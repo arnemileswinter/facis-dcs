@@ -222,6 +222,13 @@ func (e UpdateEvent) GetDID() string {
 	return e.DID
 }
 
+// BlockAnnotation is one review note targeting a layout block @id.
+// Persisted on SubmitEvent → outbox_events.event_data.
+type BlockAnnotation struct {
+	BlockID string `json:"block_id"`
+	Comment string `json:"comment"`
+}
+
 // SubmitEvent is emitted when a contract is submitted
 type SubmitEvent struct {
 	DID             string                 `json:"did"`
@@ -233,6 +240,7 @@ type SubmitEvent struct {
 	ContractVersion int                    `json:"contract_version"`
 	ActionFlag      *actionflag.ActionFlag `json:"action_flag,omitempty"`
 	Comments        []string               `json:"comments"`
+	Annotations     []BlockAnnotation      `json:"annotations,omitempty"`
 	UserRoles       userrole.UserRoles     `json:"user_roles"`
 }
 
@@ -355,10 +363,107 @@ type RetrieveAllEvent struct {
 	UserRoles   userrole.UserRoles `json:"user_roles"`
 }
 
-// RetrieveArchivedEvent is emitted when archive data is retrieved.
+// RetrieveArchivedEvent is emitted when archive data is retrieved. It names
+// every archived contract the caller received (DCS-FR-CSA-18).
 type RetrieveArchivedEvent struct {
-	RetrievedBy string    `json:"retrieved_by"`
+	RetrievedBy  string             `json:"retrieved_by"`
+	HolderDID    string             `json:"holder_did"`
+	UserRoles    userrole.UserRoles `json:"user_roles"`
+	ContractDIDs []string           `json:"contract_dids"`
+	// SectionIDs names the archived sections the caller received
+	// (DCS-FR-CSA-26); empty for a read of whole contracts.
+	SectionIDs []string  `json:"section_ids,omitempty"`
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
+// SearchArchivedEvent is emitted when the archive is searched. It names the
+// search criteria and every archived contract in the result (DCS-FR-CSA-18).
+type SearchArchivedEvent struct {
+	RetrievedBy  string             `json:"retrieved_by"`
+	HolderDID    string             `json:"holder_did"`
+	UserRoles    userrole.UserRoles `json:"user_roles"`
+	Criteria     map[string]string  `json:"criteria"`
+	ContractDIDs []string           `json:"contract_dids"`
+	OccurredAt   time.Time          `json:"occurred_at"`
+}
+
+// EventType implements [event.Event].
+func (e SearchArchivedEvent) EventType() string {
+	return eventtype.SearchArchived.String()
+}
+
+// GetDID implements [event.Event].
+func (e SearchArchivedEvent) GetDID() string {
+	return "*"
+}
+
+// ArchiveOperationFailedEvent records an archive operation that did not
+// complete (DCS-FR-CSA-18: every archival and retrieval operation is logged
+// with its outcome). DID is empty when the operation names no contract.
+type ArchiveOperationFailedEvent struct {
+	DID        string    `json:"did,omitempty"`
+	Operation  string    `json:"operation"`
+	Actor      string    `json:"actor"`
+	Outcome    string    `json:"outcome"`
+	Reason     string    `json:"reason"`
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
+// EventType implements [event.Event].
+func (e ArchiveOperationFailedEvent) EventType() string {
+	return eventtype.ArchiveOperationFailed.String()
+}
+
+// GetDID implements [event.Event].
+func (e ArchiveOperationFailedEvent) GetDID() string {
+	if e.DID == "" {
+		return "*"
+	}
+	return e.DID
+}
+
+// StoreArchiveEvidenceEvent is emitted when an Archive Manager stores an
+// evidence document for an archived contract (DCS-IR-CSA-02).
+type StoreArchiveEvidenceEvent struct {
+	DID         string    `json:"did"`
+	EvidenceID  string    `json:"evidence_id"`
+	StoredBy    string    `json:"stored_by"`
+	Name        string    `json:"name"`
+	MediaType   string    `json:"media_type"`
+	ContentHash string    `json:"content_hash"`
 	OccurredAt  time.Time `json:"occurred_at"`
+}
+
+// EventType implements [event.Event].
+func (e StoreArchiveEvidenceEvent) EventType() string {
+	return eventtype.StoreArchiveEvidence.String()
+}
+
+// GetDID implements [event.Event].
+func (e StoreArchiveEvidenceEvent) GetDID() string {
+	return e.DID
+}
+
+// StoreArchiveSectionEvent is emitted when an Archive Manager archives a
+// contract section for the parties assigned to it (DCS-FR-CSA-26).
+type StoreArchiveSectionEvent struct {
+	DID             string    `json:"did"`
+	ContractVersion int       `json:"contract_version"`
+	SectionID       string    `json:"section_id"`
+	Parties         []string  `json:"parties"`
+	StoredBy        string    `json:"stored_by"`
+	ContentHash     string    `json:"content_hash"`
+	OccurredAt      time.Time `json:"occurred_at"`
+}
+
+// EventType implements [event.Event].
+func (e StoreArchiveSectionEvent) EventType() string {
+	return eventtype.StoreArchiveSection.String()
+}
+
+// GetDID implements [event.Event].
+func (e StoreArchiveSectionEvent) GetDID() string {
+	return e.DID
 }
 
 // StoreArchivedEvent is emitted when a contract is stored in the archive.
@@ -420,6 +525,28 @@ func (e StoreArchivedEvent) GetDID() string {
 	return e.DID
 }
 
+// StoreExecutionProofEvent is emitted when the proof of contract execution
+// over every signature is stored (DCS-FR-SM-10).
+type StoreExecutionProofEvent struct {
+	DID                string                `json:"did"`
+	ContentHash        string                `json:"content_hash"`
+	ArchiveContentHash string                `json:"archive_content_hash"`
+	PDFHash            string                `json:"pdf_hash"`
+	NotaryReceipt      *ArchiveNotaryReceipt `json:"notary_receipt,omitempty"`
+	TSAReceipt         *ArchiveTSAReceipt    `json:"tsa_receipt,omitempty"`
+	OccurredAt         time.Time             `json:"occurred_at"`
+}
+
+// EventType implements [event.Event].
+func (e StoreExecutionProofEvent) EventType() string {
+	return eventtype.StoreExecutionProof.String()
+}
+
+// GetDID implements [event.Event].
+func (e StoreExecutionProofEvent) GetDID() string {
+	return e.DID
+}
+
 // DeleteArchivedEvent is emitted when an archive entry is soft-deleted
 // (DCS-FR-CSA-17: deletion requires a justification and MUST be logged with
 // timestamp and user identity).
@@ -438,6 +565,30 @@ func (e DeleteArchivedEvent) EventType() string {
 
 // GetDID implements [event.Event].
 func (e DeleteArchivedEvent) GetDID() string {
+	return e.DID
+}
+
+// KeyShreddedEvent records the destruction of a contract's wrapped
+// content-encryption keys (DCS-NFR-SEC-13, DCS-NFR-COMP-03). ShreddedBy is a
+// local participant on the archive-deletion path or the requesting peer's DID
+// on the federation erase path. The event carries no contract content.
+type KeyShreddedEvent struct {
+	DID          string    `json:"did"`
+	ScopeKind    string    `json:"scope_kind"`
+	ScopeID      string    `json:"scope_id"`
+	ShreddedBy   string    `json:"shredded_by"`
+	Reason       string    `json:"reason"`
+	RowsShredded int64     `json:"rows_shredded"`
+	OccurredAt   time.Time `json:"occurred_at"`
+}
+
+// EventType implements [event.Event].
+func (e KeyShreddedEvent) EventType() string {
+	return eventtype.KeyShredded.String()
+}
+
+// GetDID implements [event.Event].
+func (e KeyShreddedEvent) GetDID() string {
 	return e.DID
 }
 
@@ -513,6 +664,27 @@ func (e NegotiationEvent) GetDID() string {
 	return e.DID
 }
 
+// AcceptOfferEvent is emitted when the counterparty accepts an inbound offer
+// as-is (no redline), which mints its negotiation task for the round.
+type AcceptOfferEvent struct {
+	DID             string             `json:"did"`
+	HolderDID       string             `json:"holder_did"`
+	ContractVersion int                `json:"contract_version"`
+	AcceptedBy      string             `json:"accepted_by"`
+	OccurredAt      time.Time          `json:"occurred_at"`
+	UserRoles       userrole.UserRoles `json:"user_roles"`
+}
+
+// EventType implements the Event interface.
+func (e AcceptOfferEvent) EventType() string {
+	return eventtype.AcceptOffer.String()
+}
+
+// GetDID implements the Event interface.
+func (e AcceptOfferEvent) GetDID() string {
+	return e.DID
+}
+
 // AcceptNegotiationEvent is emitted when a template is verified.
 type AcceptNegotiationEvent struct {
 	DID             string             `json:"did"`
@@ -554,12 +726,63 @@ func (e RejectNegotiationEvent) GetDID() string {
 	return e.DID
 }
 
+// WithdrawNegotiationEvent is emitted when the proposal author retracts their
+// change request before any counterparty has accepted it.
+type WithdrawNegotiationEvent struct {
+	DID             string             `json:"did"`
+	HolderDID       string             `json:"holder_did"`
+	ContractVersion int                `json:"contract_version"`
+	NegotiationID   string             `json:"negotiation_id"`
+	WithdrawnBy     string             `json:"withdrawn_by"`
+	OccurredAt      time.Time          `json:"occurred_at"`
+	UserRoles       userrole.UserRoles `json:"user_roles"`
+}
+
+// EventType implements the Event interface.
+func (e WithdrawNegotiationEvent) EventType() string {
+	return eventtype.WithdrawRespond.String()
+}
+
+// GetDID implements the Event interface.
+func (e WithdrawNegotiationEvent) GetDID() string {
+	return e.DID
+}
+
+// NegotiationChangeSupersededEvent records the change requests whose content
+// the fold of a round dropped. Each entry names one accepted request, the
+// later accepted request that overwrote it, and the fields that did not reach
+// the merged version. Emitted alongside IncreaseContractVersionEvent, whose
+// OldContractVersion is the round these requests belonged to; the requests
+// themselves stay readable in full on the contract, so the trail shows both
+// that a redline was accepted and that the contract does not carry it.
+type NegotiationChangeSupersededEvent struct {
+	DID             string                       `json:"did"`
+	HolderDID       string                       `json:"holder_did"`
+	ContractVersion int                          `json:"contract_version"`
+	MergedVersion   int                          `json:"merged_contract_version"`
+	Superseded      []db.NegotiationSupersession `json:"superseded"`
+	SubmittedBy     string                       `json:"submitted_by"`
+	OccurredAt      time.Time                    `json:"occurred_at"`
+	UserRoles       userrole.UserRoles           `json:"user_roles"`
+}
+
+// EventType implements the Event interface.
+func (e NegotiationChangeSupersededEvent) EventType() string {
+	return eventtype.NegotiationChangeSuperseded.String()
+}
+
+// GetDID implements the Event interface.
+func (e NegotiationChangeSupersededEvent) GetDID() string {
+	return e.DID
+}
+
 // ApproveEvent is emitted when a contract is approved.
 type ApproveEvent struct {
 	DID             string             `json:"did"`
 	HolderDID       string             `json:"holder_did"`
 	ContractVersion int                `json:"contract_version"`
 	ApprovedBy      string             `json:"approved_by"`
+	DecisionNotes   []string           `json:"decision_notes,omitempty"`
 	OccurredAt      time.Time          `json:"occurred_at"`
 	UserRoles       userrole.UserRoles `json:"user_roles"`
 }
@@ -616,6 +839,70 @@ func (e TerminateEvent) GetDID() string {
 	return e.DID
 }
 
+// ActivateEvent is emitted when the target system acknowledges a deployment
+// and the contract moves from SIGNED to ACTIVE. ActivatedBy is the OAuth2
+// client of the target system.
+type ActivateEvent struct {
+	DID             string    `json:"did"`
+	ContractVersion int       `json:"contract_version"`
+	CorrelationID   string    `json:"correlation_id"`
+	ActivatedBy     string    `json:"activated_by"`
+	PreviousState   string    `json:"previous_state"`
+	NewState        string    `json:"new_state"`
+	OccurredAt      time.Time `json:"occurred_at"`
+}
+
+// EventType implements the Event interface.
+func (e ActivateEvent) EventType() string {
+	return eventtype.Activate.String()
+}
+
+// GetDID implements the Event interface.
+func (e ActivateEvent) GetDID() string {
+	return e.DID
+}
+
+// CataloguePublishEvent is emitted when a contract's metadata is registered in
+// the Federated Catalogue (DCS-IR-CWE-10).
+type CataloguePublishEvent struct {
+	DID             string             `json:"did"`
+	HolderDID       string             `json:"holder_did"`
+	ContractVersion int                `json:"contract_version"`
+	AssetHash       string             `json:"asset_hash"`
+	PublishedBy     string             `json:"published_by"`
+	OccurredAt      time.Time          `json:"occurred_at"`
+	UserRoles       userrole.UserRoles `json:"user_roles"`
+}
+
+// EventType implements the Event interface.
+func (e CataloguePublishEvent) EventType() string {
+	return eventtype.PublishCatalogue.String()
+}
+
+// GetDID implements the Event interface.
+func (e CataloguePublishEvent) GetDID() string {
+	return e.DID
+}
+
+// CatalogueWithdrawEvent is emitted when a contract's catalogue entry is
+// revoked (DCS-IR-CWE-10, DCS-FR-CWE-23).
+type CatalogueWithdrawEvent struct {
+	DID        string    `json:"did"`
+	AssetHash  string    `json:"asset_hash"`
+	State      string    `json:"state"`
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
+// EventType implements the Event interface.
+func (e CatalogueWithdrawEvent) EventType() string {
+	return eventtype.WithdrawCatalogue.String()
+}
+
+// GetDID implements the Event interface.
+func (e CatalogueWithdrawEvent) GetDID() string {
+	return e.DID
+}
+
 // RenewEvent is emitted on the newly created renewal contract when it is
 // derived from an existing (original) contract (DCS-FR-CWE-11/22,
 // DCS-FR-CSA-15). The original contract is not mutated and does not receive
@@ -645,6 +932,7 @@ func (e RenewEvent) GetDID() string {
 
 // RecordEvidenceEvent is emitted when an evidence is recorded
 type RecordEvidenceEvent struct {
+	EvidenceID      string             `json:"evidence_id"`
 	DID             string             `json:"did"`
 	HolderDID       string             `json:"holder_did"`
 	ContractVersion int                `json:"contract_version"`
@@ -671,6 +959,7 @@ type AuditEvent struct {
 	OccurredAt    time.Time                   `json:"occurred_at"`
 	ComponentType componenttype.ComponentType `json:"component_type"`
 	UserRoles     userrole.UserRoles          `json:"user_roles"`
+	Justification string                      `json:"justification"`
 }
 
 // EventType implements the Event interface.
@@ -745,7 +1034,8 @@ func (e IncreaseContractVersionEvent) GetDID() string {
 	return e.DID
 }
 
-// ContractExpired is emitted when change requests for contract merged
+// ContractExpired is emitted when the expiry cron job persists EXPIRED. ExpPolicy
+// is nil for a contract without an expiration policy.
 type ContractExpired struct {
 	DID             string                             `json:"did"`
 	HolderDID       string                             `json:"holder_did"`
@@ -763,6 +1053,29 @@ func (e ContractExpired) EventType() string {
 
 // GetDID implements the Event interface.
 func (e ContractExpired) GetDID() string {
+	return e.DID
+}
+
+// ContractRenewalDue is emitted when the notice period before a contract's
+// expiry date starts, so the parties can renew in time (DCS-FR-CWE-22).
+type ContractRenewalDue struct {
+	DID             string                             `json:"did"`
+	ContractVersion int                                `json:"contract_version"`
+	State           contractstate.ContractState        `json:"state"`
+	ExpDate         time.Time                          `json:"exp_date"`
+	ExpNoticePeriod int                                `json:"exp_notice_period"`
+	ExpPolicy       *expirationpolicy.ExpirationPolicy `json:"exp_policy"`
+	Responsible     *db.Responsible                    `json:"responsible,omitempty"`
+	OccurredAt      time.Time                          `json:"occurred_at"`
+}
+
+// EventType implements the Event interface.
+func (e ContractRenewalDue) EventType() string {
+	return eventtype.ContractRenewalDue.String()
+}
+
+// GetDID implements the Event interface.
+func (e ContractRenewalDue) GetDID() string {
 	return e.DID
 }
 
@@ -800,4 +1113,54 @@ func (e SearchEvent) EventType() string {
 // GetDID implements the Event interface.
 func (e SearchEvent) GetDID() string {
 	return "*"
+}
+
+// ContractTargetSettings is the configuration of a contract target system as
+// the audit trail records it.
+type ContractTargetSettings struct {
+	Name          string  `json:"name"`
+	URL           string  `json:"url"`
+	Description   *string `json:"description,omitempty"`
+	Enabled       bool    `json:"enabled"`
+	OAuthClientID *string `json:"oauth_client_id,omitempty"`
+}
+
+// NewContractTargetSettings returns the settings of target, or nil when there
+// is no target.
+func NewContractTargetSettings(target *db.ContractTarget) *ContractTargetSettings {
+	if target == nil {
+		return nil
+	}
+	return &ContractTargetSettings{
+		Name:          target.Name,
+		URL:           target.URL,
+		Description:   target.Description,
+		Enabled:       target.Enabled,
+		OAuthClientID: target.OAuthClientID,
+	}
+}
+
+// ContractTargetChangedEvent records an administrator's change to a contract
+// target system (FR-UC-09-2): the settings before and after the change, and
+// the administrator with the roles they acted in. Before is nil on create,
+// After is nil on delete.
+type ContractTargetChangedEvent struct {
+	Change              eventtype.EventType     `json:"-"`
+	TargetID            string                  `json:"target_id"`
+	Before              *ContractTargetSettings `json:"before,omitempty"`
+	After               *ContractTargetSettings `json:"after,omitempty"`
+	ActorDID            string                  `json:"actor_did"`
+	ActorParticipantDID string                  `json:"actor_participant_did"`
+	UserRoles           userrole.UserRoles      `json:"user_roles"`
+	OccurredAt          time.Time               `json:"occurred_at"`
+}
+
+func (e ContractTargetChangedEvent) EventType() string {
+	return e.Change.String()
+}
+
+// GetDID keys the audit chain by the target, so the chain is the history of
+// its configuration.
+func (e ContractTargetChangedEvent) GetDID() string {
+	return "contract-target:" + e.TargetID
 }

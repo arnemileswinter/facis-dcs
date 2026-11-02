@@ -31,7 +31,7 @@
 ## Development
 
 ### Dependencies
-- Go **1.25+** – Installation: Follow the instructions on [Install Go](https://go.dev/learn/)
+- Go **1.26.10+** – Installation: Follow the instructions on [Install Go](https://go.dev/learn/)
 - Goa **v3** – Installation: Follow the instructions on [Goa Quickstart](https://goa.design/docs/1-goa/quickstart/)
 
 ### Setup the Backend
@@ -61,6 +61,62 @@ export FEDERATED_CATALOGUE_CLIENT_SECRET="dcs-fc-client-secret"
 go test -v ./...
 ```
 **Note:** Every time you modify files in **backend/design**, you must regenerate the code.
+
+## Contract Signing
+
+The DCS is the OID4VP relying party and signature validator; it holds no
+contract-signing key (ADR-12, ADR-20). The only signing path is the ceremony:
+
+1. `POST /signature/request` — start a ceremony, request a PID (+ Power of
+   Attorney) presentation from the signer's wallet.
+2. The wallet presents PID+PoA (direct_post `vp_token`, keyed by the DCQL
+   credential query ids) to the ceremony's own callback
+   (`POST /signature/request/{ceremony_id}/callback`) — verified
+   cryptographically against the ceremony's nonce and the configured PID
+   issuer trust anchors (`OID4VP_TRUST_DATA_PATH`) before anything is
+   persisted. A PID whose issuer credential carries an x5c certificate
+   (a real EUDI wallet, rather than this project's JWKS-only dev issuer) is
+   only accepted if its chain verifies against `OID4VP_X5C_TRUST_ANCHORS_PATH`
+   (a PEM bundle of trusted roots, one per issuer whose chains this deployment
+   verifies); an x5c-bearing credential presented with none configured is
+   refused outright, never trusted off its own embedded certificate. The same
+   bundle anchors the signed status list a credential names.
+3. `POST /signature/request/{ceremony_id}/publish` — prepare the to-be-signed
+   PDF and JSON-LD payload (evidence embedded, bytes pinned), and publish a
+   standard OID4VP Document-Retrieval request object as a QR/deep link.
+4. The wallet fetches the request object, fetches both documents, signs the
+   PDF (PAdES, via its own SCA/QTSP) and the JSON-LD payload (JAdES, with the
+   ceremony's request nonce bound into the protected header), and posts both
+   back to the SAME callback endpoint from step 2 (`documentWithSignature[]`
+   / `signatureObject[]`).
+5. The callback validates: the submitted PDF's initial revision byte-matches
+   what was pinned at prepare, the DSS-validated signature meets the
+   contract's declared level (AES or QES, per `dcs:requiredCredentialType` on
+   the signature field), the certificate names the ceremony's verified PID,
+   and (once a ceremony is published) the JAdES's nonce claim matches. Only
+   then does it finalize and transition the contract to SIGNED.
+
+Prepare and submit also apply the signing workflow the contract document
+defines (DCS-FR-SM-13): a `dcs:SignatureField` with `dcs:signingOrder` (a
+positive integer) is refused until every field with a lower position is
+signed, and every signature is refused after `dcs:signingDeadline` (an
+`xsd:dateTime`, or an `xsd:date` that includes the whole day in UTC, at the
+top level of the document). A refusal is audited as
+`APPLY_SIGNATURE_FAILED`. The compliance monitor flags a contract that is not
+signed when its signing deadline passes (`SIGNING_DEADLINE_MISSED`).
+
+`POST /signature/prepare` + `POST /signature/submit` are the same
+prepare/validate steps without the QR/publish layer, for a JWT-authenticated
+caller who already has the signatory's signed PDF in hand (e.g. a desktop
+PAdES signer) — same acceptance gate, no separate ceremony webhook.
+
+There is no DCS-signed-PAdES fallback: `POST /signature/apply` and the
+`dcs-contract-pades` HSM key are removed. See
+[docs/adr-12-wallet-driven-signing.md](../docs/adr-12-wallet-driven-signing.md)
+and [docs/adr-20-signing-acceptance-hardening.md](../docs/adr-20-signing-acceptance-hardening.md)
+for the full acceptance-path decision record, and
+[testWallet/](../testWallet/) for the wallet+QTSP stand-in that drives this
+path in dev and CI.
 
 ## Running the API Server
 
@@ -129,6 +185,8 @@ The Dockerfile and build script live in `deployment/docker/`. The script resolve
 - `TAG` – Sets the image tag (default: `latest`)
 - `REGISTRY` – Docker registry (environment variable)
 - `REPO` – Docker repository (environment variable)
+- `GIT_SHA` – Optional commit SHA (environment variable). Defaults to `git rev-parse HEAD` at the repo root.
+- `BUILD_TIME` – Optional RFC3339 build timestamp. Defaults to UTC now when unset.
 
 **Example:**
 ```bash

@@ -179,6 +179,7 @@ func doRequest(method, path string, body io.Reader, contentType string) *httptes
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
+	req.Header.Set(signingChainHeader, base64.StdEncoding.EncodeToString(testMainX5ChainPEM))
 	rec := httptest.NewRecorder()
 	newServer().ServeHTTP(rec, req)
 	return rec
@@ -362,6 +363,20 @@ func TestVerify_ValidPDF(t *testing.T) {
 	}
 }
 
+// A compiled base followed by a signature-shaped revision that was never
+// re-anchored is outside its only manifest's hard binding (ADR-26), so /verify
+// reports a mismatch rather than reading the trailer as a valid signature layer.
+func TestVerify_UnanchoredSignatureTrailerOnTheBaseIsAMismatch(t *testing.T) {
+	pdf := compilePDF(t)
+	trailer := append(append([]byte(nil), pdf...),
+		"\n4242 0 obj\n<< /Type /Sig /ByteRange [0 1 2 3] /Contents <00> >>\nendobj\nstartxref\n0\n%%EOF\n"...)
+
+	rec := doRequest(http.MethodPost, "/verify", bytes.NewReader(trailer), "application/pdf")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("verify: status %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestVerify_WrongContentType(t *testing.T) {
 	rec := doRequest(http.MethodPost, "/verify",
 		bytes.NewBufferString("{}"), "application/json")
@@ -537,7 +552,7 @@ func TestUpdateResponseCarriesVersionHeader(t *testing.T) {
 	_, _ = pdfPart.Write(basePDF)
 	payloadPart, _ := mw.CreateFormField("payload")
 	_, _ = payloadPart.Write([]byte(minimalPayloadAmended))
-	mw.Close()
+	_ = mw.Close()
 
 	rec := doRequest(http.MethodPost, "/render/amendment", &buf, mw.FormDataContentType())
 	if rec.Code != http.StatusOK {
@@ -569,7 +584,7 @@ func TestUpdateWithVCEmbedsAttachment(t *testing.T) {
 	_, _ = payloadPart.Write([]byte(minimalPayloadAmended))
 	vcPart, _ := mw.CreateFormField("vc")
 	_, _ = vcPart.Write(vcBytes)
-	mw.Close()
+	_ = mw.Close()
 
 	rec := doRequest(http.MethodPost, "/render/amendment", &buf, mw.FormDataContentType())
 	if rec.Code != http.StatusOK {
@@ -601,7 +616,7 @@ func TestUpdateWithVCUnchangedPayloadProceeds(t *testing.T) {
 	_, _ = payloadPart.Write([]byte(minimalPayload)) // same payload as base
 	vcPart, _ := mw.CreateFormField("vc")
 	_, _ = vcPart.Write(vcBytes)
-	mw.Close()
+	_ = mw.Close()
 
 	rec := doRequest(http.MethodPost, "/render/amendment", &buf, mw.FormDataContentType())
 	if rec.Code != http.StatusOK {
@@ -629,26 +644,6 @@ func TestOntologyContextIsValidJSONLD(t *testing.T) {
 	}
 	if !bytes.Contains(res, []byte("w3id.org/facis/dcs/ontology")) {
 		t.Error("ontology context must reference the canonical dcs ontology IRI")
-	}
-}
-
-// ---- OntologyOwl ------------------------------------------------------------
-
-func TestOntologyOwl(t *testing.T) {
-	rec := doRequest(http.MethodGet, "/ontology/dcs-pdf-core.owl", nil, "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-	res := rec.Body.Bytes()
-	if len(res) == 0 {
-		t.Fatal("expected non-empty OWL bytes")
-	}
-	ct := rec.Header().Get("Content-Type")
-	if !strings.HasPrefix(ct, "text/turtle") {
-		t.Fatalf("OWL endpoint must serve text/turtle, got %q", ct)
-	}
-	if !bytes.Contains(res, []byte("w3id.org/facis/dcs/ontology")) {
-		t.Error("OWL response must reference the canonical dcs ontology IRI")
 	}
 }
 
@@ -680,6 +675,11 @@ func TestVerify_AmendedDocument(t *testing.T) {
 	}
 	if !result.Match {
 		t.Error("expected match=true for valid amended PDF")
+	}
+	// An amendment carries the previous manifest forward verbatim next to a newly
+	// signed one, so both claim signatures must verify.
+	if !result.C2PASignatureValid {
+		t.Errorf("expected c2pa_signature_valid=true for a valid amended PDF, got error %q", result.C2PASignatureError)
 	}
 }
 
@@ -786,8 +786,9 @@ func TestClaim_MissingPDFField(t *testing.T) {
 type verifyResult struct {
 	Match              bool   `json:"match"`
 	C2PASignatureValid bool   `json:"c2pa_signature_valid"`
+	C2PASignatureError string `json:"c2pa_signature_error,omitempty"`
 	VCBytes            string `json:"vc_bytes,omitempty"` // base64-encoded VC JSON
-	VCProofValid       bool   `json:"vc_proof_valid"`
+	VCPresent          bool   `json:"vc_present"`
 	Artifact           string `json:"artifact"` // base64-encoded verification-witness PDF
 }
 
@@ -815,7 +816,62 @@ func TestVerify_ReturnsJSON(t *testing.T) {
 		t.Error("expected match=true for a valid compiled PDF")
 	}
 	if !result.C2PASignatureValid {
-		t.Error("expected c2pa_signature_valid=true for a valid compiled PDF")
+		t.Errorf("expected c2pa_signature_valid=true for a valid compiled PDF, got error %q", result.C2PASignatureError)
+	}
+}
+
+// TestVerify_ReportsForgedC2PASignature is the behaviour the field's old
+// hardcoded true hid: /verify now runs the COSE claim-signature check, so a PDF
+// whose signature bytes were replaced is reported as invalid with the reason.
+func TestVerify_ReportsForgedC2PASignature(t *testing.T) {
+	pdf := compilePDF(t)
+	idx := bytes.Index(pdf, []byte{0xA0, 0xF6, 0x58, 0x40})
+	if idx < 0 {
+		t.Fatal("compiled PDF carries no COSE signature to forge")
+	}
+	forged := append([]byte(nil), pdf...)
+	start := idx + 4
+	for i := start; i < start+64; i++ {
+		forged[i] ^= 0xFF
+	}
+
+	rec := doRequest(http.MethodPost, "/verify", bytes.NewReader(forged), "application/pdf")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("verify: status %d: %s", rec.Code, rec.Body.String())
+	}
+	var result verifyResult
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("decode verify response: %v", err)
+	}
+	if result.C2PASignatureValid {
+		t.Error("expected c2pa_signature_valid=false for a PDF with a forged COSE signature")
+	}
+	if result.C2PASignatureError == "" {
+		t.Error("expected c2pa_signature_error to name the reason the signature failed")
+	}
+}
+
+// TestVerify_ReportsVCPresenceNotProofValidity pins that pdf-core reports only
+// what it can establish about an embedded lifecycle credential. Verifying the
+// proof needs the issuer's assertion key, which pdf-core cannot resolve, so the
+// response carries presence plus the bytes and leaves the verdict to the caller.
+func TestVerify_ReportsVCPresenceNotProofValidity(t *testing.T) {
+	pdf := compilePDF(t)
+
+	rec := doRequest(http.MethodPost, "/verify", bytes.NewReader(pdf), "application/pdf")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("verify: status %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.Bytes()
+	if bytes.Contains(body, []byte("vc_proof_valid")) {
+		t.Error("pdf-core must not report a vc_proof_valid verdict it cannot establish")
+	}
+	var result verifyResult
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&result); err != nil {
+		t.Fatalf("decode verify response: %v", err)
+	}
+	if result.VCPresent {
+		t.Error("expected vc_present=false for a compiled PDF carrying no lifecycle credential")
 	}
 }
 
@@ -877,6 +933,12 @@ func TestVerify_JSONIncludesVCBytesWhenPresent(t *testing.T) {
 	}
 	if result.VCBytes == "" {
 		t.Error("expected vc_bytes to be non-empty when PDF contains contract-lifecycle-vc.json")
+	}
+	if !result.VCPresent {
+		t.Error("expected vc_present=true when PDF contains contract-lifecycle-vc.json")
+	}
+	if !result.C2PASignatureValid {
+		t.Errorf("expected c2pa_signature_valid=true for a VC-carrying amended PDF, got error %q", result.C2PASignatureError)
 	}
 }
 
@@ -964,7 +1026,7 @@ func TestEmbedEvidenceAttachesAndRoundTrips(t *testing.T) {
 	_, _ = pdfPart.Write(basePDF)
 	evPart, _ := mw.CreateFormField("evidence")
 	_, _ = evPart.Write(evidence)
-	mw.Close()
+	_ = mw.Close()
 
 	rec := doRequest(http.MethodPost, "/evidence/embed", &buf, mw.FormDataContentType())
 	if rec.Code != http.StatusOK {
@@ -982,13 +1044,102 @@ func TestEmbedEvidenceAttachesAndRoundTrips(t *testing.T) {
 		t.Error("/evidence/embed must NOT sign the PDF")
 	}
 
-	// Round-trips back out.
-	extractRec := doRequest(http.MethodPost, "/evidence/extract",
-		bytes.NewReader(rec.Body.Bytes()), "application/pdf")
-	if extractRec.Code != http.StatusOK {
-		t.Fatalf("extract expected 200, got %d: %s", extractRec.Code, extractRec.Body.String())
+	// Round-trips back out as a one-element array.
+	extracted := extractEvidenceArray(t, rec.Body.Bytes())
+	if len(extracted) != 1 {
+		t.Fatalf("extract returned %d attachments, want 1", len(extracted))
 	}
-	if !bytes.Equal(bytes.TrimSpace(extractRec.Body.Bytes()), evidence) {
-		t.Errorf("extracted evidence mismatch: got %q", extractRec.Body.String())
+	if !bytes.Equal(bytes.TrimSpace(extracted[0]), evidence) {
+		t.Errorf("extracted evidence mismatch: got %q", extracted[0])
+	}
+}
+
+// extractEvidenceArray posts a PDF to /evidence/extract and returns the raw
+// elements of the JSON array the endpoint answers with.
+func extractEvidenceArray(t *testing.T, pdf []byte) []json.RawMessage {
+	t.Helper()
+	rec := doRequest(http.MethodPost, "/evidence/extract", bytes.NewReader(pdf), "application/pdf")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("extract expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("extract Content-Type = %q, want application/json", ct)
+	}
+	var attachments []json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &attachments); err != nil {
+		t.Fatalf("extract response is not a JSON array: %v\nbody: %s", err, rec.Body.String())
+	}
+	return attachments
+}
+
+// embedEvidenceHTTP posts pdf + evidence to /evidence/embed and returns the PDF
+// the endpoint answers with.
+func embedEvidenceHTTP(t *testing.T, pdf, evidence []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	pdfPart, _ := mw.CreateFormField("pdf")
+	_, _ = pdfPart.Write(pdf)
+	evPart, _ := mw.CreateFormField("evidence")
+	_, _ = evPart.Write(evidence)
+	_ = mw.Close()
+
+	rec := doRequest(http.MethodPost, "/evidence/embed", &buf, mw.FormDataContentType())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("embed expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	return rec.Body.Bytes()
+}
+
+// TestExtractEvidenceReturnsEveryAttachmentInEmbedOrder pins the federation
+// contract: each signing DCS embeds its own evidence before its signature, so
+// the endpoint answers with a JSON array of every attachment, oldest-first,
+// each element spliced in verbatim — the backend parses the elements as the
+// exact JSON documents it embedded, so re-marshalling would break signature
+// checks over those bytes.
+func TestExtractEvidenceReturnsEveryAttachmentInEmbedOrder(t *testing.T) {
+	baseRec := doRequest(http.MethodPost, "/render",
+		strings.NewReader(minimalPayload), "application/ld+json")
+	if baseRec.Code != http.StatusOK {
+		t.Fatalf("compile base PDF: %d", baseRec.Code)
+	}
+	pdf := signPrepared(t, baseRec)
+
+	evidences := [][]byte{
+		[]byte(`{"party":"a","type":["ContractSigningSummaryCredential"],"id":"urn:dcs:evidence:a"}`),
+		[]byte(`{"party":"b","type":["VerifiablePresentation"],"id":"urn:dcs:evidence:b"}`),
+	}
+	for _, evidence := range evidences {
+		pdf = embedEvidenceHTTP(t, pdf, evidence)
+	}
+
+	attachments := extractEvidenceArray(t, pdf)
+	if len(attachments) != len(evidences) {
+		t.Fatalf("extract returned %d attachments, want %d", len(attachments), len(evidences))
+	}
+	for i, want := range evidences {
+		if !bytes.Equal(bytes.TrimSpace(attachments[i]), want) {
+			t.Errorf("attachment %d (oldest-first): got %s, want %s", i, attachments[i], want)
+		}
+	}
+}
+
+// TestExtractEvidenceWithoutAttachmentsIsNoContent keeps 204 as the "nothing
+// embedded" answer, so the backend never has to distinguish an empty array from
+// an unsigned document.
+func TestExtractEvidenceWithoutAttachmentsIsNoContent(t *testing.T) {
+	baseRec := doRequest(http.MethodPost, "/render",
+		strings.NewReader(minimalPayload), "application/ld+json")
+	if baseRec.Code != http.StatusOK {
+		t.Fatalf("compile base PDF: %d", baseRec.Code)
+	}
+	pdf := signPrepared(t, baseRec)
+
+	rec := doRequest(http.MethodPost, "/evidence/extract", bytes.NewReader(pdf), "application/pdf")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 for a PDF without evidence, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("204 must carry no body, got %q", rec.Body.String())
 	}
 }

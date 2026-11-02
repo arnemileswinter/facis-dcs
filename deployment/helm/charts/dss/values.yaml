@@ -9,7 +9,26 @@ image:
   # never :latest.
   repository: conectx/dss-demo
   tag: "6.2.1"
+  # Optional "sha256:<hex>": pulls <repository>:<tag>@<digest>.
+  digest: ""
   pullPolicy: IfNotPresent
+
+# The image runs Tomcat as root. The chart runs it as 1000 on a read-only root
+# filesystem (DCS-NFR-SEC-05): Tomcat writes to emptyDir volumes for webapps
+# (the WAR, copied in by an init container, and its expanded tree), logs,
+# temp, work, conf/Catalina and /tmp.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
 
 service:
   type: ClusterIP
@@ -20,3 +39,13 @@ resources:
     memory: "512Mi"
   limits:
     memory: "1536Mi"
+
+# The bundled dss.properties this image ships already defaults
+# current.lotl.url to the real EU LOTL, so QES qualification determination
+# against the actual EU trusted lists is the out-of-the-box behavior with no
+# override needed — this just pins it explicitly (mounted as
+# dss-custom.properties, which the bundle's own Spring config loads from the
+# Tomcat shared classpath) so a future image tag silently defaulting
+# elsewhere can't change that unnoticed.
+trustedList:
+  lotlURL: https://ec.europa.eu/tools/lotl/eu-lotl.xml

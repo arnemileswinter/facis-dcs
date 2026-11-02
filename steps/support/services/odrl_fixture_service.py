@@ -15,14 +15,12 @@ carrying either:
     whose rules each carry exactly one `odrl:action` plus
     `odrl:assigner`/`odrl:assignee`/`odrl:target`.
 
-A negotiable data point is one typed `dcs:Placeholder` node (ADR-15,
-docs/adr-15-placeholder-typed-node.md): self-contained, carrying its
-`dcs:datatype` inline (resolved from the field's SHACL shape) and — when a
-value is set — that value inline on `dcs:value`. The node lives in the flat
-top-level `dcs:contractData` registry; the human-readable clause references it
-by a bare `{"@id"}` and the ODRL constraint's `odrl:leftOperand` names the SAME
-`@id`. The backend hard-fails a placeholder that carries no `dcs:datatype`
-(canonicalFieldIDs), so every node here declares one.
+A negotiable data point is declared once as a typed `dcs:ContractField` in
+the top-level `dcs:contractFields` registry. It carries its `dcs:datatype`
+(resolved from the field's SHACL shape), requiredness and — when set — its
+`dcs:value`. The domain-level object in `dcs:contractData`, the human-readable
+clause and the ODRL constraint's `odrl:leftOperand` all reference the same
+field by a bare `{"@id"}`.
 
 Both shapes constrain the SAME field (`urn:uuid:field-provider-country`, a
 string, or `urn:uuid:field-provider-coverage`, a number) so the same fixture
@@ -40,18 +38,19 @@ _FIELD_BY_NAME = {
 }
 
 
-def _placeholder_node(field_name: str, actual_value=None) -> dict:
-    """One typed `dcs:Placeholder` node (ADR-15): self-contained, carrying its
-    `dcs:datatype` inline (from the field's SHACL shape) and, when a value is
-    set, that value inline on `dcs:value` — the shape the enforcement path
-    reads and the datatype the backend's canonicalFieldIDs validator requires.
+def _contract_field_node(field_name: str, actual_value=None) -> dict:
+    """Build one declared `dcs:ContractField` with its datatype, requiredness
+    and optional negotiated value.
     """
     field_id, label, datatype = _FIELD_BY_NAME[field_name]
     node = {
         "@id": field_id,
-        "@type": "dcs:Placeholder",
+        "@type": "dcs:ContractField",
         "dcs:label": label,
         "dcs:datatype": datatype,
+        "dcs:shape": {
+            "@id": f"https://w3id.org/facis/dcs/taxonomy/v1#field-provider-{field_name}"
+        },
         "dcs:required": True,
     }
     if actual_value is not None:
@@ -89,7 +88,7 @@ def odrl_set_policies(
     """The canonical ODRL 2.2 shape: one enclosing `odrl:Offer` (`@id` anchored to
     contract DID), `odrl:profile` declared, rule carries exactly one
     `odrl:action` plus assigner/assignee/target. The constraint's
-    `odrl:leftOperand` names the placeholder node's `@id` (ADR-15).
+    `odrl:leftOperand` names the declared contract field's `@id`.
     """
     field_id, _, _ = _FIELD_BY_NAME[field_name]
     rule_bucket = {
@@ -125,10 +124,10 @@ def build_contract_document(contract_did: str, field_name: str, policies, actual
     contractData + policies) suitable for a full replacement PUT to
     /contract/update while the contract is in DRAFT.
 
-    `dcs:contractData` is the flat, self-contained registry of typed
-    `dcs:Placeholder` nodes (ADR-15); the clause references the node by a bare
-    `{"@id"}`, the value rides inline on the node (`dcs:value`), and the ODRL
-    constraint names the same `@id`.
+    `dcs:contractFields` declares the typed field and its value.
+    `dcs:contractData` contains the domain-level provider object, whose
+    country or coverage property references that field by `{"@id"}`. The
+    clause and ODRL constraint name the same field `@id`.
     """
     field_id, _, _ = _FIELD_BY_NAME[field_name]
     return {
@@ -168,7 +167,14 @@ def build_contract_document(contract_did: str, field_name: str, policies, actual
                 ]
             },
         },
-        "dcs:contractData": [_placeholder_node(field_name, actual_value)],
+        "dcs:contractFields": [_contract_field_node(field_name, actual_value)],
+        "dcs:contractData": [
+            {
+                "@id": "urn:uuid:object-provider",
+                "@type": "dcs:Provider",
+                f"dcs:{field_name}": {"@id": field_id},
+            }
+        ],
         "dcs:policies": policies,
     }
 

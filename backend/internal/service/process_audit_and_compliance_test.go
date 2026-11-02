@@ -1,14 +1,118 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
-	"time"
+
+	goa "goa.design/goa/v3/pkg"
 
 	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype/componenttype"
+	"digital-contracting-service/internal/middleware"
+	"digital-contracting-service/internal/processauditandcompliance/auditexecutor"
 )
+
+type countingAuditExecutor struct {
+	calls int
+}
+
+func (e *countingAuditExecutor) Run(context.Context, auditexecutor.Request) (auditexecutor.Response, []byte, error) {
+	e.calls++
+	return auditexecutor.Response{}, nil, nil
+}
+
+func TestAuditReportUsesPersistedRunWithoutExecutorAndHashesExactBytes(t *testing.T) {
+	raw := []byte("{\n" +
+		`  "contract_version":"facis-pac-audit-executor/v1",` + "\n" +
+		`  "audit_id":"00000000-0000-4000-8000-000000000001",` + "\n" +
+		`  "correlation_id":"00000000-0000-4000-8000-000000000001",` + "\n" +
+		`  "scope":"contracts","resource":{"did":"did:example:contract"},` + "\n" +
+		`  "executor":{"id":"test","version":"1"},"executed_at":"2026-07-28T12:00:00Z",` + "\n" +
+		`  "findings":[{"rule_id":"RULE-1","result":"FAILED","reason":"failed","severity":"error","evidence_refs":["contracts/0"]}]` + "\n" +
+		"}\n")
+	executor := &countingAuditExecutor{}
+	var recordedHash, recordedFormat, recordedJustification string
+	var recordedSummary auditReportSummary
+	service := &processAuditAndCompliancesrvc{
+		AuditExecutor: executor,
+		auditRunReader: func(_ context.Context, scope, did string) (persistedAuditRun, error) {
+			if scope != "contracts" || did != "did:example:contract" {
+				t.Fatalf("unexpected persisted-run lookup: scope=%q did=%q", scope, did)
+			}
+			request := []byte(`{"contract_version":"facis-pac-audit-executor/v1","audit_id":"00000000-0000-4000-8000-000000000001","correlation_id":"00000000-0000-4000-8000-000000000001","scope":"contracts","resource":{"did":"did:example:contract"},"evidence":{"contracts":[{"did":"did:example:contract","component":"contract-workflow-engine","audit_trail":[{"id":1,"kind":"TIMELINE","event_type":"CREATED","created_at":"2026-07-28T10:00:00Z","event_data":{"created_by":"alice"}}]}]}}`)
+			return persistedAuditRun{RequestBytes: request, ResponseBytes: raw, RequestHash: hashBytes(request), ResponseHash: hashBytes(raw)}, nil
+		},
+		reportEventPersister: func(_ context.Context, report auditReport, format, contentHash, _, justification string) error {
+			recordedHash = contentHash
+			recordedFormat = format
+			recordedJustification = justification
+			recordedSummary = report.Summary
+			return nil
+		},
+	}
+	scope, format, did := "contracts", "json", "did:example:contract"
+	content, err := service.AuditReport(middleware.InjectAuthContext(context.Background(), []string{"Auditor"}, "holder", "auditor"), &processauditandcompliance.AuditReportPayload{
+		Scope: &scope, Format: &format, Did: &did, Justification: "report unit test",
+	})
+	if err != nil {
+		t.Fatalf("AuditReport returned error: %v", err)
+	}
+	var report auditReport
+	if err := json.Unmarshal(content, &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.ResponseHash != hashBytes(raw) || len(report.Events) != 1 || report.Events[0].Actor != "alice" || len(report.Findings) != 1 {
+		t.Fatalf("incomplete JSON report: %+v", report)
+	}
+	if string(content) == string(raw) {
+		t.Fatal("report did not include snapshot evidence")
+	}
+	if executor.calls != 0 {
+		t.Fatalf("report invoked executor %d times", executor.calls)
+	}
+	if recordedHash != hashBytes(content) || recordedFormat != "json" || recordedJustification != "report unit test" {
+		t.Fatalf("unexpected report event: hash=%q format=%q justification=%q", recordedHash, recordedFormat, recordedJustification)
+	}
+	if recordedSummary.TotalChecks != 1 || recordedSummary.Failed != 1 {
+		t.Fatalf("unexpected persisted report summary: %+v", recordedSummary)
+	}
+}
+
+func TestAuditRejectsBeforeExecutorDispatch(t *testing.T) {
+	tests := []struct {
+		name    string
+		context context.Context
+		scope   string
+	}{
+		{name: "unsupported scope", context: context.Background(), scope: "unsupported"},
+		{
+			name: "archive manager outside archive scope",
+			context: middleware.InjectAuthContext(
+				context.Background(), []string{"Archive Manager"}, "did:example:holder", "archive-manager",
+			),
+			scope: "contracts",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			executor := &countingAuditExecutor{}
+			service := &processAuditAndCompliancesrvc{AuditExecutor: executor}
+			_, err := service.Audit(test.context, &processauditandcompliance.PACAuditRequest{
+				Scope: test.scope, Justification: "pre-dispatch unit test",
+			})
+			if err == nil {
+				t.Fatal("Audit returned nil error")
+			}
+			if executor.calls != 0 {
+				t.Fatalf("rejected audit invoked executor %d times", executor.calls)
+			}
+		})
+	}
+}
 
 func TestResolveAuditScopeMapsUIScopes(t *testing.T) {
 	tests := []struct {
@@ -32,6 +136,13 @@ func TestResolveAuditScopeMapsUIScopes(t *testing.T) {
 		{
 			name:      "contracts",
 			scope:     "contracts",
+			scopeName: "contracts",
+			component: componenttype.ContractWorkflowEngine,
+			contract:  true,
+		},
+		{
+			name:      "contract singular case insensitive",
+			scope:     "CONTRACT",
 			scopeName: "contracts",
 			component: componenttype.ContractWorkflowEngine,
 			contract:  true,
@@ -79,67 +190,6 @@ func TestResolveAuditScopeMapsUIScopes(t *testing.T) {
 	}
 }
 
-func TestBuildAuditReportSummarizesEventsAndFindings(t *testing.T) {
-	createdData := json.RawMessage(`{"created_by":"alice"}`)
-	findingData := json.RawMessage(`{"ruleId":"FACIS-CONTRACT-POLICY-003","severity":"error","message":"Service availability must satisfy policy minimum.","requirement":"service.sla.availability must be >= 99.9","actualValue":99.5,"expectedValue":99.9,"operator":"gte","path":"service.sla.availability"}`)
-	did := "did:example:contract"
-	report := buildAuditReport("contracts", "", "auditor", time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC), []*processauditandcompliance.PACAuditResponse{
-		{
-			Did:       did,
-			Component: componenttype.ContractWorkflowEngine.String(),
-			AuditTrail: []*processauditandcompliance.PACResourceAuditTrailEntry{
-				{ID: 1, Component: componenttype.ContractWorkflowEngine.String(), EventType: "CREATE_CONTRACT", EventData: createdData, Did: &did, CreatedAt: "2026-06-30T10:00:00Z"},
-				{ID: 2, Component: componenttype.ContractWorkflowEngine.String(), EventType: "CONTRACT_CONTENT_POLICY_AUDIT_FINDING", EventData: findingData, Did: &did, CreatedAt: "2026-06-30T10:05:00Z"},
-			},
-		},
-	})
-
-	if report.Summary.TotalEvents != 1 || report.Summary.TotalChecks != 1 || report.Summary.Failed != 1 {
-		t.Fatalf("unexpected summary: %+v", report.Summary)
-	}
-	if got := report.Events[0].Actor; got != "alice" {
-		t.Fatalf("event actor = %q, want alice", got)
-	}
-	finding := report.Findings[0]
-	if finding.RuleID != "FACIS-CONTRACT-POLICY-003" || finding.Operator != "gte" {
-		t.Fatalf("unexpected finding: %+v", finding)
-	}
-	if finding.ExpectedValue != float64(99.9) || finding.ActualValue != float64(99.5) {
-		t.Fatalf("unexpected finding values: actual=%v expected=%v", finding.ActualValue, finding.ExpectedValue)
-	}
-}
-
-func TestBuildAuditReportFiltersByDID(t *testing.T) {
-	keptDID := "did:example:kept"
-	skippedDID := "did:example:skipped"
-	eventData := json.RawMessage(`{"created_by":"alice"}`)
-	responses := []*processauditandcompliance.PACAuditResponse{
-		{
-			Did:       keptDID,
-			Component: componenttype.ContractWorkflowEngine.String(),
-			AuditTrail: []*processauditandcompliance.PACResourceAuditTrailEntry{
-				{ID: 1, Component: componenttype.ContractWorkflowEngine.String(), EventType: "CREATE_CONTRACT", EventData: eventData, Did: &keptDID, CreatedAt: "2026-06-30T10:00:00Z"},
-			},
-		},
-		{
-			Did:       skippedDID,
-			Component: componenttype.ContractWorkflowEngine.String(),
-			AuditTrail: []*processauditandcompliance.PACResourceAuditTrailEntry{
-				{ID: 2, Component: componenttype.ContractWorkflowEngine.String(), EventType: "CREATE_CONTRACT", EventData: eventData, Did: &skippedDID, CreatedAt: "2026-06-30T10:05:00Z"},
-			},
-		},
-	}
-
-	report := buildAuditReport("contracts", keptDID, "auditor", time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC), responses)
-
-	if len(report.Resources) != 1 || report.Resources[0].DID != keptDID {
-		t.Fatalf("unexpected resources: %+v", report.Resources)
-	}
-	if len(report.Events) != 1 || report.Events[0].DID != keptDID {
-		t.Fatalf("unexpected events: %+v", report.Events)
-	}
-}
-
 func TestRenderAuditReportCSVAndPDF(t *testing.T) {
 	report := auditReport{
 		ReportID:    "pac-report-test",
@@ -174,10 +224,6 @@ func TestRenderAuditReportCSVAndPDF(t *testing.T) {
 	if !strings.Contains(string(pdfBytes), "CREATE_CONTRACT") || !strings.Contains(string(pdfBytes), "did:web:actor") {
 		t.Fatal("pdf does not include lifecycle actor and timestamp evidence")
 	}
-	download := reportDownloadEnvelope(report, "pdf", pdfBytes, "application/pdf")
-	if download.ContentHash != hashBytes(pdfBytes) {
-		t.Fatalf("hash is not over exact report bytes: %s", download.ContentHash)
-	}
 }
 
 func TestResolveAuditScopeAcceptsComponentTypes(t *testing.T) {
@@ -210,6 +256,70 @@ func TestResolveAuditScopeRejectsUnknownScope(t *testing.T) {
 	}
 }
 
+func TestAuditRequestDIDAcceptsResourceIDAlias(t *testing.T) {
+	resourceID := " did:example:contract "
+	request := &processauditandcompliance.PACAuditRequest{ResourceID: &resourceID}
+	if got := auditRequestDID(request); got != "did:example:contract" {
+		t.Fatalf("auditRequestDID() = %q", got)
+	}
+}
+
+func TestAuditEvidenceResourceUsesExecutorWireNames(t *testing.T) {
+	kind, result, ruleID, reason := "CHECK", "FAILED", "RULE-1", "Power of Attorney denied"
+	resource := auditEvidenceResource{
+		Did: "did:example:contract", Component: "PROCESS_AUDIT_AND_COMPLIANCE",
+		CreatedAt: "2026-07-29T12:00:00Z",
+		AuditTrail: []*processauditandcompliance.PACResourceAuditTrailEntry{{
+			ID: 1, EventType: "PAC_TRUST_GATE_DENIAL", CreatedAt: "2026-07-29T12:00:00Z",
+			Kind: &kind, Result: &result, RuleID: &ruleID, Reason: &reason,
+		}},
+	}
+	raw, err := json.Marshal(resource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	trail := envelope["audit_trail"].([]any)
+	entry := trail[0].(map[string]any)
+	if entry["kind"] != "CHECK" || entry["rule_id"] != "RULE-1" || entry["reason"] != reason {
+		t.Fatalf("unexpected executor wire entry: %s", raw)
+	}
+	if _, leaked := entry["RuleID"]; leaked {
+		t.Fatalf("Goa service field name leaked into executor wire contract: %s", raw)
+	}
+}
+
+func TestExternalAuditResponseCarriesTheSubmittedTimeline(t *testing.T) {
+	firstDID, secondDID := "did:example:one", "did:example:two"
+	evidence := []*auditEvidenceResource{
+		{Did: firstDID, Component: "CONTRACT_WORKFLOW_ENGINE", AuditTrail: []*processauditandcompliance.PACResourceAuditTrailEntry{
+			{ID: 1, EventType: "CONTRACT_CREATED", Did: &firstDID},
+			nil,
+		}},
+		nil,
+		{Did: secondDID, Component: "CONTRACT_WORKFLOW_ENGINE", AuditTrail: []*processauditandcompliance.PACResourceAuditTrailEntry{
+			{ID: 2, EventType: "CONTRACT_SIGNED", Did: &secondDID},
+		}},
+	}
+	response := toPACExternalAuditResponse(auditexecutor.Response{
+		ContractVersion: auditexecutor.ContractVersion, AuditID: "audit-1", CorrelationID: "audit-1",
+		Scope: "contracts", ExecutedAt: "2026-07-29T12:00:00Z",
+	}, evidence)
+
+	if len(response.Timeline) != 2 {
+		t.Fatalf("expected the gathered evidence to be flattened into the timeline, got %d entries", len(response.Timeline))
+	}
+	if response.Timeline[0].EventType != "CONTRACT_CREATED" || response.Timeline[1].EventType != "CONTRACT_SIGNED" {
+		t.Fatalf("unexpected timeline order: %+v", response.Timeline)
+	}
+	if response.Timeline[0].Did == nil || *response.Timeline[0].Did != firstDID {
+		t.Fatalf("a flattened entry lost the DID it is anchored on: %+v", response.Timeline[0])
+	}
+}
+
 func TestValidateAuditScopeDependencies(t *testing.T) {
 	service := &processAuditAndCompliancesrvc{}
 
@@ -221,5 +331,31 @@ func TestValidateAuditScopeDependencies(t *testing.T) {
 	}
 	if err := service.validateAuditScopeDependencies(auditScopeConfig{component: componenttype.SignatureManagement}); err != nil {
 		t.Fatalf("validateAuditScopeDependencies returned error for scope without dependency requirement: %v", err)
+	}
+}
+
+func TestAuditReportShreddedSnapshotIsNotFoundAndDoesNotEmitReport(t *testing.T) {
+	service := &processAuditAndCompliancesrvc{
+		auditRunReader: func(context.Context, string, string) (persistedAuditRun, error) {
+			return persistedAuditRun{}, &artifactstore.ShreddedError{Scope: artifactstore.ContractScope("did:example:erased")}
+		},
+		reportEventPersister: func(context.Context, auditReport, string, string, string, string) error {
+			t.Fatal("report event emitted for unreadable run")
+			return nil
+		},
+	}
+	_, err := service.AuditReport(context.Background(), nil)
+	var serviceError *goa.ServiceError
+	if !errors.As(err, &serviceError) || serviceError.Name != "not_found" {
+		t.Fatalf("expected not_found, got %v", err)
+	}
+}
+
+func TestAuditReportUnsupportedFormatIsBadRequest(t *testing.T) {
+	format := "unsupported"
+	_, err := (&processAuditAndCompliancesrvc{}).AuditReport(context.Background(), &processauditandcompliance.AuditReportPayload{Format: &format})
+	var serviceError *goa.ServiceError
+	if !errors.As(err, &serviceError) || serviceError.Name != "bad_request" {
+		t.Fatalf("expected bad_request, got %v", err)
 	}
 }

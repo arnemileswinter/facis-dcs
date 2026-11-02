@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
 	"digital-contracting-service/internal/auth/oid4vp/status"
 	"digital-contracting-service/internal/auth/oid4vp/status/codec"
 	"digital-contracting-service/internal/auth/oid4vp/status/envelope"
@@ -27,7 +28,7 @@ func (h *IETFToken) Mechanism() status.Mechanism {
 
 func (h *IETFToken) Check(
 	ctx context.Context,
-	_ status.VerifiedCredential,
+	credential status.VerifiedCredential,
 	ref status.Reference,
 ) (status.Result, error) {
 	if err := requireStatusTrust(h.Trust); err != nil {
@@ -77,6 +78,14 @@ func (h *IETFToken) Check(
 	subject, _ := claims["sub"].(string)
 	if subject != ref.URI {
 		return status.Result{}, status.ErrStatusURIMismatch
+	}
+
+	// Whose revocation statement this is (ADR-34). The signature and the subject
+	// together still allow any trusted issuer to publish a list at another
+	// issuer's URI.
+	listIssuer, _ := claims["iss"].(string)
+	if err := status.RequireCredentialIssuer(credential, listIssuer); err != nil {
+		return status.Result{}, err
 	}
 
 	if err := h.validateTimeClaims(claims); err != nil {
@@ -130,7 +139,24 @@ func (h *IETFToken) verifyJWT(body []byte) (envelope.VerifiedJWT, error) {
 	if err := requireStatusTrust(h.Trust); err != nil {
 		return envelope.VerifiedJWT{}, err
 	}
-	return envelope.VerifyES256JWT(body, func(issuer string, _ *jwt.Token) (*ecdsa.PublicKey, error) {
+	return envelope.VerifyES256JWT(body, func(issuer string, token *jwt.Token) (*ecdsa.PublicKey, error) {
+		// An issuer that publishes its key by certificate chain bundles no JWKS,
+		// so its status list is verified from the chain the token carries —
+		// against the same anchors and the same leaf-identifies-issuer binding
+		// the credential is held to. This is the path a statuslist+jwt from the
+		// issuer's own flow takes: SelectMechanismFromResponse routes that
+		// content type here, not to the XFSC handler.
+		if raw, ok := token.Header["x5c"]; ok {
+			key, err := sdjwt.VerificationKeyFromX5C(raw, h.Trust.X5CRoots, issuer)
+			if err != nil {
+				return nil, err
+			}
+			ecKey, ok := key.(*ecdsa.PublicKey)
+			if !ok {
+				return nil, fmt.Errorf("status list x5c leaf key is %T, not ECDSA", key)
+			}
+			return ecKey, nil
+		}
 		return h.Trust.ResolveECDSAPublicKey(issuer)
 	})
 }
@@ -153,11 +179,21 @@ func (h *IETFToken) validateTimeClaims(claims map[string]any) error {
 	if h.Now != nil {
 		now = h.Now()
 	}
-	if exp, ok := envelope.ExpFromClaims(claims); ok && now.Unix() >= exp {
+
+	if exp, present, err := envelope.ExpFromClaims(claims); err != nil {
+		return fmt.Errorf("status list token exp claim invalid: %w", err)
+	} else if present && now.Unix() >= exp {
 		return fmt.Errorf("status list token expired")
 	}
-	if nbf, ok := envelope.NbfFromClaims(claims); ok && now.Unix() < nbf {
+
+	if nbf, present, err := envelope.NbfFromClaims(claims); err != nil {
+		return fmt.Errorf("status list token nbf claim invalid: %w", err)
+	} else if present && now.Unix() < nbf {
 		return fmt.Errorf("status list token not yet valid")
+	}
+
+	if _, _, err := envelope.IatFromClaims(claims); err != nil {
+		return fmt.Errorf("status list token iat claim invalid: %w", err)
 	}
 	return nil
 }

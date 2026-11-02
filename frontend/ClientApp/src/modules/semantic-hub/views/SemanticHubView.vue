@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { refreshOntologyDomainFields } from '@template-repository/utils/ontology-domain-fields'
 import PublishEntryForm from '@semantic-hub/components/PublishEntryForm.vue'
 import RegisterVersionForm from '@semantic-hub/components/RegisterVersionForm.vue'
 import {
@@ -96,6 +97,8 @@ async function afterMutation() {
   // A clause-catalog change must reach the template builder's palette
   // without a reload (ADR-10).
   if (selected.value?.name === 'clause-catalog') void clauseCatalog.refresh()
+  // Same for the builder's hub-derived object vocabulary.
+  refreshOntologyDomainFields().catch(() => undefined)
 }
 
 const activeBadge = computed(() => (v: SemanticSchemaItem) => v.active)
@@ -109,8 +112,8 @@ onMounted(loadEntries)
       <h1 class="text-xl font-bold">Semantic Hub</h1>
       <p class="mt-1 text-sm text-base-content/70">
         Versioned schema store: JSON-LD contexts, SHACL shapes, and validation profiles every produced document is
-        validated against. Activating a version changes what newly produced documents are checked with —
-        already-produced documents stay pinned to the version they were created under.
+        validated against. Activating a version changes what newly produced documents are checked with. Documents
+        already produced remain pinned to the version used when they were created.
       </p>
     </header>
 

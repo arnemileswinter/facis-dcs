@@ -3,8 +3,7 @@ import { computed, onUnmounted, type Ref, ref } from 'vue'
 import { ROUTES } from '@/router/router'
 import { useContractsStore } from '@/stores/contracts-store'
 import { useNegotiationTaskStateFilterStore } from '@/stores/state-filter-store'
-import { ContractState } from '@/types/contract-state'
-import { negotiationTaskStates } from '@/types/negotiation-task-state'
+import { NegotiationTaskState, negotiationTaskStates } from '@/types/negotiation-task-state'
 import { compareValues } from '@/utils/comparison'
 import TaskListSearch from './TaskListSearch.vue'
 import ListSort from '../ListSort.vue'
@@ -42,33 +41,27 @@ const sortedTasks = computed(() => {
 
 const hasTasks = computed(() => props.tasks.length > 0)
 
+// Unfiltered, the tab means "rounds awaiting my response": a task exists only
+// because this instance engaged with a negotiation round, and OPEN is exactly
+// the ones it still owes an answer to. The previous default filtered on the
+// CONTRACT's state instead, which encoded a lifecycle assumption the task's own
+// state already answers.
 const filteredTasks = computed(() => {
   if (stateFilterStore.hasFilters) {
     return sortedTasks.value.filter((task) => stateFilterStore.hasFilter(task.state))
   }
-  return sortedTasks.value.filter((task) => {
-    const contractState = contractsStore.findContractByDid(task.did)?.state
-    return (
-      contractState && ([ContractState.draft, ContractState.negotiation] as ContractState[]).includes(contractState)
-    )
-  })
+  return sortedTasks.value.filter((task) => task.state === NegotiationTaskState.open)
 })
 
 const getContractName = (task: ContractNegotiationTask) => {
   return contractsStore.findContractByDid(task.did)?.name ?? 'Nameless Contract'
 }
 
-const applySearchResult = (searchResult: ContractNegotiationTask[]) => {
-  isSearchActive.value = searchResult.length !== props.tasks.length
-  searchedTasks.value = searchResult
-}
-
-const resolveViewRouteName = (task: ContractNegotiationTask) => {
-  const currentState = contractsStore.findContractByDid(task.did)?.state
-  if (currentState === ContractState.negotiation) {
-    return ROUTES.CONTRACTS.NEGOTIATE
+const applySearchResult = (searchResult: ContractNegotiationTask[] | null) => {
+  isSearchActive.value = !!searchResult
+  if (searchResult) {
+    searchedTasks.value = searchResult
   }
-  return ROUTES.CONTRACTS.VIEW
 }
 
 onUnmounted(() => stateFilterStore.reset())
@@ -77,20 +70,22 @@ onUnmounted(() => stateFilterStore.reset())
 <template>
   <div class="flex h-full min-h-0 flex-col">
     <ul class="list flex-1 overflow-y-auto">
-      <li class="flex w-full flex-col justify-end px-4 tracking-wide sm:flex-row">
+      <li class="flex flex-wrap items-center gap-3 px-4 py-2 tracking-wide [&>.join]:m-0">
         <TaskListSearch
-          class="flex-1"
+          class="w-full min-w-0 lg:w-auto lg:flex-1"
           :tasks="tasks"
           placeholder="Search contracts"
           @search-result="applySearchResult"
         />
-        <ListStateFilter
-          label="Negotiation Task"
-          :filters="negotiationTaskStates"
-          store-type="negotiationTasks"
-          :disabled="!hasTasks"
-        />
-        <ListSort v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :sorter="sorter" :disabled="!hasTasks" />
+        <div class="ml-auto flex shrink-0 items-center gap-3 [&>button]:m-0">
+          <ListStateFilter
+            label="Negotiation Task"
+            :filters="negotiationTaskStates"
+            store-type="negotiationTasks"
+            :disabled="!hasTasks"
+          />
+          <ListSort v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :sorter="sorter" :disabled="!hasTasks" />
+        </div>
       </li>
       <template v-if="filteredTasks.length > 0">
         <li v-for="task in filteredTasks" :key="task.did" class="list-row">
@@ -108,7 +103,7 @@ onUnmounted(() => stateFilterStore.reset())
                 <div>Creation date: {{ new Date(task.created_at).toLocaleDateString() }}</div>
                 <div class="card-actions justify-end">
                   <RouterLink
-                    :to="{ name: resolveViewRouteName(task), params: { did: task.did } }"
+                    :to="{ name: ROUTES.CONTRACTS.NEGOTIATE, params: { did: task.did } }"
                     class="btn btn-sm btn-primary"
                   >
                     View

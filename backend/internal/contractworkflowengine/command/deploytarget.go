@@ -4,12 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
+	"net/url"
+	"slices"
 	"strings"
 	"time"
+
+	"digital-contracting-service/internal/base/identity"
+	"digital-contracting-service/internal/base/safehttp"
 )
 
 // ContractTargetClient dispatches a deployment payload to the configured
@@ -19,45 +24,73 @@ import (
 // system's own acknowledgement (POST /contract/deployment/callback) is the
 // authoritative signal of a successful deployment (DCS-FR-SM-12).
 type ContractTargetClient interface {
-	Deploy(ctx context.Context, payload map[string]any) error
+	// DeployTo posts the payload to one registered target's endpoint. The URL is
+	// a parameter rather than client state because a DCS may serve several
+	// execution environments and each contract names its own (ADR-25).
+	DeployTo(ctx context.Context, url string, payload map[string]any) error
+}
+
+// ErrInvalidTargetURL refuses a target URL that the signed contract may not
+// be posted to.
+var ErrInvalidTargetURL = errors.New("invalid target URL")
+
+// ValidateTargetURL accepts an absolute https URL. A target receives the
+// signed contract and its signatures (DCS-IR-CI-01), so plain http is
+// accepted only for a host that did:web may be resolved from over http:
+// loopback, or a host DCS_DIDWEB_INSECURE_HOSTS names (identity.DIDWebSchemes).
+func ValidateTargetURL(raw string) error {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" {
+		return fmt.Errorf("%w: %q is not an absolute URL", ErrInvalidTargetURL, raw)
+	}
+	switch parsed.Scheme {
+	case "https":
+		return nil
+	case "http":
+		if slices.Contains(identity.DIDWebSchemes(parsed.Host), "http") {
+			return nil
+		}
+		return fmt.Errorf("%w: %q uses plain http; a target receives the signed contract, so only loopback and the hosts DCS_DIDWEB_INSECURE_HOSTS names may use http",
+			ErrInvalidTargetURL, raw)
+	}
+	return fmt.Errorf("%w: %q does not use https", ErrInvalidTargetURL, raw)
 }
 
 // HTTPContractTargetClient POSTs the deployment payload to a configured URL
 // (deployment/helm/charts/orce/flows/contract-target-flow.json is the
-// reference implementation of the receiving side).
+// reference implementation of the receiving side). It follows no redirect and
+// dials loopback only for a host ValidateTargetURL allows plain http for.
 type HTTPContractTargetClient struct {
-	url        string
-	httpClient *http.Client
+	strict   *http.Client
+	loopback *http.Client
 }
 
-// ContractTargetURL returns the configured Contract Target System endpoint,
-// or "" if none is configured.
-func ContractTargetURL() string {
-	return strings.TrimSpace(os.Getenv("CONTRACT_TARGET_URL"))
-}
-
-func NewHTTPContractTargetClient(url string) *HTTPContractTargetClient {
+func NewHTTPContractTargetClient() *HTTPContractTargetClient {
 	return &HTTPContractTargetClient{
-		url:        strings.TrimSpace(url),
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		strict:   safehttp.Client(10*time.Second, safehttp.Policy{}),
+		loopback: safehttp.Client(10*time.Second, safehttp.Policy{AllowLoopback: true}),
 	}
 }
 
-func (c *HTTPContractTargetClient) Deploy(ctx context.Context, payload map[string]any) error {
-	if c == nil || c.url == "" {
-		return fmt.Errorf("contract target URL is empty")
+func (c *HTTPContractTargetClient) DeployTo(ctx context.Context, target string, payload map[string]any) error {
+	if err := ValidateTargetURL(target); err != nil {
+		return err
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal deployment payload: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSpace(target), bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create deployment request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	client := c.strict
+	if slices.Contains(identity.DIDWebSchemes(req.URL.Host), "http") {
+		client = c.loopback
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("post deployment payload: %w", err)
 	}

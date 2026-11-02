@@ -15,11 +15,11 @@ overwritten in place; the seam is instead:
   1. Add the tampered/stripped bytes as a NEW CID, via `ipfs add` exec'd
      inside the shared in-cluster IPFS pod (see _ipfs_exec_prefix below).
   2. Point `contracts.pdf_ipfs_cid` at that new CID, via the existing
-     `context.db` test-DB connection (see environment.py and the
-     `_seed_trusted_peer` precedent in
-     steps/peer_trust/dcs_peer_trust_steps.py) — a direct Postgres
-     connection is already an accepted test-only seam in this codebase,
-     preferred here over a second kubectl-exec-into-postgres seam.
+     `context.db` test-DB connection (see environment.py) — a direct
+     Postgres connection is already an accepted test-only seam in this
+     codebase (also used, read-only, by steps/peer_trust/
+     dcs_trust_pdp_steps.py's `sync_fails` polling under ADR-19), preferred
+     here over a second kubectl-exec-into-postgres seam.
 
 This is a genuine black-box test target afterwards: the verify/validate
 endpoints under test do not know or care that the CID was swapped by a test
@@ -59,10 +59,8 @@ def _ipfs_exec_prefix() -> list:
     """Return the kubectl-exec argv prefix for running commands inside the
     shared IPFS pod.
 
-    IPFS is a SINGLE instance shared across both BDD releases (see
-    deployment/helm/values.bdd2.yml's ipfsClient.mfsBaseURL pointing at
-    "dcs-ipfs" regardless of which DCS instance is calling) — there is no
-    per-instance IPFS to disambiguate.
+    The exec prefix selects the pod serving the tested contract's IPFS
+    endpoint, configured through deployment/helm's ipfs values.
 
     Mirrors the BDD_HSMSIGN_EXEC convention established in
     tests/bdd/scripts/run_bdd_helm.sh: an env-var-provided exec prefix so
@@ -104,6 +102,25 @@ def ipfs_add_bytes(data: bytes) -> str:
         f"{proc.stderr.decode(errors='replace')})"
     )
     return cid
+
+
+def ipfs_cat_bytes(cid: str) -> bytes:
+    """Fetch the raw bytes stored under `cid` from the shared in-cluster IPFS
+    node, exactly as an IPFS-level reader would see them — bypassing the DCS
+    API entirely. Read-only counterpart of ipfs_add_bytes over the same
+    BDD_IPFS_EXEC seam; used by the opaque-at-rest scenarios
+    (features/26_encryption_at_rest/) to prove stored artifacts are
+    ciphertext, not plaintext PDFs (DCS-NFR-SEC-14).
+    """
+    cmd = _ipfs_exec_prefix() + ["ipfs", "cat", cid]
+    proc = subprocess.run(cmd, capture_output=True, timeout=60)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"ipfs cat {cid} failed (exit {proc.returncode}): "
+            f"{proc.stderr.decode(errors='replace')}"
+        )
+    assert proc.stdout, f"ipfs cat {cid} returned no bytes"
+    return proc.stdout
 
 
 def swap_contract_pdf_cid(context, did: str, new_pdf_bytes: bytes) -> CidSwapHandle:

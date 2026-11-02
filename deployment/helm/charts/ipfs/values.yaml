@@ -1,7 +1,46 @@
 image:
   repository: ipfs/kubo
+  # Left mutable deliberately for now. A pin is the right end state, but it must
+  # be to the digest a healthy node is actually running -- pinning to a guessed
+  # version tag rolled the node back eleven minor releases and broke every
+  # scenario that stores a PDF. Pin to sha256:8907cb0cc1ad5798f6bb1bb1341a8009
+  # 90c268e021cedfa317e8aa1a33864214 (the digest running on the demo instances)
+  # through digest below, per environment.
   tag: "latest"
+  # Optional "sha256:<hex>": pulls <repository>:<tag>@<digest>.
+  digest: ""
   pullPolicy: IfNotPresent
+
+# 1000:100 is the ipfs user of the Kubo image. Kubo writes only to its repo
+# volume /data/ipfs (DCS-NFR-SEC-05).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 100
+  fsGroup: 100
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# Node tuning, applied by the config init container. Both default OFF: they
+# trade durability and network reachability for write latency, which is the
+# right trade only for a disposable stack.
+config:
+  # "none" turns the DHT off entirely. A hermetic test node talks to nobody,
+  # and every add otherwise pays for providing its blocks to a network that
+  # does not exist there.
+  routingType: ""
+  # Skips the per-write fsync in the flatfs datastore. Under a full suite the
+  # pinset grows into the thousands and the fsync per pinned block is what
+  # pushes pin/add past the document-manager's 5s client timeout — at which
+  # point every store fails, the workers retry, and the queue of concurrent
+  # pins makes the node slower still. Data-loss-on-crash is acceptable exactly
+  # where the whole cluster is deleted after the run.
+  noSync: false
 
 service:
   type: ClusterIP
@@ -16,6 +55,13 @@ service:
   swarmNodePort: null
 
 api:
+  # Kubo API.Authorizations (DCS-NFR-SF-02): every RPC call must carry the
+  # bearer token of the Secret <release>-ipfs-api (key token), which the chart
+  # generates on install and keeps on upgrade. The parent chart gives it to the
+  # backend as IPFS_API_TOKEN. The ipfs CLI in the pod needs
+  # --api-auth "bearer:$IPFS_API_TOKEN".
+  auth:
+    enabled: false
   cors:
     enabled: false
     allowOrigins: []
@@ -32,5 +78,8 @@ persistence:
   size: 5Gi
   accessModes:
     - ReadWriteOnce
+  # Empty uses the cluster default StorageClass. Set an encrypted class per
+  # environment; the Kubo repo stores all pinned artifact ciphertext.
+  storageClassName: ""
 
 resources: {}

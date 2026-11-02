@@ -116,12 +116,48 @@ def jwk_from_did_jwk(did: str) -> dict[str, Any]:
     return public_jwk(raw)
 
 
-def build_trust_json(*, issuer_public: dict[str, Any], issuer_dids: list[str], vcts: list[str]) -> dict[str, Any]:
-    issuer_key = public_key_material(issuer_public)
+def build_trust_json(
+    *,
+    issuer_bases: list[str],
+    leaf_key_der_b64: str,
+    vcts: list[str],
+) -> dict[str, Any]:
+    """Build a trust document in the schema LoadTrustConfig accepts (ADR-31).
+
+    An entry states which purposes the issuer is granted, which organizations it
+    may attest, and how its key is resolved. Emitting the older bare-jwks form
+    produces a document the backend refuses outright.
+
+    There is one entry per stack, and it is that stack's ORCE credential issuer,
+    identified by the base URL it publishes under — the same string it puts in
+    every credential's `iss` and in the `iss` of the status list those
+    credentials point at. Nothing else is listed because nothing else issues:
+    an issuer that publishes no status list can attest nothing a verifier will
+    accept, since a list is believed only from the issuer that publishes it.
+
+    The purposes are all three because in a dev stack this one issuer stands in
+    for all of them, including the identity issuer a real deployment runs
+    elsewhere (deployment/helm/values.pid-issuer.yml). Organizations are
+    wildcarded because it stands in for every party the suites invent; a real
+    deployment names them.
+
+    The mechanism is x5c — the key arrives in the credential's certificate chain
+    — and login additionally PINS the key that chain's leaf must carry (ADR-35),
+    because verifying a login issuer against a CA list would let that CA
+    introduce another one.
+    """
     issuers: dict[str, Any] = {}
-    for did in issuer_dids:
-        issuers[did] = {"jwks": {"keys": [issuer_key]}}
-    return {"vcts": list(dict.fromkeys(vcts)), "issuers": issuers}
+    for base in dict.fromkeys(issuer_bases):
+        issuers[base] = {
+            "purposes": ["login", "peer", "pid"],
+            "organizations": ["*"],
+            "mechanism": "x5c",
+            "x5c_leaf_keys": [leaf_key_der_b64],
+        }
+    return {
+        "vcts": list(dict.fromkeys(vcts)),
+        "issuers": issuers,
+    }
 
 
 def load_json(path: Path) -> dict[str, Any]:

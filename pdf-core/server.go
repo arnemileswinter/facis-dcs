@@ -18,9 +18,6 @@ import (
 //go:embed docs/semantic-ontology/linkml/output/linkml.yaml.context.jsonld
 var ontologyContext []byte
 
-//go:embed docs/semantic-ontology/linkml/output/linkml.yaml.owl.ttl
-var ontologyOWL []byte
-
 //go:embed docs/semantic-ontology/linkml/output/linkml.yaml.shacl.merged.ttl
 var ontologySHACL []byte
 
@@ -41,16 +38,18 @@ func newServer() http.Handler {
 	mux.HandleFunc("POST /render", svc.render)
 	mux.HandleFunc("POST /verify", svc.verify)
 	mux.HandleFunc("POST /verify/content", svc.verifyContent)
+	mux.HandleFunc("POST /verify/content-match", svc.verifyContentMatch)
 	mux.HandleFunc("POST /render/amendment", svc.renderAmendment)
+	mux.HandleFunc("POST /render/reanchor", svc.renderReanchor)
 	mux.HandleFunc("POST /c2pa/embed", svc.embedC2PASignatures)
 	mux.HandleFunc("POST /evidence/embed", svc.embedEvidence)
 	mux.HandleFunc("POST /evidence/extract", svc.extractEvidence)
 	mux.HandleFunc("POST /claim", svc.claim)
 	mux.HandleFunc("POST /manifest/extract", svc.extractManifest)
+	mux.HandleFunc("POST /manifest/reference", svc.manifestReference)
 	mux.HandleFunc("POST /manifest/chain", svc.manifestChain)
 	mux.HandleFunc("POST /payload/extract", svc.extractPayload)
 	mux.HandleFunc("GET /ontology/dcs-pdf-core", svc.ontologyContext)
-	mux.HandleFunc("GET /ontology/dcs-pdf-core.owl", svc.ontologyOwl)
 	mux.HandleFunc("GET /swagger.json", handleSwagger)
 	mux.HandleFunc("GET /ui/", handleUI)
 	mux.HandleFunc("GET /index.html", handleUI)
@@ -70,7 +69,7 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 
 func handleUI(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, swaggerHTML)
+	_, _ = fmt.Fprint(w, swaggerHTML)
 }
 
 func handleSwagger(w http.ResponseWriter, _ *http.Request) {

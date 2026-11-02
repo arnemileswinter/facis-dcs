@@ -60,11 +60,13 @@ func TestBuildJWTIncludesWalletNonceAndClientMetadata(t *testing.T) {
 }
 
 func TestSignES256JWTIncludesJWKHeader(t *testing.T) {
-	token, err := signES256JWT("kid-1", jwt.MapClaims{"a": "b"}, map[string]string{
-		"kty": "EC",
-		"crv": "P-256",
-		"x":   "x",
-		"y":   "y",
+	token, err := signES256JWT("kid-1", jwt.MapClaims{"a": "b"}, map[string]any{
+		"jwk": map[string]string{
+			"kty": "EC",
+			"crv": "P-256",
+			"x":   "x",
+			"y":   "y",
+		},
 	}, func(signingInput string) ([]byte, error) {
 		return []byte{1, 2, 3}, nil
 	})
@@ -88,6 +90,36 @@ func TestSignES256JWTIncludesJWKHeader(t *testing.T) {
 	}
 	if _, ok := header["jwk"]; !ok {
 		t.Fatalf("jwk header missing")
+	}
+}
+
+func TestSignES256JWTIncludesX5CHeader(t *testing.T) {
+	token, err := signES256JWT("kid-1", jwt.MapClaims{"a": "b"}, map[string]any{
+		"x5c": []string{"deadbeef"},
+	}, func(signingInput string) ([]byte, error) {
+		return []byte{1, 2, 3}, nil
+	})
+	if err != nil {
+		t.Fatalf("signES256JWT returned error: %v", err)
+	}
+
+	parts := splitJWT(token)
+	rawHeader, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		t.Fatalf("decode header: %v", err)
+	}
+
+	var header map[string]any
+	if err := json.Unmarshal(rawHeader, &header); err != nil {
+		t.Fatalf("unmarshal header: %v", err)
+	}
+
+	if _, ok := header["jwk"]; ok {
+		t.Fatalf("jwk header should not be present when signing with x5c")
+	}
+	x5c, ok := header["x5c"].([]any)
+	if !ok || len(x5c) != 1 || x5c[0] != "deadbeef" {
+		t.Fatalf("x5c header missing or malformed: %v", header["x5c"])
 	}
 }
 

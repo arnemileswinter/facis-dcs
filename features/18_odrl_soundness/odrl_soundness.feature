@@ -46,7 +46,7 @@ Feature: Machine-readable ODRL soundness and server-side policy enforcement
     When contract "ODRL Seal Contract" is submitted, reviewed, approved, and signed via the standard workflow
     Then the stored policies of contract "ODRL Seal Contract" form a single enclosing odrl:Agreement whose @id is anchored to the contract DID and which declares an odrl:profile
 
-  @DCS-FR-PACM-03
+  @DCS-FR-PACM-03 @DCS-FR-UC-10-2
   Scenario: A contract with a violated ODRL constraint cannot be approved
     Given a fresh draft contract "ODRL Violation Contract"
     When the policies of contract "ODRL Violation Contract" are updated to a real ODRL 2.2 policy set (rule "Duty", field "country", operator "isAnyOf") requiring "DEU,AUT,CHE" while the actual value is "FRA"

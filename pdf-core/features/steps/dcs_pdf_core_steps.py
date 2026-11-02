@@ -68,6 +68,11 @@ def _raw_request(context, method, path, data, content_type):
     request = urllib.request.Request(f"{context.server_url}{path}", data=data, method=method)
     if content_type:
         request.add_header("Content-Type", content_type)
+    # pdf-core holds no signing material, so every render names the chain it signs
+    # under, as the DCS backend does with the certificate for its dcs-c2pa key.
+    chain = getattr(context, "c2pa_x5chain_pem", None)
+    if chain:
+        request.add_header("X-DCS-C2PA-X5Chain", base64.b64encode(chain).decode("ascii"))
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             return {
@@ -163,6 +168,18 @@ def _ensure_c2patool_binary():
     return binary_path
 
 
+# c2patool exits 0 whenever it can *read* a manifest, including when it judges
+# that manifest invalid, so the exit code alone proves only that the JUMBF parses.
+# The verdict lives in validation_state / validation_results, which must be
+# asserted explicitly.
+#
+# signingCredential.untrusted is the one expected failure: the dev C2PA CA is not
+# in c2patool's trust list, and it does not by itself make the state Invalid.
+# Every other failure — a claim signature that does not verify, a hard binding
+# that does not match the bytes — is a defect.
+_C2PA_EXPECTED_FAILURES = {"signingCredential.untrusted"}
+
+
 def _run_c2patool(pdf_path):
     binary = _ensure_c2patool_binary()
     completed = subprocess.run(
@@ -176,6 +193,41 @@ def _run_c2patool(pdf_path):
         raise AssertionError(
             f"c2patool failed for {pdf_path.name}\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
         )
+
+    try:
+        report = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise AssertionError(
+            f"c2patool produced no JSON report for {pdf_path.name}: {exc}\nstdout:\n{completed.stdout}"
+        )
+
+    unexpected = [
+        f"{entry.get('code')} ({entry.get('explanation')}) at {entry.get('url')}"
+        for scope in _c2pa_validation_scopes(report)
+        for entry in scope.get("failure", [])
+        if entry.get("code") not in _C2PA_EXPECTED_FAILURES
+    ]
+    state = report.get("validation_state")
+    # Signed contracts included: provenance is re-anchored over the signature
+    # (ADR-26), so a signed artifact validates like any other and a dataHash
+    # mismatch on one is a regression, not an expected state.
+    if unexpected or state != "Valid":
+        raise AssertionError(
+            f"c2patool reports validation_state={state!r} for {pdf_path.name}; "
+            f"unexpected failures:\n  " + "\n  ".join(unexpected or ["(none)"])
+        )
+
+
+def _c2pa_validation_scopes(report):
+    """Yield every validation_results scope: the active manifest and each ingredient."""
+    results = report.get("validation_results", {})
+    active = results.get("activeManifest")
+    if active:
+        yield active
+    for delta in results.get("ingredientDeltas", []):
+        deltas = delta.get("validationDeltas")
+        if deltas:
+            yield deltas
 
 
 def _run_verapdf(pdf_path):
@@ -1401,6 +1453,76 @@ def step_active_hash_data_matches_amended_pdf(context):
     _assert_active_hash_data_matches(context.amended_pdf)
 
 
+@when('I append a "{status}" lifecycle credential to the "{stage}" PDF through /render/amendment')
+def step_append_lifecycle_credential(context, status, stage):
+    """The update the DCS appends for a state reached after signing: the embedded
+    payload unchanged, and a lifecycle credential naming the state."""
+    pdf = _get_stage_pdf(context, stage)
+    payload = _extract_embedded_stream_by_filespec_name(pdf, "contract.jsonld").decode("utf-8")
+    body, content_type = _build_multipart_body(pdf, payload)
+    vc = json.dumps({"credentialSubject": {"status": status}}).encode("utf-8")
+    boundary = b"dcs-pdf-amendment-boundary"
+    body = body[: -len(b"--" + boundary + b"--\r\n")] + (
+        b"--" + boundary + b"\r\n"
+        b'Content-Disposition: form-data; name="vc"; filename="contract-lifecycle-vc.json"\r\n'
+        b"Content-Type: application/json\r\n\r\n" + vc + b"\r\n"
+        b"--" + boundary + b"--\r\n"
+    )
+    _request(context, "POST", "/render/amendment", body, content_type)
+    assert context.last_response["status"] == 200, (
+        f"lifecycle append failed (HTTP {context.last_response['status']}): {context.last_response['body'][:300]}"
+    )
+    context.lifecycle_pdf = context.last_response["body"]
+    _save_artifact(context, context.lifecycle_pdf, "_lifecycle")
+
+
+@then('the "{stage}" PDF preserves the "{prefix_stage}" PDF bytes as a prefix')
+def step_stage_preserves_prefix(context, stage, prefix_stage):
+    assert _get_stage_pdf(context, stage).startswith(_get_stage_pdf(context, prefix_stage)), (
+        f"the {stage} PDF rewrote bytes of the {prefix_stage} PDF"
+    )
+
+
+@then('the PAdES signature of the "{stage}" PDF is intact and valid')
+def step_stage_pades_intact(context, stage):
+    pdf = _get_stage_pdf(context, stage)
+    _validate_pades_signatures(pdf)
+    reader = PdfFileReader(BytesIO(pdf))
+    signer = _get_test_signer()
+    vc = ValidationContext(trust_roots=[signer.signing_cert], allow_fetching=False)
+    for embedded_sig in reader.embedded_signatures:
+        status = validate_pdf_signature(embedded_sig, signer_validation_context=vc)
+        assert status.intact and status.valid, f"signature not intact after the append: {status}"
+        print(f"pyHanko: {embedded_sig.field_name} intact, valid, coverage {status.coverage}, "
+              f"modification level {status.modification_level}")
+
+
+@then('the active manifest c2pa.hash.data hash matches the "{stage}" PDF bytes')
+def step_active_hash_data_matches_stage(context, stage):
+    _assert_active_hash_data_matches(_get_stage_pdf(context, stage))
+
+
+@then('the "{stage}" PDF verifies through /verify with match true')
+def step_stage_verifies(context, stage):
+    _request(context, "POST", "/verify", _get_stage_pdf(context, stage), "application/pdf")
+    assert context.last_response["status"] == 200, (
+        f"verify of {stage} PDF failed (HTTP {context.last_response['status']}): "
+        f"{context.last_response['body'][:300]}"
+    )
+    body = json.loads(context.last_response["body"].decode("utf-8"))
+    assert body.get("match") is True and body.get("c2pa_signature_valid") is True, body
+
+
+@then('the C2PA chain of the "{stage}" PDF ends with lifecycle status "{status}"')
+def step_chain_ends_with_status(context, stage, status):
+    _request(context, "POST", "/manifest/chain", _get_stage_pdf(context, stage), "application/pdf")
+    assert context.last_response["status"] == 200, context.last_response["body"][:300]
+    chain = json.loads(context.last_response["body"].decode("utf-8"))
+    statuses = [(entry.get("lifecycle") or {}).get("status") for entry in chain]
+    statuses = [s for s in statuses if s]
+    assert statuses and statuses[-1] == status, f"chain statuses {statuses}, want the last to be {status!r}"
+
+
 @then("the active manifest claim references c2pa.hash.data in the amended PDF")
 def step_active_claim_refs_hash_data_amended(context):
     _assert_active_claim_references_hash_data(context.amended_pdf)
@@ -1600,8 +1722,21 @@ _PDF_STAGE_ATTR = {
     "signed": "signed_pdf",
     "amended": "amended_pdf",
     "re-signed": "re_signed_pdf",
+    "re-anchored": "reanchored_pdf",
+    "lifecycle": "lifecycle_pdf",
     "final": "final_pdf",
 }
+
+
+@when('I re-anchor the "{stage}" PDF through /render/reanchor')
+def step_reanchor_stage_pdf(context, stage):
+    """Append the provenance-only manifest that covers a signature (ADR-26)."""
+    _request(context, "POST", "/render/reanchor", _get_stage_pdf(context, stage), "application/pdf")
+    assert context.last_response["status"] == 200, (
+        f"re-anchor of {stage} PDF failed (HTTP {context.last_response['status']}): "
+        f"{context.last_response['body'][:300]}"
+    )
+    context.reanchored_pdf = context.last_response["body"]
 
 
 def _get_stage_pdf(context, stage):

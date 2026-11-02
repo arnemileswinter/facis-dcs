@@ -1,12 +1,15 @@
 tmp
 __debug_bin*
 
+/temp/
+
 .idea
 .vscode
 .DS_Store
 .claude/
 .codex/
 node_modules
+__pycache__/
 backend/gen
 
 frontend/node_modules
@@ -35,6 +38,7 @@ testWallet/.venv
 testWallet/dcs_wallet/__pycache__/
 
 # BDD test build artifacts
+tests/integration/artifacts/generated/
 bdd-executor
 tests/bdd/.coverage*
 tests/bdd/.tmp
@@ -51,5 +55,6 @@ tests/bdd/.coverage.*
 .coverage.*
 .claude/*
 docs/anforderung.md
-/AGENTS.md
 testWallet/keys/signing/
+.agents/
+/AGENTS.md

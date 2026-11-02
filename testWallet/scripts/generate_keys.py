@@ -17,9 +17,15 @@ from pathlib import Path
 from typing import Any
 
 WALLET_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = WALLET_ROOT.parent
 sys.path.insert(0, str(WALLET_ROOT))
 
-from dcs_wallet.issuer import DEFAULT_ISSUER_DID, POA_VCT, TRUSTED_ISSUER_DIDS
+import base64
+
+from cryptography.hazmat.primitives import serialization
+
+from dcs_wallet.issuer import POA_VCT
+from dcs_wallet.issuer_pki import issuer_signing_key
 from dcs_wallet.keys import (
     build_trust_json,
     generate_ec_private_jwk,
@@ -28,6 +34,19 @@ from dcs_wallet.keys import (
     public_jwk,
     write_json,
 )
+
+PID_VCT = "urn:dcs:pid:demo:v1"
+
+# The issuers this repository's stacks run, named by the URL each publishes
+# under: the kind/BDD release behind its stripped /issuer prefix, and the dev
+# NodePort. Both are the ORCE credential issuer handed the committed PKI
+# fixture (orce.pkiRootCA.devFixture), which is why one pinned leaf key covers
+# both -- and why a trust document written without them refuses every login the
+# suites perform.
+ISSUER_BASES = [
+    "http://localhost:30181",
+    "http://localhost:18080/issuer",
+]
 
 
 def _read_existing_private_key(path: Path) -> dict[str, Any] | None:
@@ -64,7 +83,17 @@ def _confirm(paths: list[Path], *, regenerate: bool) -> bool:
     return answer in {"y", "yes"}
 
 
-def materialize_keys(*, keys_dir: Path, trust_path: Path, issuer_did: str, regenerate: bool) -> None:
+def _pinned_leaf_key() -> str:
+    """The key a login issuer's leaf must carry: base64 DER SubjectPublicKeyInfo
+    of the signing key the dev and BDD ORCE issuer is handed."""
+    spki = issuer_signing_key().public_key().public_bytes(
+        serialization.Encoding.DER,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    return base64.b64encode(spki).decode()
+
+
+def materialize_keys(*, keys_dir: Path, trust_path: Path, regenerate: bool) -> None:
     issuer_path = keys_dir / "issuer-dev.jwk"
     wallet_path = keys_dir / "wallet.jwk"
 
@@ -78,8 +107,11 @@ def materialize_keys(*, keys_dir: Path, trust_path: Path, issuer_did: str, regen
 
     issuer_public = public_jwk(issuer_private)
     wallet_public = public_jwk(wallet_private)
-    trusted_dids = list(dict.fromkeys([issuer_did, *TRUSTED_ISSUER_DIDS]))
-    trust = build_trust_json(issuer_public=issuer_public, issuer_dids=trusted_dids, vcts=[POA_VCT])
+    trust = build_trust_json(
+        issuer_bases=ISSUER_BASES,
+        leaf_key_der_b64=_pinned_leaf_key(),
+        vcts=[POA_VCT, PID_VCT],
+    )
 
     write_json(issuer_path, issuer_private)
     write_json(keys_dir / "issuer-dev.public.jwk", issuer_public)
@@ -90,9 +122,15 @@ def materialize_keys(*, keys_dir: Path, trust_path: Path, issuer_did: str, regen
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate testWallet keys and trust.dev.json")
-    parser.add_argument("--issuer-did", default=DEFAULT_ISSUER_DID)
     parser.add_argument("--keys-dir", type=Path, default=WALLET_ROOT / "keys")
-    parser.add_argument("--trust-path", type=Path, default=WALLET_ROOT / "trust.dev.json")
+    parser.add_argument(
+        "--trust-path",
+        type=Path,
+        # The file the backend actually loads and the image bakes in
+        # (deployment/docker/Dockerfile, values.yaml oid4vp.trust.dataPath).
+        # Writing beside the wallet instead left the shipped fixture stale.
+        default=REPO_ROOT / "backend/config/oid4vp/trust.dev.json",
+    )
     parser.add_argument("--regenerate", action="store_true", help="replace issuer and wallet private keys")
     parser.add_argument("--yes", action="store_true", help="skip confirmation")
     args = parser.parse_args()
@@ -109,12 +147,12 @@ def main() -> int:
     materialize_keys(
         keys_dir=args.keys_dir,
         trust_path=args.trust_path,
-        issuer_did=args.issuer_did,
         regenerate=args.regenerate,
     )
     print(f"keys: {args.keys_dir}")
     print(f"trust: {args.trust_path}")
-    print(f"issuer: {args.issuer_did}")
+    for base in ISSUER_BASES:
+        print(f"issuer: {base}")
     return 0
 
 

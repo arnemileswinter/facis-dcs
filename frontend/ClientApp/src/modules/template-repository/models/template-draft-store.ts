@@ -1,6 +1,8 @@
-import type { ContractTemplateResponsible } from '@/models/contract-template-responsible'
-import type { DcsBlock, DcsLayoutNode, DcsPlaceholder, OdrlRule } from '@/models/dcs-jsonld'
+import type { TemplateLevel } from '@/models/contract-template/contract-template'
+import type { ContractTemplateResponsible } from '@/models/contract-template/contract-template-responsible'
+import type { DcsBlock, DcsContractDataObject, DcsContractField, DcsLayoutNode, OdrlRule } from '@/models/dcs-jsonld'
 import type { ContractTemplateState } from '@/types/contract-template-state'
+import type { PartyType } from '@/types/party-type'
 import type { MetaData, TemplateTypeValue } from '@template-repository/models/contract-template'
 
 export const TEMPLATE_DATA_VERSIONS = [1] as const
@@ -17,15 +19,24 @@ interface TemplateDraftState {
   blocks: DcsBlock[]
   /** JSON-LD layout tree. */
   layout: DcsLayoutNode[]
-  /** JSON-LD data requirements (replaces semanticConditions as stored state). */
-  contractData: DcsPlaceholder[]
+  /** JSON-LD field declarations referenced by clauses and domain data. */
+  contractFields: DcsContractField[]
+  /** Typed business objects that bind properties to the declared fields. */
+  contractData: DcsContractDataObject[]
   /** JSON-LD ODRL policies (operator constraints). */
   policies: OdrlRule[]
   customMetaData: MetaData[]
+  partyType: PartyType | undefined
+  /** DCS-FR-TR-10 searchable metadata. */
+  jurisdiction: string
+  industry: string
+  /** DCS-FR-TR-02, DCS-FR-TR-23 template structure. */
+  templateLevel: TemplateLevel
+  requiredTemplates: string[]
   templateType: TemplateTypeValue
   state: ContractTemplateState | undefined
-  document_number: string | null
   version: number | null
+  created_at: string | null
   updated_at: string | null
   created_by: string
   responsible: ContractTemplateResponsible | null

@@ -3,24 +3,28 @@ package pg
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"digital-contracting-service/internal/base/ipfs"
+	"digital-contracting-service/internal/base/contractreadpolicy"
+
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 
 	"digital-contracting-service/internal/base/datatype"
 
 	"github.com/jmoiron/sqlx"
 
+	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/signingmanagement/db"
 )
 
 type PostgresContractRepo struct {
-	IPFSClient *ipfs.APIClient
-	PDFCore    *pdfcore.Client
+	Artifacts *artifactstore.Store
+	PDFCore   *pdfcore.Client
 }
 
 // ReadDataByDID reads the contract regardless of lifecycle state — like
@@ -50,17 +54,20 @@ func (r *PostgresContractRepo) ReadDataByDID(ctx context.Context, tx *sqlx.Tx, d
 func (r *PostgresContractRepo) ReadAllMetaData(ctx context.Context, tx *sqlx.Tx, pagination datatype.Pagination) ([]db.ContractMetadata, error) {
 	// ACTIVE belongs here too: signing completion auto-deploys the contract
 	// (SIGNED -> ACTIVE), so a fully-signed contract that the Signature Compliance
-	// Viewer must still inspect lives in ACTIVE, not SIGNED.
+	// Viewer must still inspect lives in ACTIVE, not SIGNED. REVOKED stays
+	// listed as well (DCS-FR-SM-22): the signer dashboard and the compliance
+	// viewer must show a revoked signing status, not hide the contract.
 	query := `
         SELECT did, state, name, description, created_by, created_at, updated_at, contract_version, start_date, exp_date, exp_policy, exp_notice_period, responsible
         FROM contracts
-        WHERE state IN ('APPROVED', 'SIGNED', 'ACTIVE')
+        WHERE state IN ('APPROVED', 'SIGNED', 'ACTIVE', 'REVOKED')
     `
 
 	var params []any
+	query += " AND " + contractreadpolicy.SQL(ctx, "contracts.did", &params)
 	if pagination.Limit > 0 {
 		offset := (pagination.Offset - 1) * pagination.Limit
-		query += ` ORDER BY created_at DESC LIMIT $1 OFFSET $2`
+		query += fmt.Sprintf(" ORDER BY created_at DESC, did LIMIT $%d OFFSET $%d", len(params)+1, len(params)+2)
 		params = append(params, pagination.Limit, offset)
 	}
 
@@ -93,16 +100,8 @@ func (r *PostgresContractRepo) ReadProcessDataByDID(ctx context.Context, tx *sql
 	return &processData, nil
 }
 
-// UpdateState is unconditional: the caller (command/apply.go) already
-// validated the transition against contractstate.Transitions before calling
-// this, so no hardcoded SQL state guard is needed here anymore.
-func (r *PostgresContractRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error {
-	statement := `
-        UPDATE contracts SET state = $2
-        WHERE did = $1
-    `
-	_, err := tx.ExecContext(ctx, statement, did, state)
-	return err
+func (r *PostgresContractRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did, from, to string) error {
+	return cwepg.UpdateContractState(ctx, tx, did, from, to)
 }
 
 // UpdateContractData persists the sealed contract document the first
@@ -123,10 +122,10 @@ func (r *PostgresContractRepo) UpdateContractData(ctx context.Context, tx *sqlx.
 func (r *PostgresContractRepo) CreateSignature(ctx context.Context, tx *sqlx.Tx, signature db.ContractSignature) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO contract_signatures
-			(contract_did, signer_did, credential_type, signature_bytes, status, key_version,
+			(contract_did, signer_did, credential_type, signature_bytes, status,
 			 ipfs_cid, ceremony_id, pdf_hash, content_hash, field_name, jades_signature)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-		signature.ContractDID, signature.SignerDID, signature.CredentialType, signature.SignatureBytes, signature.Status, signature.KeyVersion,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		signature.ContractDID, signature.SignerDID, signature.CredentialType, signature.SignatureBytes, signature.Status,
 		signature.IpfsCID, signature.CeremonyID, signature.PDFHash, signature.ContentHash, signature.FieldName, signature.JAdESSignature,
 	)
 	if err != nil {
@@ -148,7 +147,7 @@ func (r *PostgresContractRepo) SetSignedPDF(ctx context.Context, tx *sqlx.Tx, di
 	// stamping (no fresh renderer version) — keep the stored one.
 	_, err := tx.ExecContext(ctx, `
 		UPDATE contracts
-		   SET pdf_ipfs_cid = $2, pdf_renderer_version = COALESCE(NULLIF($3, ''), pdf_renderer_version), pdf_c2pa_state = $4, pdf_payload_hash = $5
+		   SET pdf_ipfs_cid = $2, pdf_renderer_version = COALESCE(NULLIF($3, ''), pdf_renderer_version), pdf_c2pa_state = $4, pdf_payload_hash = $5, pdf_signed = true
 		 WHERE did = $1`,
 		did, ipfsCID, rendererVersion, c2paState, payloadHash,
 	)
@@ -156,22 +155,6 @@ func (r *PostgresContractRepo) SetSignedPDF(ctx context.Context, tx *sqlx.Tx, di
 		return fmt.Errorf("could not set signed PDF for %s: %w", did, err)
 	}
 	return nil
-}
-
-// ActiveKeyVersion returns the currently active HSM key version for a purpose
-// label. A label with no row yet is on its initial (un-rotated) version 1.
-func (r *PostgresContractRepo) ActiveKeyVersion(ctx context.Context, tx *sqlx.Tx, label string) (int, error) {
-	var version int
-	err := tx.QueryRowContext(ctx,
-		`SELECT active_version FROM pki_active_key_version WHERE label = $1`, label,
-	).Scan(&version)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 1, nil
-	}
-	if err != nil {
-		return 0, fmt.Errorf("read active key version for %q: %w", label, err)
-	}
-	return version, nil
 }
 
 func (r *PostgresContractRepo) RevokeSignature(ctx context.Context, tx *sqlx.Tx, did string, signerDID string) error {
@@ -195,11 +178,12 @@ func (r *PostgresContractRepo) RevokeSignature(ctx context.Context, tx *sqlx.Tx,
 	return nil
 }
 
-// ReadLatestEnvelopeByContractDID retrieves the most recent non-revoked signature record for did.
+// ReadLatestEnvelopeByContractDID retrieves the most recent signature record
+// for did, of any status and any field.
 func (r *PostgresContractRepo) ReadLatestEnvelopeByContractDID(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractSignatureEnvelope, error) {
 	var signature db.ContractSignature
 	err := tx.GetContext(ctx, &signature,
-		`SELECT contract_did, signer_did, credential_type, status, signed_at, revoked_at, ipfs_cid, key_version
+		`SELECT contract_did, signer_did, credential_type, status, signed_at, revoked_at, ipfs_cid
 		   FROM contract_signatures
 		  WHERE contract_did = $1
 		  ORDER BY created_at DESC
@@ -215,7 +199,6 @@ func (r *PostgresContractRepo) ReadLatestEnvelopeByContractDID(ctx context.Conte
 		CredentialType: signature.CredentialType,
 		Status:         signature.Status,
 		IpfsCID:        signature.IpfsCID,
-		KeyVersion:     signature.KeyVersion,
 	}
 	if signature.SignedAt != nil {
 		t := signature.SignedAt.Format(time.RFC3339)
@@ -229,19 +212,11 @@ func (r *PostgresContractRepo) ReadLatestEnvelopeByContractDID(ctx context.Conte
 }
 
 func (r *PostgresContractRepo) ReadAllSigningTasks(ctx context.Context, tx *sqlx.Tx) ([]db.ContractSigningTask, error) {
-
 	var tasks []db.ContractSigningTask
-	err := tx.SelectContext(ctx, &tasks,
-		`SELECT cs.contract_did, c.contract_version, cs.signer_did, cs.created_at
-		   FROM contract_signatures cs
-		   JOIN contracts c ON c.did = cs.contract_did
-		  WHERE c.state = 'APPROVED' AND cs.status = 'PENDING'
-		  ORDER BY cs.created_at DESC`,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return tasks, nil
+	var params []any
+	query := `SELECT cs.contract_did, c.contract_version, cs.status AS state, cs.signer_did, cs.created_at FROM contract_signatures cs JOIN contracts c ON c.did = cs.contract_did WHERE c.state = 'APPROVED' AND cs.status = 'PENDING' AND ` + contractreadpolicy.SQL(ctx, "c.did", &params) + " ORDER BY cs.created_at DESC"
+	err := tx.SelectContext(ctx, &tasks, query, params...)
+	return tasks, err
 }
 
 func (r *PostgresContractRepo) CountSignatureForContractDID(ctx context.Context, tx *sqlx.Tx, did string) (int, error) {
@@ -264,11 +239,7 @@ func (r *PostgresContractRepo) FetchContractPDFBytes(ctx context.Context, tx *sq
 	if cidStr == "" {
 		return nil, nil
 	}
-	result, err := r.IPFSClient.FetchFile(cidStr)
-	if err != nil {
-		return nil, err
-	}
-	return result.Data, nil
+	return r.Artifacts.Get(ctx, artifactstore.ContractScope(did), cidStr)
 }
 
 func (r *PostgresContractRepo) CollectValidationFindings(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error) {
@@ -309,7 +280,13 @@ func (r *PostgresContractRepo) CollectValidationFindings(ctx context.Context, tx
 	}
 
 	pdfBytes, fetchErr := r.FetchContractPDFBytes(ctx, tx, did)
-	if fetchErr != nil {
+	if artifactstore.IsTampered(fetchErr) {
+		// The embedded signing evidence lives inside the stored PDF, so bytes
+		// that fail authenticated decryption invalidate the evidence itself —
+		// report that, not a fetch problem.
+		findings = append(findings,
+			"Embedded signing evidence is invalid: the stored contract PDF failed authenticated decryption, so it was altered or substituted at rest")
+	} else if fetchErr != nil {
 		findings = append(findings, fmt.Sprintf("Could not fetch contract PDF for integrity check: %v", fetchErr))
 	} else if len(pdfBytes) == 0 {
 		findings = append(findings, "No contract PDF available for MR/HR integrity check")
@@ -333,7 +310,7 @@ func (r *PostgresContractRepo) CollectValidationFindings(ctx context.Context, tx
 func (r *PostgresContractRepo) LoadSignatures(ctx context.Context, tx *sqlx.Tx, did string) ([]db.SignatureRecord, error) {
 	var records []db.SignatureRecord
 	err := tx.SelectContext(ctx, &records,
-		`SELECT signer_did, credential_type, status, signed_at, revoked_at, cert_revoked_at, field_name, jades_signature
+		`SELECT signer_did, credential_type, status, signed_at, revoked_at, cert_revoked_at, field_name, jades_signature, ceremony_id, ipfs_cid, pdf_hash
 		   FROM contract_signatures
 		  WHERE contract_did = $1
 		  ORDER BY created_at`, did,
@@ -342,6 +319,27 @@ func (r *PostgresContractRepo) LoadSignatures(ctx context.Context, tx *sqlx.Tx, 
 		return nil, err
 	}
 	return records, nil
+}
+
+func (r *PostgresContractRepo) ReadPeerSignatureEvidence(ctx context.Context, tx *sqlx.Tx, did string) (json.RawMessage, error) {
+	var evidence []byte
+	err := tx.GetContext(ctx, &evidence,
+		`SELECT poa_evidence FROM contract_sync_signatures WHERE did = $1 AND poa_evidence IS NOT NULL`, did)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return evidence, nil
+}
+
+func (r *PostgresContractRepo) ReadPeerSigners(ctx context.Context, tx *sqlx.Tx, did string) ([]db.PeerSigner, error) {
+	var signers []db.PeerSigner
+	if err := tx.SelectContext(ctx, &signers, `SELECT from_peer_did, received_at FROM contract_sync_signatures WHERE did = $1`, did); err != nil {
+		return nil, fmt.Errorf("read the peer signers of %s: %w", did, err)
+	}
+	return signers, nil
 }
 
 func (r *PostgresContractRepo) CollectComplianceFindings(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error) {

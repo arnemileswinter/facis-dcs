@@ -7,7 +7,6 @@ package ipfs
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,28 +18,42 @@ import (
 )
 
 type APIClient struct {
-	baseURL    string
+	// mfsBaseURL is the Kubo RPC API. Artifacts are stored and read through it
+	// directly: the XFSC ipfs-document-manager that used to sit in front of it
+	// answered every read by listing the whole pinset under Kubo's pinner lock,
+	// and gave an add and its pin one shared 5s deadline (ADR-36).
 	mfsBaseURL string
 	client     *http.Client
-	// fetchAttempts and fetchBackoff bound the read-after-write retry against
-	// the tenant store, which is eventually consistent: a CID returned by
-	// CreateFile is not always immediately resolvable through the tenant
-	// gateway (a subsequent GET can transiently return 404/5xx until the
-	// DataIdentifier record and its blocks propagate).
-	fetchAttempts int
-	fetchBackoff  time.Duration
 }
 
-func NewClient(baseURL string, mfsBaseURL string) *APIClient {
+func NewClient(mfsBaseURL string) *APIClient {
 	return &APIClient{
-		baseURL:    baseURL,
 		mfsBaseURL: mfsBaseURL,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 		},
-		fetchAttempts: 8,
-		fetchBackoff:  500 * time.Millisecond,
 	}
+}
+
+// WithBearerToken makes every Kubo RPC call send the token as a bearer token.
+// Kubo checks it when its API.Authorizations names it (DCS-NFR-SF-02). An
+// empty token sends no Authorization header.
+func (c *APIClient) WithBearerToken(token string) *APIClient {
+	if token != "" {
+		c.client.Transport = bearerTransport{token: token, next: http.DefaultTransport}
+	}
+	return c
+}
+
+type bearerTransport struct {
+	token string
+	next  http.RoundTripper
+}
+
+func (t bearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("Authorization", "Bearer "+t.token)
+	return t.next.RoundTrip(r)
 }
 
 type IPFSResult struct {
@@ -52,203 +65,31 @@ type IPFSResult struct {
 }
 
 func (c *APIClient) CreateFile(ctx context.Context, data any) (*IPFSResult, error) {
-	jsonData, err := json.Marshal(data)
+	body, err := json.Marshal(data)
 	if err != nil {
 		return nil, fmt.Errorf("marshal data: %w", err)
 	}
-
-	if c.baseURL == "" {
-		return c.createKuboFile(ctx, jsonData)
-	}
-
-	body := jsonData
+	// Raw bytes are stored verbatim: an artifact handed over as []byte is
+	// already its final on-disk form (a PDF, a ciphertext blob), and marshalling
+	// it would store a base64 JSON string a third larger than the bytes it
+	// wraps. Everything else is a value that has no form until it is encoded.
 	if raw, ok := data.([]byte); ok {
 		body = raw
 	}
-
-	url := c.baseURL + "/api/ipfs/create"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("do request: %w", err)
-	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			log.Println("could not close response body")
-		}
-	}(resp.Body)
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, body)
-	}
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
-	}
-
-	var result IPFSResult
-	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
-	}
-
-	if c.mfsBaseURL != "" {
-		err := c.copyToMFS(ctx, c.mfsBaseURL, result.Identifier.Value, result.Identifier.Value)
-		if err != nil {
-			return &result, err
-		}
-	}
-
-	return &result, nil
+	return c.createKuboFile(ctx, body)
 }
 
 func (c *APIClient) FetchFile(cid string) (*IPFSResult, error) {
-	if c.baseURL == "" {
-		return c.fetchKuboFile(cid)
-	}
-
-	// Fast path: one tenant attempt, then the durable pinned Kubo copy. Both are
-	// written synchronously by CreateFile (copyToMFS), so the common case — the
-	// tenant document-manager dropped its DataIdentifier mapping under load —
-	// resolves in two quick calls. Doing the multi-second tenant retry first
-	// would compound over a long audit-chain walk into a request-deadline
-	// timeout (DCS-FR-CSA: the tamper-proof trail read must not 404 or hang on a
-	// link the tenant index transiently forgot; the Kubo copy is identical and
-	// the hash chain still verifies).
-	if body, status, err := c.getOnce(fmt.Sprintf("%s/api/ipfs/%s", c.baseURL, cid)); err == nil && status == http.StatusOK {
-		return decodeTenantBody(body)
-	}
-	if c.mfsBaseURL != "" {
-		if kubo, kerr := c.fetchKuboFile(cid); kerr == nil {
-			return kubo, nil
-		}
-	}
-
-	// Neither resolved on the first try — treat as genuine read-after-write lag
-	// and retry the tenant path with backoff, falling back to Kubo once more.
-	body, err := c.fetchTenantFileWithRetry(cid)
-	if err != nil {
-		if c.mfsBaseURL != "" {
-			if kubo, kerr := c.fetchKuboFile(cid); kerr == nil {
-				return kubo, nil
-			}
-		}
-		return nil, err
-	}
-	return decodeTenantBody(body)
-}
-
-// decodeTenantBody unwraps a tenant-gateway response into an IPFSResult,
-// decoding the base64-in-JSON-string data payload the tenant store wraps.
-func decodeTenantBody(body []byte) (*IPFSResult, error) {
-	var result IPFSResult
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
-	}
-
-	if len(result.Data) > 0 {
-		var dataStr string
-		if err := json.Unmarshal(result.Data, &dataStr); err != nil {
-			return nil, fmt.Errorf("decode ipfs data json string: %w", err)
-		}
-		if dataStr == "" {
-			return nil, fmt.Errorf("decode ipfs data: empty payload")
-		}
-		decoded, err := base64.StdEncoding.DecodeString(dataStr)
-		if err != nil {
-			return nil, fmt.Errorf("decode ipfs data base64: %w", err)
-		}
-		result.Data = json.RawMessage(decoded)
-	}
-
-	return &result, nil
-}
-
-// fetchTenantFileWithRetry GETs a CID from the tenant gateway, retrying on
-// transient not-yet-resolvable responses (404/5xx) with a bounded backoff.
-// This absorbs the tenant store's read-after-write lag so a CID that CreateFile
-// has just returned is reliably retrievable by a subsequent request.
-func (c *APIClient) fetchTenantFileWithRetry(cid string) ([]byte, error) {
-	url := fmt.Sprintf("%s/api/ipfs/%s", c.baseURL, cid)
-
-	attempts := c.fetchAttempts
-	if attempts < 1 {
-		attempts = 1
-	}
-
-	var lastErr error
-	for attempt := 0; attempt < attempts; attempt++ {
-		if attempt > 0 && c.fetchBackoff > 0 {
-			time.Sleep(c.fetchBackoff)
-		}
-
-		body, status, err := c.getOnce(url)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if status == http.StatusOK {
-			return body, nil
-		}
-		lastErr = fmt.Errorf("unexpected status %d: %s", status, body)
-		// Only the transient not-yet-resolvable statuses are worth retrying;
-		// any other 4xx is a definitive answer.
-		if status != http.StatusNotFound && status < 500 {
-			return nil, lastErr
-		}
-	}
-	return nil, lastErr
-}
-
-func (c *APIClient) getOnce(url string) ([]byte, int, error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer func(Body io.ReadCloser) {
-		if err := Body.Close(); err != nil {
-			log.Println("could not close response body")
-		}
-	}(resp.Body)
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, resp.StatusCode, err
-	}
-	return body, resp.StatusCode, nil
+	return c.fetchKuboFile(cid)
 }
 
 func (c *APIClient) DeleteFile(cid string) error {
-	if c.baseURL == "" {
-		return c.deleteKuboFile(cid)
-	}
-
-	url := fmt.Sprintf("%s/api/ipfs/%s", c.baseURL, cid)
-
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodDelete, url, nil)
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			log.Println("could not close response body")
-		}
-	}(resp.Body)
-
-	return nil
-
+	return c.deleteKuboFile(cid)
 }
 
 func (c *APIClient) createKuboFile(ctx context.Context, data []byte) (*IPFSResult, error) {
 	if c.mfsBaseURL == "" {
-		return nil, fmt.Errorf("IPFS_MFS_BASE_URL is required when IPFS_TENANT_BASE_URL is not configured")
+		return nil, fmt.Errorf("IPFS_MFS_BASE_URL is required")
 	}
 
 	var body bytes.Buffer
@@ -316,10 +157,17 @@ func (c *APIClient) createKuboFile(ctx context.Context, data []byte) (*IPFSResul
 
 func (c *APIClient) fetchKuboFile(cid string) (*IPFSResult, error) {
 	if c.mfsBaseURL == "" {
-		return nil, fmt.Errorf("IPFS_MFS_BASE_URL is required when IPFS_TENANT_BASE_URL is not configured")
+		return nil, fmt.Errorf("IPFS_MFS_BASE_URL is required")
 	}
 
-	url := fmt.Sprintf("%s/api/v0/cat?arg=%s", c.mfsBaseURL, cid)
+	// offline=true because every CID this service reads is one it stored
+	// itself. Without it a block the node does not hold sends kubo to the
+	// network to look for it, and a node configured with no routing and no
+	// peers has nowhere to look — so instead of answering "missing" it waits
+	// until the caller's own timeout expires. An audit chain walk that meets
+	// one dangling CID then spends the whole request budget on it. Offline,
+	// a present block reads exactly as before and a missing one fails at once.
+	url := fmt.Sprintf("%s/api/v0/cat?arg=%s&offline=true", c.mfsBaseURL, cid)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create Kubo cat request: %w", err)
@@ -346,20 +194,14 @@ func (c *APIClient) fetchKuboFile(cid string) (*IPFSResult, error) {
 		return nil, fmt.Errorf("read Kubo cat response: %w", err)
 	}
 
-	var dataStr string
-	var resultData []byte
-	if json.Unmarshal(body, &dataStr) == nil {
-		decoded, err := base64.StdEncoding.DecodeString(dataStr)
-		if err != nil {
-			return nil, fmt.Errorf("base64 decode Kubo file data: %w", err)
-		}
-		resultData = decoded
-	} else {
-		resultData = body
-	}
-
+	// The block is returned as stored. Nothing unwraps it: CreateFile writes a
+	// []byte artifact verbatim and everything else as the JSON it marshals to,
+	// so there is no envelope here to strip. The base64 decode that used to sit
+	// in this spot belonged to the tenant manager's response format, and once
+	// that reader was gone it could only misfire -- a payload that happened to
+	// marshal to a JSON string would have been base64-decoded into garbage.
 	result := &IPFSResult{
-		Data: resultData,
+		Data: body,
 	}
 	result.Identifier.Format = "CID"
 	result.Identifier.Value = cid
@@ -369,7 +211,7 @@ func (c *APIClient) fetchKuboFile(cid string) (*IPFSResult, error) {
 
 func (c *APIClient) deleteKuboFile(cid string) error {
 	if c.mfsBaseURL == "" {
-		return fmt.Errorf("IPFS_MFS_BASE_URL is required when IPFS_TENANT_BASE_URL is not configured")
+		return fmt.Errorf("IPFS_MFS_BASE_URL is required")
 	}
 
 	url := fmt.Sprintf("%s/api/v0/pin/rm?arg=%s", c.mfsBaseURL, cid)

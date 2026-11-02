@@ -3,6 +3,7 @@ package validation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,6 +27,11 @@ type ContractContentPolicy struct {
 	// into the Semantic Hub's canonical SHACL shapes / SLA validation
 	// profile (the default disk policy document sets both; ad-hoc/test
 	// policies that want to exercise only ODRL evaluation leave them unset).
+	// "Enforce" here means "include in this audit's findings", not "block":
+	// what a caller does with a finding is the caller's decision — the
+	// read-only audit-trail query reports them, the workflow gate blocks on
+	// the ones it is the enforcement point for (workflowgate.resultFromLocal).
+	// The blocking SHACL gate is RequireHubConformance, elsewhere.
 	// The hub is the only source for their content — there is no
 	// alternative/inline shape format anymore (ADR-8, ADR-9).
 	EnforceCanonicalShapes   bool `json:"enforceCanonicalShapes"`
@@ -59,11 +65,39 @@ func AuditContractContent(ctx context.Context, contractDocument any, policyDocum
 	if err != nil {
 		return nil, err
 	}
-	// The domain-field ontology backs value normalization during profile
-	// audits (compactEntityRole); loading it here hard-fails the audit when
-	// the hub cannot serve it.
+	// This load is a hub-liveness probe, nothing more: it hard-fails the audit
+	// when the hub cannot serve the domain-field ontology. The parsed ontology
+	// is NOT consulted on this path. (An earlier comment here named a value-
+	// normalization function `compactEntityRole` as the reason; no such
+	// function exists anywhere in the repository, and the value normalization
+	// it implies was never written — which is why facis.sla.basic.v1.yaml has
+	// to list both the bare `provider` and the full taxonomy IRI in one
+	// `values` list.)
 	if _, err := requireDomainOntology(ctx); err != nil {
 		return nil, err
+	}
+	if policy.EnforceValidationProfile {
+		pinnedProfile := pinnedHubProfileVersion(contract)
+		if pinnedProfile <= 0 {
+			if _, hasBundle := contract["dcs:effectiveShapes"]; hasBundle {
+				return nil, errors.New("immutable semantic bundle is missing dcterms:conformsTo")
+			}
+		} else {
+			bundleSource, ok := source.(EffectiveBundleShapeSource)
+			if !ok {
+				return nil, errors.New("shape source cannot resolve immutable validation profile")
+			}
+			profileContent, loadErr := bundleSource.ProfileAt(ctx, pinnedProfile)
+			if loadErr != nil {
+				return nil, fmt.Errorf("load pinned validation profile v%d: %w", pinnedProfile, loadErr)
+			}
+			hubProfile, parseErr := LoadValidationProfileYAML([]byte(profileContent))
+			if parseErr != nil {
+				return nil, fmt.Errorf("parse pinned validation profile v%d: %w", pinnedProfile, parseErr)
+			}
+			policy.profiles = []ValidationProfile{hubProfile}
+			policy.ProfileVersion = pinnedProfile
+		}
 	}
 
 	findings := []PolicyFinding{}
@@ -73,7 +107,7 @@ func AuditContractContent(ctx context.Context, contractDocument any, policyDocum
 			return nil, fmt.Errorf("SHACL validation: %w", err)
 		}
 		policy.ShapesVersion = shapesVersion
-		findings = append(findings, shaclFindings...)
+		findings = append(findings, tagFindingSource(shaclFindings, SourceHubShapes)...)
 	}
 	root, err := expandForAudit(ctx, contract, source)
 	if err != nil {
@@ -81,13 +115,13 @@ func AuditContractContent(ctx context.Context, contractDocument any, policyDocum
 	}
 
 	for _, profile := range policy.profiles {
-		findings = append(findings, auditContractValidationProfile(contract, root, profile)...)
+		findings = append(findings, tagFindingSource(auditContractValidationProfile(contract, root, profile), SourceValidationProfile)...)
 	}
 	embeddedFindings, err := auditExpandedODRLPolicies(ctx, root, expandedODRLPolicyRules(root))
 	if err != nil {
 		return nil, err
 	}
-	findings = append(findings, embeddedFindings...)
+	findings = append(findings, tagFindingSource(embeddedFindings, SourceContractODRL)...)
 	externalRules, err := expandExternalODRLRules(ctx, externalODRLPolicies(policy.Policies), source)
 	if err != nil {
 		return nil, err
@@ -96,13 +130,20 @@ func AuditContractContent(ctx context.Context, contractDocument any, policyDocum
 	if err != nil {
 		return nil, err
 	}
-	findings = append(findings, externalFindings...)
+	findings = append(findings, tagFindingSource(externalFindings, SourcePolicySetODRL)...)
 
 	for i := range findings {
 		findings[i].PolicySetID = policy.PolicySetID
 		findings[i].PolicyVersion = policy.Version
 	}
 	return findings, nil
+}
+
+func tagFindingSource(findings []PolicyFinding, source string) []PolicyFinding {
+	for i := range findings {
+		findings[i].Source = source
+	}
+	return findings
 }
 
 type ContractPolicySatisfactionError struct {
@@ -154,6 +195,7 @@ func ValidateContractPolicySatisfaction(contractDocument any, metadata ContractC
 	blocking := make([]PolicyFinding, 0)
 	for _, finding := range findings {
 		if isBlockingContractPolicyFinding(finding) {
+			finding.Source = SourceContractODRL
 			finding.PolicySetID = defaultContractPolicySetID
 			finding.PolicyVersion = metadata.PolicyVersion
 			if strings.TrimSpace(finding.PolicyVersion) == "" {
@@ -208,12 +250,10 @@ func normalizeContractContentPolicy(ctx context.Context, raw any, metadata Contr
 		}
 	}
 
-	// EnforceCanonicalShapes drives validateAgainstHubShapes (called from
-	// AuditContractContent, where the document being audited — needed for
-	// ADR-8 version pinning — is in scope). Here, only the validation
-	// profile: content always comes from the hub (ADR-8/ADR-9 — no disk
-	// fallback), the currently-active version (profile pinning is not part
-	// of the ShapeSource contract, unlike shapes).
+	// At this normalization stage the contract is not yet in scope, so load the
+	// hub's active profile as the provisional policy. AuditContractContent
+	// replaces it with the document's pinned ProfileAt version when an immutable
+	// effective bundle is present. There is no disk or executor-side fallback.
 	if policy.EnforceValidationProfile {
 		profileContent, profileVersion, err := activeShapeSource.ActiveProfile(ctx)
 		if err != nil {
@@ -241,7 +281,7 @@ func loadDefaultContractContentPolicyDocument() (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	bytes, err := os.ReadFile(path)
+	bytes, err := os.ReadFile(path) // #nosec G304 -- path comes from operator configuration (environment), not from a request
 	if err != nil {
 		return nil, fmt.Errorf("read contract content policy file %q: %w", path, err)
 	}
@@ -307,7 +347,7 @@ func auditContractValidationRule(contract map[string]any, rule ValidationRule) [
 			}
 		}
 		if len(findings) == 0 {
-			return []PolicyFinding{validationRuleFinding(rule, strings.Join(rule.RequiredFields, ", "), "info", issueMessage(rule))}
+			return []PolicyFinding{validationRuleFinding(rule, strings.Join(rule.RequiredFields, ", "), SeveritySatisfied, issueMessage(rule))}
 		}
 		return findings
 	case ValidationRuleFieldValue:
@@ -315,26 +355,26 @@ func auditContractValidationRule(contract map[string]any, rule ValidationRule) [
 		if !ok || !compareValues(value, defaultOperator(rule.Operator, "eq"), rule.Value) {
 			return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, defaultSeverity(rule.Severity), issueMessage(rule), optionalActualValue(value, ok), rule.Value, nil, defaultOperator(rule.Operator, "eq"))}
 		}
-		return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, "info", issueMessage(rule), value, rule.Value, nil, defaultOperator(rule.Operator, "eq"))}
+		return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, SeveritySatisfied, issueMessage(rule), value, rule.Value, nil, defaultOperator(rule.Operator, "eq"))}
 	case ValidationRuleComparison:
 		value, ok := contractValue(contract, rule.Target)
 		if !ok || !compareValues(value, rule.Operator, rule.Value) {
 			return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, defaultSeverity(rule.Severity), issueMessage(rule), optionalActualValue(value, ok), rule.Value, nil, rule.Operator)}
 		}
-		return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, "info", issueMessage(rule), value, rule.Value, nil, rule.Operator)}
+		return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, SeveritySatisfied, issueMessage(rule), value, rule.Value, nil, rule.Operator)}
 	case ValidationRuleValueIn:
 		value, ok := contractString(contract, rule.Target)
 		if !ok || !normalizedSet(rule.Values)[strings.ToUpper(strings.TrimSpace(value))] {
 			return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, defaultSeverity(rule.Severity), issueMessage(rule), optionalActualValue(value, ok), nil, anySliceFromStrings(rule.Values), "in")}
 		}
-		return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, "info", issueMessage(rule), value, nil, anySliceFromStrings(rule.Values), "in")}
+		return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, SeveritySatisfied, issueMessage(rule), value, nil, anySliceFromStrings(rule.Values), "in")}
 	case ValidationRuleSignatureLevel:
 		value, ok := contractString(contract, rule.Target)
 		required, _ := rule.Value.(string)
 		if !ok || !signatureLevelSatisfies(value, required) {
 			return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, defaultSeverity(rule.Severity), issueMessage(rule), optionalActualValue(value, ok), required, nil, "atLeast")}
 		}
-		return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, "info", issueMessage(rule), value, required, nil, "atLeast")}
+		return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, SeveritySatisfied, issueMessage(rule), value, required, nil, "atLeast")}
 	default:
 		return nil
 	}
@@ -575,6 +615,9 @@ type odrlFieldInfo struct {
 	label    string
 	value    any
 	hasValue bool
+	// units are the distinct odrl:unit IRIs the document's constraints
+	// denominate this field's boundaries in (applyDeclaredUnits).
+	units []string
 }
 
 func contractFinding(ruleID, title, severity, message, path, ontologyTerm string) PolicyFinding {
@@ -621,7 +664,7 @@ func normalizeObject(raw any) (map[string]any, error) {
 }
 
 // contractValue resolves a validation-profile rule target (a document
-// property path like "contract.jurisdiction", or a placeholder dcs:label) to
+// property path like "contract.jurisdiction", or a field dcs:label) to
 // the document's runtime value.
 func contractValue(contract map[string]any, target string) (any, bool) {
 	if value, ok := contractSHACLAliasValue(contract, target); ok {
@@ -661,8 +704,8 @@ func firstExistingValue(contract map[string]any, keys ...string) (any, bool) {
 	return nil, false
 }
 
-// contractDataFieldValue pairs a declared placeholder with the value it
-// carries inline (dcs:value); the placeholder @id is the IRI an ODRL
+// contractDataFieldValue pairs a declared ContractField with its inline
+// dcs:value; the field @id is the IRI an ODRL
 // constraint's odrl:leftOperand references, and dcs:label is its human name.
 type contractDataFieldValue struct {
 	label    string
@@ -670,7 +713,7 @@ type contractDataFieldValue struct {
 	hasValue bool
 }
 
-// contractDataFieldValues walks the document's declared placeholders in
+// contractDataFieldValues walks the document's declared ContractFields in
 // document order (including composed sub-templates'), yielding each once with
 // the value it carries inline.
 func contractDataFieldValues(contract map[string]any) []contractDataFieldValue {
@@ -680,19 +723,19 @@ func contractDataFieldValues(contract map[string]any) []contractDataFieldValue {
 	walk = func(current any) {
 		switch value := current.(type) {
 		case map[string]any:
-			if rawPlaceholders, ok := topLevelValue(documentData(value), "contractData").([]any); ok {
-				for _, rawPlaceholder := range rawPlaceholders {
-					placeholder, ok := rawPlaceholder.(map[string]any)
+			if rawFields, ok := topLevelValue(documentData(value), "contractFields").([]any); ok {
+				for _, rawField := range rawFields {
+					field, ok := rawField.(map[string]any)
 					if !ok {
 						continue
 					}
-					fieldID, _ := placeholder["@id"].(string)
+					fieldID, _ := field["@id"].(string)
 					if fieldID == "" || seen[fieldID] {
 						continue
 					}
 					seen[fieldID] = true
-					fieldValue, hasValue := inlineFieldValue(placeholder)
-					label, _ := firstOf(placeholder, "dcs:label", "label").(string)
+					fieldValue, hasValue := inlineFieldValue(field)
+					label, _ := firstOf(field, "dcs:label", "label").(string)
 					out = append(out, contractDataFieldValue{
 						label:    label,
 						value:    fieldValue,
@@ -713,7 +756,7 @@ func contractDataFieldValues(contract map[string]any) []contractDataFieldValue {
 	return out
 }
 
-// inlineFieldValue reads the value a placeholder carries inline (dcs:value),
+// inlineFieldValue reads the value a field carries inline (dcs:value),
 // treating an empty value as absent.
 func inlineFieldValue(field map[string]any) (any, bool) {
 	for _, key := range []string{"dcs:value", "value"} {
@@ -747,7 +790,7 @@ func semanticConditionValuesByParameterName(contract map[string]any, parameterNa
 }
 
 // companyPartiesFromSemanticValues no longer derives parties from filled
-// placeholders: the flat, self-contained placeholder registry carries no
+// contractFields: the flat, self-contained field registry carries no
 // entity grouping, and a contract's parties are materialized from its ODRL
 // rules (materializeRuleParties) and stored in dcs:parties.
 func companyPartiesFromSemanticValues(_ map[string]any) ([]any, bool) {

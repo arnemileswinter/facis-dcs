@@ -52,7 +52,6 @@ func TemplatePolicyFindingEventData(finding validation.PolicyFinding, template *
 	data["objectDescription"] = base.DerefString(template.Description)
 	data["templateType"] = template.TemplateType
 	data["state"] = template.State
-	data["documentNumber"] = base.DerefString(template.DocumentNumber)
 	data["version"] = template.Version
 	data["createdBy"] = template.CreatedBy
 	data["createdAt"] = template.CreatedAt.UTC().Format(time.RFC3339)

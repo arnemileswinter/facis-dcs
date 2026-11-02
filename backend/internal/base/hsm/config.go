@@ -8,11 +8,11 @@ import (
 
 // Default per-purpose key labels (DCS_HSM_KEY_* env overrides).
 const (
-	defaultKeyDID   = "dcs-did"
-	defaultKeyVC    = "dcs-vc"
-	defaultKeyJAR   = "dcs-oid4vp-jar"
-	defaultKeyPADES = "dcs-contract-pades"
-	defaultKeyC2PA  = "dcs-c2pa"
+	defaultKeyDID  = "dcs-did"
+	defaultKeyVC   = "dcs-vc"
+	defaultKeyJAR  = "dcs-oid4vp-jar"
+	defaultKeyC2PA = "dcs-c2pa"
+	defaultKeyECDH = "dcs-ecdh"
 
 	defaultModulePath = "/usr/lib/softhsm/libsofthsm2.so"
 	defaultTokenLabel = "dcs"
@@ -38,11 +38,11 @@ func KeyLabelVC() string { return envOr("DCS_HSM_KEY_VC", defaultKeyVC) }
 // KeyLabelJAR returns the CKA_LABEL of the OpenID4VP JAR signing key.
 func KeyLabelJAR() string { return envOr("DCS_HSM_KEY_JAR", defaultKeyJAR) }
 
-// KeyLabelPADES returns the CKA_LABEL of the PAdES contract signing key.
-func KeyLabelPADES() string { return envOr("DCS_HSM_KEY_PADES", defaultKeyPADES) }
-
 // KeyLabelC2PA returns the CKA_LABEL of the C2PA COSE signing key.
 func KeyLabelC2PA() string { return envOr("DCS_HSM_KEY_C2PA", defaultKeyC2PA) }
+
+// KeyLabelECDH returns the CKA_LABEL of the key-agreement (CEK wrap) key.
+func KeyLabelECDH() string { return envOr("DCS_HSM_KEY_ECDH", defaultKeyECDH) }
 
 // VersionedLabel returns the CKA_LABEL of a specific key version for a base
 // label. Version 1 is the un-suffixed base label produced by the initial token

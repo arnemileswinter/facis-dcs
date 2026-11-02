@@ -17,6 +17,8 @@ func mountSwaggerUI(mux goahttp.Muxer) {
 		specURL := "./openapi3.json"
 		html := buildSwaggerHTML(specURL)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+		w.Header().Set("X-Frame-Options", "DENY")
 		_, err := w.Write([]byte(html))
 		if err != nil {
 			log.Println("Failed to write response:", err)
@@ -41,8 +43,8 @@ func mountSwaggerUI(mux goahttp.Muxer) {
 			return
 		}
 
-		// UpdateState the servers field with the runtime API path prefix
-		// Determine scheme from X-Forwarded-Proto header (proxy) or TLS status (direct)
+		// Rewrite the servers field to the runtime API path prefix; scheme comes
+		// from X-Forwarded-Proto (proxy) or TLS status (direct).
 		scheme := r.Header.Get("X-Forwarded-Proto")
 		if scheme == "" {
 			scheme = "http"

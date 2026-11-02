@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
 import BlockToolbar from '@template-repository/components/builder-editor/toolbar/BlockToolbar.vue'
 import ClauseSegmentsPreview from '@template-repository/components/clauses-editor/ClauseSegmentsPreview.vue'
 import { useBlockMovementPreview } from '@template-repository/composables/useBlockMovementPreview'
@@ -81,6 +81,10 @@ const savedText = computed(() => {
 const localTitle = ref('')
 const localText = ref('')
 
+const localTitleId = useId()
+const localTextId = useId()
+const clauseLabelId = useId()
+
 watch(
   () => [props.item.blockId, savedTitle.value, savedText.value] as const,
   ([, title, text]) => {
@@ -125,8 +129,9 @@ function revertToSaved() {
     <div class="min-w-0 flex-1 px-3 py-2">
       <!-- Section: title input -->
       <template v-if="block && block['@type'] === 'dcs:Section'">
-        <label class="text-[10px] font-bold uppercase opacity-60">Section</label>
+        <label :for="localTitleId" class="text-[10px] font-bold uppercase opacity-60">Section</label>
         <input
+          :id="localTitleId"
           v-model="localTitle"
           type="text"
           class="input input-sm mt-0.5 w-full input-ghost font-semibold"
@@ -136,8 +141,9 @@ function revertToSaved() {
       </template>
       <!-- Text: textarea -->
       <template v-else-if="block && block['@type'] === 'dcs:TextBlock'">
-        <label class="text-[10px] font-bold uppercase opacity-60">Text</label>
+        <label :for="localTextId" class="text-[10px] font-bold uppercase opacity-60">Text</label>
         <textarea
+          :id="localTextId"
           v-model="localText"
           :disabled="!uiStore.isTemplateEditable"
           class="textarea mt-0.5 min-h-10 w-full resize-y textarea-ghost text-sm textarea-sm"
@@ -147,13 +153,16 @@ function revertToSaved() {
       </template>
       <!-- Clause: read-only -->
       <template v-else-if="block && block['@type'] === 'dcs:Clause'">
-        <label class="text-[10px] font-bold uppercase opacity-60">
+        <span :id="clauseLabelId" class="text-[10px] font-bold uppercase opacity-60">
           Clause
           <span class="mt-0.5 text-[10px] font-semibold text-base-content">
             ({{ clauseBlock?.['dcs:title'] ?? '' }})
           </span>
-        </label>
-        <p class="mt-1 text-xs leading-relaxed whitespace-pre-wrap text-base-content/70">
+        </span>
+        <p
+          :aria-labelledby="clauseLabelId"
+          class="mt-1 text-xs leading-relaxed whitespace-pre-wrap text-base-content/70"
+        >
           <ClauseSegmentsPreview :segments="clauseSegments" :get-placeholder-label="getPlaceholderLabel" />
         </p>
       </template>

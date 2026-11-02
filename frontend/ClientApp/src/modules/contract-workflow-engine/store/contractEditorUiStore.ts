@@ -1,8 +1,7 @@
 import { defineStore } from 'pinia'
 import { useAuthStore } from '@/stores/auth-store'
-import { ContractState } from '@/types/contract-state'
+import { contractAuditRoles } from '@/types/contract-audit-roles'
 import type { ContractState as ContractStateType } from '@/types/contract-state'
-import type { UserRole } from '@/types/user-role'
 import type {
   ContractEditorTabId,
   ContractEditorUiState,
@@ -17,7 +16,9 @@ const defaultState: Readonly<ContractEditorUiState> = {
     { id: 'clauses', label: 'Clauses' },
     { id: 'builder', label: 'Builder' },
     { id: 'diff', label: 'Diff View' },
+    { id: 'proposals', label: 'Proposals' },
     { id: 'audit', label: 'Audit History' },
+    { id: 'history', label: 'Lifecycle History' },
     { id: 'structure', label: 'Structure' },
   ],
 }
@@ -28,25 +29,18 @@ export const useContractEditorUiStore = defineStore(storeId, {
     setActiveTab(tab: ContractEditorTabId) {
       this.activeTab = tab
     },
-    availableTabs(contractState: ContractStateType) {
+    // `rendered` is the set of tabs the calling view actually has a pane for;
+    // a tab outside it would select an empty page body.
+    availableTabs(_contractState: ContractStateType, rendered: ContractEditorTabId[]) {
       const isAuditingAuthorized =
-        (['AUDITOR', 'COMPLIANCE_OFFICER', 'SYSTEM_ADMINISTRATOR'] as UserRole[]).some((role) =>
-          useAuthStore().user?.roles?.includes(role),
-        ) ?? false
+        contractAuditRoles.some((role) => useAuthStore().user?.roles?.includes(role)) ?? false
 
-      switch (contractState) {
-        case ContractState.negotiation:
-          return this.tabs.filter(
-            (tab) =>
-              ['details', 'content', 'diff', 'structure'].includes(tab.id) ||
-              (isAuditingAuthorized && tab.id === 'audit'),
-          )
-        default:
-          return this.tabs.filter(
-            (tab) =>
-              ['details', 'content', 'structure'].includes(tab.id) || (isAuditingAuthorized && tab.id === 'audit'),
-          )
-      }
+      const forState: ContractEditorTabId[] = ['details', 'content', 'diff', 'proposals', 'history', 'structure']
+
+      return this.tabs.filter(
+        (tab) =>
+          rendered.includes(tab.id) && (forState.includes(tab.id) || (isAuditingAuthorized && tab.id === 'audit')),
+      )
     },
     reset(overrides?: Partial<ContractEditorUiState>) {
       Object.assign(this, getInitialState())

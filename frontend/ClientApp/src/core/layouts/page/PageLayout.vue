@@ -28,16 +28,20 @@ onMounted(() => {
 <template>
   <div :class="[drawerClasses.root, 'min-h-screen']">
     <input :id="pageSidebarId" type="checkbox" class="drawer-toggle" />
-    <div :class="[drawerClasses.header, 'flex h-screen flex-col overflow-hidden bg-base-100']">
+    <div :class="[drawerClasses.header, 'flex h-screen min-w-0 flex-col overflow-hidden bg-base-100']">
       <!-- Navbar -->
-      <header class="navbar sticky top-0 z-30 w-full border-b border-base-content/10 bg-base-100">
+      <header class="navbar sticky top-0 z-30 w-full shrink-0 border-b border-base-content/10 bg-base-100">
         <slot name="navbar">
           <PageNavBar />
         </slot>
       </header>
 
       <!-- Main Content -->
-      <main ref="scroll-container" class="grow overflow-y-auto bg-base-200" tabindex="-1">
+      <main
+        ref="scroll-container"
+        class="min-w-0 grow overflow-x-hidden overflow-y-auto bg-base-200 outline-none"
+        tabindex="-1"
+      >
         <slot>
           <RouterView />
         </slot>
@@ -46,7 +50,7 @@ onMounted(() => {
 
     <!-- Sidebar -->
     <div :class="[drawerClasses.sidebar, 'z-40']">
-      <label :for="pageSidebarId" aria-label="close sidebar" class="drawer-overlay"></label>
+      <label :for="pageSidebarId" class="drawer-overlay"><span class="sr-only">Close sidebar</span></label>
       <aside
         :class="[
           'flex min-h-full flex-col border-r border-base-content/5 bg-base-200 transition-all duration-300 ease-in-out',

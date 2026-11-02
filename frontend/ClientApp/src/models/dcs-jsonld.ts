@@ -4,7 +4,8 @@ export interface JsonLdReference {
 
 export interface JsonLdTypedValue {
   '@value': string
-  '@type': `xsd:${'string' | 'decimal' | 'integer' | 'boolean' | 'date' | 'dateTime'}`
+  /** A compact xsd term, or an external library's exact datatype IRI. */
+  '@type': string
 }
 
 export interface DcsTemplateMetadata {
@@ -21,39 +22,155 @@ export interface DcsContractMetadata {
   '@type': 'dcs:ContractMetadata'
   'dcs:title'?: string
   'dcs:description'?: string
+  'dcs:startDate'?: JsonLdTypedValue
+  'dcs:expirationDate'?: JsonLdTypedValue
+  'dcs:expirationNoticePeriod'?: number
+  'dcs:expirationPolicy'?: string
   'dcs:customMetaData'?: unknown[]
 }
 
-/** An xsd datatype a placeholder resolves to (from its SHACL sh:datatype). */
-export type XsdDatatype = `xsd:${'string' | 'decimal' | 'integer' | 'boolean' | 'date' | 'dateTime'}`
+/** An XSD datatype declared by a contract field. Every member is a value
+ *  space DCS can order, so an ODRL boundary stated over the field has a
+ *  defined answer. */
+export type XsdDatatype = `xsd:${'string' | 'decimal' | 'integer' | 'boolean' | 'date' | 'dateTime' | 'duration'}`
+
+const XSD = 'http://www.w3.org/2001/XMLSchema#'
 
 /**
- * A typed, self-contained slot. The full node lives in the document's top-level
- * dcs:contractData registry, carrying its datatype straight from the SHACL
- * shape; a clause and an ODRL operand both reference it by @id. The filled value
- * rides inline on the same node (dcs:value).
+ * The XSD datatypes an imported library may declare, each mapped to the
+ * compact term a dcs:ContractField carries. A member maps only where the two
+ * share a value space: the integer and decimal families keep their numeric
+ * order, the string family its lexical order, durations stay durations.
+ * Anything else in the XSD namespace is a datatype DCS cannot order — reading
+ * it as a string turns "PT6H <= PT24H" into a byte comparison that answers,
+ * and answers wrong — so compactXsdDatatype rejects it rather than coercing.
  */
-export interface DcsPlaceholder {
+const XSD_TO_COMPACT: Readonly<Record<string, XsdDatatype>> = {
+  string: 'xsd:string',
+  normalizedString: 'xsd:string',
+  token: 'xsd:string',
+  language: 'xsd:string',
+  Name: 'xsd:string',
+  NCName: 'xsd:string',
+  NMTOKEN: 'xsd:string',
+  anyURI: 'xsd:string',
+  hexBinary: 'xsd:string',
+  base64Binary: 'xsd:string',
+  decimal: 'xsd:decimal',
+  double: 'xsd:decimal',
+  float: 'xsd:decimal',
+  integer: 'xsd:integer',
+  int: 'xsd:integer',
+  long: 'xsd:integer',
+  short: 'xsd:integer',
+  byte: 'xsd:integer',
+  nonNegativeInteger: 'xsd:integer',
+  positiveInteger: 'xsd:integer',
+  nonPositiveInteger: 'xsd:integer',
+  negativeInteger: 'xsd:integer',
+  unsignedLong: 'xsd:integer',
+  unsignedInt: 'xsd:integer',
+  unsignedShort: 'xsd:integer',
+  unsignedByte: 'xsd:integer',
+  boolean: 'xsd:boolean',
+  date: 'xsd:date',
+  dateTime: 'xsd:dateTime',
+  dateTimeStamp: 'xsd:dateTime',
+  duration: 'xsd:duration',
+  dayTimeDuration: 'xsd:duration',
+  yearMonthDuration: 'xsd:duration',
+}
+
+/**
+ * The compact term for a declared datatype IRI (absolute or already compact),
+ * or undefined when the IRI names no datatype at all — an rdfs:range that is
+ * a class, an sh:class leaf, an absent declaration.
+ *
+ * Throws for an IRI that IS in the XSD namespace but names a datatype DCS
+ * cannot order. Silently degrading it to xsd:string is the failure this
+ * guards: the declaration is lost, and every later comparison over the field
+ * runs on bytes.
+ */
+export function compactXsdDatatype(iri: string): XsdDatatype | undefined {
+  const local = iri.startsWith(XSD) ? iri.slice(XSD.length) : iri.startsWith('xsd:') ? iri.slice(4) : ''
+  if (!local) return undefined
+  const compact = XSD_TO_COMPACT[local]
+  if (!compact) {
+    throw new Error(
+      `<${iri}> is an XSD datatype DCS cannot order. Reading it as a string would let a policy boundary over ` +
+        'this field compare lexically and answer wrong. Declare a supported datatype, or add this one to ' +
+        'XSD_TO_COMPACT and to compareXsdValues in xsd-order.ts.',
+    )
+  }
+  return compact
+}
+
+/** A declared contract field referenced by domain data and clause prose. */
+export interface DcsContractField {
   '@id': string
-  '@type': 'dcs:Placeholder'
-  /** Human representation shown in prose in place of the unfilled value. */
+  '@type': 'dcs:ContractField'
   'dcs:label': string
-  /** The input type, resolved from the shape's sh:datatype. */
   'dcs:datatype': XsdDatatype
-  /** The SHACL shape the datatype and constraint were resolved from. */
   'dcs:shape'?: JsonLdReference
-  'dcs:required'?: boolean
-  /** The filled runtime value; absent on a template (the declaration). */
-  'dcs:value'?: string | number | boolean
-  /** Value constraint (options/pattern/min/max) carried inline so the slot is
-   *  self-contained — render picks a select/text input without ontology lookup. */
+  'dcs:required': boolean
+  'dcs:value'?: string | number | boolean | JsonLdTypedValue
   'dcs:valueConstraint'?: import('@template-repository/models/contract-template').SemanticValueConstraint
 }
 
-/** A clause references a placeholder by @id — a bare {"@id"} node in content. */
-export type DcsPlaceholderRef = JsonLdReference
+/** The local name of an IRI or compact term — its part after the last
+ *  '#', '/' or ':'. */
+export function localNameOf(iri: string): string {
+  return iri.replace(/^.*[#/:]/, '')
+}
 
-export type DcsContentSegment = string | DcsPlaceholderRef
+/** Serializes a fill as a typed literal carrying the field's declared
+ *  datatype — a compact xsd term, or an external library's exact datatype
+ *  IRI. The lexical form is a string, so the document carries the exact
+ *  token the user agreed to — deterministic across round trips. */
+export function typedFieldFill(value: string | number | boolean, datatype: string): JsonLdTypedValue {
+  return { '@value': String(value), '@type': datatype }
+}
+
+/** Reads a fill back to the editor's scalar, accepting the typed-literal
+ *  serialization and bare scalars alike. Returns undefined for an absent
+ *  fill. A typed fill converts per the declared datatype — a decimal field's
+ *  editor holds a NUMBER — so write and read stay symmetric and draft
+ *  dirty-checks never see a phantom change. */
+export function fieldFillScalar(
+  fill: DcsContractField['dcs:value'],
+  datatype?: XsdDatatype,
+): string | number | boolean | undefined {
+  if (fill === null || fill === undefined) return undefined
+  if (typeof fill !== 'object') return fill
+  const lexical = fill['@value']
+  switch (datatype ?? fill['@type']) {
+    case 'xsd:decimal':
+    case 'xsd:integer':
+      return Number(lexical)
+    case 'xsd:boolean':
+      return lexical === 'true'
+    default:
+      return lexical
+  }
+}
+
+/** A clause references a ContractField only by its @id. */
+export type DcsContractFieldRef = JsonLdReference
+
+export type DcsContentSegment = string | DcsContractFieldRef
+
+/** A property value in the contract-data graph: a literal (fixed data), a
+ *  typed literal, or a reference to a declared field or another domain
+ *  object. */
+export type DcsContractDataValue = string | number | boolean | JsonLdTypedValue | JsonLdReference
+
+/** A typed domain object in the contract-data graph. Properties hold
+ *  literals, references to declared contract fields (negotiable leaves), or
+ *  references to other domain objects (structure, arbitrary depth). */
+export type DcsContractDataObject = {
+  '@id': string
+  '@type': string
+} & Record<string, DcsContractDataValue | DcsContractDataValue[] | undefined>
 
 export interface DcsSection {
   '@type': 'dcs:Section'
@@ -97,15 +214,6 @@ export interface DcsDocumentStructure {
   'dcs:layout': { '@list': DcsLayoutNode[] }
 }
 
-export interface DcsContractField {
-  '@id': string
-  '@type': 'dcs:ContractField'
-  'dcs:dataType': JsonLdReference
-  'dcs:sourceObject': JsonLdReference
-  'dcs:path': string
-  'dcs:domainField'?: JsonLdReference
-}
-
 export interface OdrlConstraint {
   '@type': 'odrl:Constraint'
   'odrl:leftOperand': JsonLdReference
@@ -118,7 +226,13 @@ export interface OdrlConstraint {
    * are negotiated field references, resolved to their filled values at
    * enforcement.
    */
-  'odrl:rightOperand'?: JsonLdTypedValue | JsonLdTypedValue[] | JsonLdReference
+  'odrl:rightOperand'?: JsonLdTypedValue | JsonLdReference | (JsonLdTypedValue | JsonLdReference)[]
+  /**
+   * The unit the boundary is measured in (ODRL IM §2.5), an IRI: a currency
+   * concept for a payment amount, a countable unit for a count. Without it a
+   * downstream target system cannot tell what the number denominates.
+   */
+  'odrl:unit'?: JsonLdReference
 }
 
 /**
@@ -152,6 +266,11 @@ export interface OdrlDuty {
   '@id'?: string
   '@type': 'odrl:Duty'
   'odrl:action': JsonLdReference | JsonLdReference[]
+  /** The clause node this duty is backed by. A nested duty is an odrl:Duty like
+   *  any other, so it owes prose too; it is authored inside the clause its
+   *  enclosing rule cites, and cites the same block (set on assembly, once the
+   *  clause block has an IRI). */
+  'dcs:prose'?: JsonLdReference
   'odrl:constraint'?: OdrlConstraintNode[]
   'odrl:consequence'?: OdrlDuty[]
 }
@@ -200,22 +319,41 @@ export interface DcsDocumentData {
   '@id'?: string
   'dcs:metadata': DcsTemplateMetadata | DcsContractMetadata
   'dcs:documentStructure': DcsDocumentStructure
-  /** Flat, self-contained registry of the document's typed placeholder nodes. */
-  'dcs:contractData': DcsPlaceholder[]
+  /** Typed business objects whose properties bind to declared contract fields. */
+  'dcs:contractData': DcsContractDataObject[]
+  /** Flat registry of fillable field declarations. */
+  'dcs:contractFields': DcsContractField[]
   'dcs:policies': OdrlSet
 }
 
 export interface DcsTemplateData extends DcsDocumentData {
   '@type': 'dcs:ContractTemplate'
   'dcs:metadata': DcsTemplateMetadata
+  /**
+   * The contractual roles the template declares, as party placeholder nodes
+   * whose IRIs end `#party-<role>`. Creating a contract binds the originating
+   * organization to one of them (backend command/create.go bindOriginatorParty).
+   */
+  'dcs:parties'?: unknown[]
 }
 
 export interface DcsContractData extends DcsDocumentData {
   '@type': 'dcs:Contract'
   'dcs:metadata': DcsContractMetadata | DcsTemplateMetadata
-  'dcs:contractFields'?: DcsContractField[]
   'dcs:parentContract'?: JsonLdReference
   derivedFromTemplate?: DcsTemplateProvenance
+  /**
+   * Server-owned parts of the document the editor neither authors nor models:
+   * the contract's party nodes (which carry the recorded signatory and Power of
+   * Attorney of an applied signature), the AcroForm signature fields naming
+   * them, and the pinned shapes graph the document is validated against. The
+   * client only carries them — see preserveServerOwnedFields.
+   */
+  'dcs:parties'?: unknown[]
+  'dcs:signatureFields'?: unknown[]
+  'sh:shapesGraph'?: unknown
+  /** The signing deadline (xsd:dateTime) the signing workflow enforces (DCS-FR-SM-13). */
+  'dcs:signingDeadline'?: unknown
 }
 
 /** The source-template node: a prov:wasDerivedFrom edge plus version assertion. */
@@ -228,16 +366,8 @@ export function isDcsSection(block: DcsBlock): block is DcsSection {
   return block['@type'] === 'dcs:Section'
 }
 
-export function isDcsTextBlock(block: DcsBlock): block is DcsTextBlock {
-  return block['@type'] === 'dcs:TextBlock'
-}
-
 export function isDcsClause(block: DcsBlock): block is DcsClause {
   return block['@type'] === 'dcs:Clause'
-}
-
-export function isDcsPlaceholder(seg: DcsContentSegment): seg is DcsPlaceholderRef {
-  return typeof seg !== 'string'
 }
 
 export function isDcsDocumentData(raw: unknown): raw is DcsDocumentData {
@@ -248,6 +378,7 @@ export function isDcsDocumentData(raw: unknown): raw is DcsDocumentData {
     (value['@type'] === 'dcs:ContractTemplate' || value['@type'] === 'dcs:Contract') &&
     typeof value['dcs:documentStructure'] === 'object' &&
     Array.isArray(value['dcs:contractData']) &&
+    Array.isArray(value['dcs:contractFields']) &&
     // Canonical shape: a single enclosing odrl:Set object.
     // An empty array is still accepted as "no policies yet" (brand-new
     // documents); a non-empty bare-rule array is not.
@@ -263,8 +394,4 @@ function isOdrlSet(value: unknown): value is OdrlSet {
 
 export function isDcsTemplateData(raw: unknown): raw is DcsTemplateData {
   return isDcsDocumentData(raw) && raw['@type'] === 'dcs:ContractTemplate'
-}
-
-export function isDcsContractData(raw: unknown): raw is DcsContractData {
-  return isDcsDocumentData(raw) && raw['@type'] === 'dcs:Contract'
 }

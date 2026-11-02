@@ -49,13 +49,6 @@ func VerifyCOSEVC(raw []byte, verifier COSEVerifier) (map[string]any, error) {
 	return document, nil
 }
 
-func ParseCOSEDocumentClaims(document map[string]any) (map[string]any, error) {
-	if document == nil {
-		return nil, fmt.Errorf("empty cose document")
-	}
-	return document, nil
-}
-
 func IssuerFromClaims(claims map[string]any) string {
 	if iss, ok := claims["iss"].(string); ok {
 		return strings.TrimSpace(iss)
@@ -73,47 +66,17 @@ func SubjectFromClaims(claims map[string]any) string {
 	return ""
 }
 
-func ExpFromClaims(claims map[string]any) (int64, bool) {
-	switch v := claims["exp"].(type) {
-	case int64:
-		return v, true
-	case int:
-		return int64(v), true
-	case uint64:
-		return int64(v), true
-	case float64:
-		return int64(v), true
-	default:
-		return 0, false
-	}
+// ExpFromClaims returns the exp NumericDate claim.
+func ExpFromClaims(claims map[string]any) (value int64, present bool, err error) {
+	return Int64Claim(claims, "exp")
 }
 
-func IatFromClaims(claims map[string]any) (int64, bool) {
-	switch v := claims["iat"].(type) {
-	case int64:
-		return v, true
-	case int:
-		return int64(v), true
-	case uint64:
-		return int64(v), true
-	case float64:
-		return int64(v), true
-	default:
-		return 0, false
-	}
+// IatFromClaims returns the iat NumericDate claim.
+func IatFromClaims(claims map[string]any) (value int64, present bool, err error) {
+	return Int64Claim(claims, "iat")
 }
 
-func NbfFromClaims(claims map[string]any) (int64, bool) {
-	switch v := claims["nbf"].(type) {
-	case int64:
-		return v, true
-	case int:
-		return int64(v), true
-	case uint64:
-		return int64(v), true
-	case float64:
-		return int64(v), true
-	default:
-		return 0, false
-	}
+// NbfFromClaims returns the nbf NumericDate claim.
+func NbfFromClaims(claims map[string]any) (value int64, present bool, err error) {
+	return Int64Claim(claims, "nbf")
 }

@@ -1,7 +1,6 @@
 package compiler
 
 import (
-	"context"
 	"testing"
 )
 
@@ -20,20 +19,20 @@ const templateSingleNodePayload = `{
     "dcs:layout":{"@type":"dcs:LayoutNode","dcs:isRoot":true,"dcs:children":{"@list":[{"@id":"urn:t#s1"}]}},
     "dcs:blocks":{"@list":[
       {"@type":"dcs:Section","@id":"urn:t#s1","dcs:title":"1. Payment"},
-      {"@type":"dcs:Clause","@id":"urn:t#c1","dcs:content":["The amount is ",{"@type":"dcs:Placeholder"},"."]}
+      {"@type":"dcs:Clause","@id":"urn:t#c1","dcs:content":["The amount is ","_____","."]}
     ]}
   }
 }`
 
 func TestTemplateSingleLayoutNodeCompiles(t *testing.T) {
-	_, err := CompilePDF(WithSigner(context.Background(), NewCapturingSigner()), []byte(templateSingleNodePayload), CanonicalCompiledAt)
+	_, err := CompilePDF(WithSigner(testChainContext(), NewCapturingSigner()), []byte(templateSingleNodePayload), CanonicalCompiledAt)
 	if err != nil {
 		t.Fatalf("template with single layout node must compile: %v", err)
 	}
 }
 
 func TestTemplateDoubleCompileDeterministic(t *testing.T) {
-	ctx := context.Background()
+	ctx := testChainContext()
 	p1, err := CompilePDF(WithSigner(ctx, NewCapturingSigner()), []byte(templateSingleNodePayload), CanonicalCompiledAt)
 	if err != nil {
 		t.Fatal(err)

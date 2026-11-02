@@ -49,6 +49,17 @@ var validStates = map[ContractState]bool{
 	Expired:     true,
 }
 
+// All returns every contract state, in lifecycle order — so a consumer that
+// classifies states (which of them freeze the PDF artifact, say) derives its
+// answer from the enum instead of restating it and silently missing a state
+// added later.
+func All() []ContractState {
+	return []ContractState{
+		Draft, Offered, Rejected, Withdrawn, Negotiation, Submitted,
+		Reviewed, Approved, Signed, Active, Revoked, Terminated, Expired,
+	}
+}
+
 func NewContractState(s string) (ContractState, error) {
 	ts := ContractState(strings.ToUpper(s))
 	if !ts.IsValid() {
@@ -57,10 +68,22 @@ func NewContractState(s string) (ContractState, error) {
 	return ts, nil
 }
 
-// IsValid checks if the ContractState is a valid role
+// IsValid reports whether the value is one of the declared ContractState values.
 func (s ContractState) IsValid() bool {
 	upper := ContractState(strings.ToUpper(string(s)))
 	return validStates[upper]
+}
+
+// Erasable reports whether a contract in this state may have its archive entry
+// deleted and its keys shredded (DCS-FR-CSA-17): only a contract that is no
+// longer in force or never came into force. The local archive delete and the
+// peer erase both use this predicate.
+func (s ContractState) Erasable() bool {
+	switch ContractState(strings.ToUpper(string(s))) {
+	case Terminated, Expired, Revoked, Rejected, Withdrawn:
+		return true
+	}
+	return false
 }
 
 // String returns the string representation of the ContractState

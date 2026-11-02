@@ -17,41 +17,34 @@ spec:
     - {{ . | quote }}
     {{- end }}
   http:
-    {{- /* Keycloak route when enabled with route.path */}}
-    {{- if and .Values.keycloak.enabled .Values.keycloak.route.path }}
-    - name: keycloak
+    {{- /* The PAC audit may spend up to evidenceTimeout gathering evidence
+         before dispatching. This Istio-only route supplies the wider request
+         deadline; generic ingress annotations remain operator-managed. */}}
+    - name: pac-audit
       match:
-        - uri:
-            prefix: {{ include "digital-contracting-service.keycloakRoutePath" . }}
+        - method:
+            exact: POST
+          uri:
+            exact: {{ printf "%s/pac/audit" (include "digital-contracting-service.apiPath" .) }}
+      timeout: {{ .Values.auditExecutor.requestTimeout | quote }}
       route:
         - destination:
-            host: {{ .Release.Name }}-keycloak
+            host: {{ include "digital-contracting-service.fullname" . }}
             port:
-              number: {{ .Values.keycloak.service.port | int }}
-    {{- end }}
-    {{- /* Federated Catalogue Portal route when enabled with route.path */}}
-    {{- if and .Values.federatedCatalogue.enabled .Values.federatedCatalogue.portal.enabled .Values.federatedCatalogue.portal.route.path }}
-    - name: federated-catalogue-portal
+              number: {{ .Values.service.port | int }}
+    {{- /* Vendored fc-service route when enabled with route.path — service
+         name/port are fc-service's own fixed defaults (kept verbatim, not
+         release-prefixed — see Chart.yaml's fc-service dependency). */}}
+    {{- if and .Values.fcservice.enabled .Values.fcservice.route.path }}
+    - name: fc-service
       match:
         - uri:
-            prefix: {{ .Values.federatedCatalogue.portal.route.path }}
+            prefix: {{ include "digital-contracting-service.fcserviceRoutePath" . }}
       route:
         - destination:
-            host: {{ .Release.Name }}-federated-catalogue-portal
+            host: fc-service
             port:
-              number: {{ .Values.federatedCatalogue.portal.service.port | default 8088 | int }}
-    {{- end }}
-    {{- /* Federated Catalogue API route when enabled with route.path */}}
-    {{- if and .Values.federatedCatalogue.enabled .Values.federatedCatalogue.route.path }}
-    - name: federated-catalogue
-      match:
-        - uri:
-            prefix: {{ .Values.federatedCatalogue.route.path }}
-      route:
-        - destination:
-            host: {{ .Release.Name }}-federated-catalogue
-            port:
-              number: {{ .Values.federatedCatalogue.service.port | int }}
+              number: 8081
     {{- end }}
     {{- /* DCS application route */}}
     - name: dcs

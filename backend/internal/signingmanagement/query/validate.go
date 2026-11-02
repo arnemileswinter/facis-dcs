@@ -12,12 +12,16 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"digital-contracting-service/internal/auth/oid4vp"
+	"digital-contracting-service/internal/auth/oid4vp/status"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
+	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
+	"digital-contracting-service/internal/pdfgeneration/provenance"
 	"digital-contracting-service/internal/signingmanagement/db"
 	"digital-contracting-service/internal/signingmanagement/dss"
 	signingmanagementevents "digital-contracting-service/internal/signingmanagement/event"
@@ -57,16 +61,74 @@ type SigningEvidence struct {
 	CredentialType       string
 	KBSDHash             string
 	ValidationReportHash string
+	Issuer               string
+	// CredentialStatus is the live status-list state of the Power of Attorney
+	// the signatory presented at the ceremony behind this signature.
+	CredentialStatus CredentialStatus
+}
+
+// Credential states the compliance viewer shows per signature (DCS-FR-SM-18).
+const (
+	CredentialValid     = "VALID"
+	CredentialRevoked   = "REVOKED"
+	CredentialSuspended = "SUSPENDED"
+	CredentialUnknown   = "UNKNOWN"
+)
+
+// CredentialStatus is one signature's credential state. Reason says why the
+// state is UNKNOWN and is empty otherwise.
+type CredentialStatus struct {
+	State  string
+	Reason string
 }
 
 type Validator struct {
 	DB      *sqlx.DB
 	CRepo   db.ContractRepo
 	PDFCore *pdfcore.Client
+	// Credentials verifies each signing-summary credential read out of the stored
+	// PDF against the key its issuer publishes for assertions, before anything it
+	// claims is used.
+	Credentials *provenance.CredentialVerifier
+	// Trust is the issuer trust configuration the Power of Attorney a peer
+	// embedded beneath its own signature is verified against, so a contract
+	// inspected here can be judged on the counterparty's authority to sign it.
+	Trust *oid4vp.TrustConfig
+	// LocalPeer is this instance's own DID: the signatures whose Power of
+	// Attorney was a `login` question answered by our own ceremony.
+	LocalPeer string
 }
 
+// Handle validates the contract's signatures. A failed attempt is audited as
+// VALIDATE_SIGNATURE_FAILED (DCS-FR-SM-19).
 func (h *Validator) Handle(ctx context.Context, cmd ValidateQry) (*ValidationResult, error) {
+	result, err := h.validate(ctx, cmd)
+	if err != nil {
+		failed := validateEvent(cmd, 0, nil, nil, time.Now().UTC())
+		failed.Outcome = signingmanagementevents.OutcomeFailed
+		failed.Error = err.Error()
+		if auditErr := event.CreateInOwnTx(ctx, h.DB, failed, componenttype.SignatureManagement); auditErr != nil {
+			log.Printf("could not audit failed validation of %s: %v", cmd.DID, auditErr)
+		}
+	}
+	return result, err
+}
 
+func validateEvent(cmd ValidateQry, contractVersion int, signerDIDs, findings []string, occurredAt time.Time) signingmanagementevents.ValidateEvent {
+	return signingmanagementevents.ValidateEvent{
+		DID:             cmd.DID,
+		ContractVersion: contractVersion,
+		SignerDIDs:      signerDIDs,
+		Outcome:         signingmanagementevents.OutcomeCompleted,
+		Findings:        findings,
+		ValidatedBy:     cmd.ValidatedBy,
+		OccurredAt:      occurredAt,
+		HolderDID:       cmd.HolderDID,
+		UserRoles:       cmd.UserRoles,
+	}
+}
+
+func (h *Validator) validate(ctx context.Context, cmd ValidateQry) (*ValidationResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
@@ -90,8 +152,13 @@ func (h *Validator) Handle(ctx context.Context, cmd ValidateQry) (*ValidationRes
 		return nil, fmt.Errorf("could not collect validation findings: %w", err)
 	}
 
-	findings = append(findings, h.crossCheckEmbeddedPID(ctx, tx, cmd.DID)...)
-	findings = append(findings, h.crossCheckSHACLDrift(ctx, tx, cmd.DID)...)
+	// The stored PDF's signing evidence is read and VERIFIED once, and the three
+	// consumers below work from the verified documents. Each used to re-extract and
+	// re-decode the attachment for itself, trusting whatever parsed.
+	evidence := h.readSigningEvidence(ctx, tx, cmd.DID)
+	findings = append(findings, evidence.Findings...)
+	findings = append(findings, h.crossCheckEmbeddedPID(ctx, tx, cmd.DID, evidence.Documents)...)
+	findings = append(findings, h.crossCheckSHACLDrift(ctx, tx, cmd.DID, evidence.Documents)...)
 
 	dssReport, dssFindings, err := h.validateWithDSS(ctx, tx, cmd.DID)
 	if err != nil {
@@ -101,16 +168,18 @@ func (h *Validator) Handle(ctx context.Context, cmd ValidateQry) (*ValidationRes
 	}
 	findings = append(findings, dssFindings...)
 
-	signingEvidence := h.collectSigningEvidence(ctx, tx, cmd.DID)
+	signingEvidence := collectSigningEvidence(evidence)
 
-	evt := signingmanagementevents.ValidateEvent{
-		DID:             cmd.DID,
-		ContractVersion: processData.ContractVersion,
-		ValidatedBy:     cmd.ValidatedBy,
-		OccurredAt:      time.Now().UTC(),
-		HolderDID:       cmd.HolderDID,
-		UserRoles:       cmd.UserRoles,
+	signatures, err := h.CRepo.LoadSignatures(ctx, tx, cmd.DID)
+	if err != nil {
+		return nil, fmt.Errorf("could not load signatures: %w", err)
 	}
+	signerDIDs := make([]string, 0, len(signatures))
+	for _, sig := range signatures {
+		signerDIDs = append(signerDIDs, sig.SignerDID)
+	}
+
+	evt := validateEvent(cmd, processData.ContractVersion, signerDIDs, findings, time.Now().UTC())
 	err = event.Create(ctx, tx, evt, componenttype.SignatureManagement)
 	if err != nil {
 		return nil, fmt.Errorf("could not create event: %w", err)
@@ -161,42 +230,165 @@ func (h *Validator) validateWithDSS(ctx context.Context, tx *sqlx.Tx, did string
 		}
 		return report, []string{finding}, nil
 	}
-	return report, []string{ValidAESFinding}, nil
+	finding := ValidAESFinding
+	if report != nil && strings.TrimSpace(report.Indication) != "" {
+		finding += fmt.Sprintf(" (indication=%s", report.Indication)
+		if strings.TrimSpace(report.SubIndication) != "" {
+			finding += fmt.Sprintf(", subIndication=%s", report.SubIndication)
+		}
+		finding += ")"
+	}
+	return report, []string{finding}, nil
 }
 
-// ValidAESFinding is the passing confirmation recorded when the EU DSS leg
-// accepts the signature as a valid Advanced Electronic Signature.
-const ValidAESFinding = "EU DSS validation confirms a valid Advanced Electronic Signature"
+// ValidAESFinding records what DSS actually reported.
+//
+// It used to read "EU DSS validation confirms a valid Advanced Electronic
+// Signature", which was returned even for INDETERMINATE — DSS declining to
+// determine, most often NO_CERTIFICATE_CHAIN_FOUND. Attributing an affirmative
+// conclusion to an external validator that withheld one is putting words in its
+// mouth, and this string is shown to users and exported into compliance PDFs.
+// The AES judgement is this system's to make and to label as its own; the
+// indication is appended so a reader can see the basis for it.
+const ValidAESFinding = "EU DSS reports no integrity or cryptographic failure"
 
-// collectSigningEvidence extracts the ContractSigningSummaryCredential(s)
-// embedded in the stored signed PDF and distills each to the compliance
-// fields the Signature Compliance Viewer surfaces (DCS-FR-SM-26): signer DID,
-// ceremony, content/PDF hashes, credential type, and the KB-JWT binding. An
-// unsigned contract (no PDF or no embedded evidence) yields no evidence; this
-// is a read-only enrichment for the viewer, so an extraction hiccup degrades
-// to no evidence rather than failing the whole validation.
-func (h *Validator) collectSigningEvidence(ctx context.Context, tx *sqlx.Tx, did string) []SigningEvidence {
+// verifiedSigningEvidence is what the stored PDF's evidence attachment yielded:
+// the summary credentials whose proof verified against their issuer's published
+// assertion key, and the findings raised for the ones that did not.
+type verifiedSigningEvidence struct {
+	Documents []json.RawMessage
+	// Statuses holds the credential status of each entry in Documents, at the
+	// same index.
+	Statuses []CredentialStatus
+	Findings []string
+}
+
+// readSigningEvidence extracts every signing evidence attachment embedded in the
+// stored PDF — one per signing event — and verifies each before it is handed on:
+// the summary against the key its issuer publishes for assertions, and, for a
+// party that is not this instance, the Power of Attorney behind that signature.
+//
+// A stored PDF is not this instance's own output: an inbound peer contract is
+// kept verbatim, because it holds provenance and credentials that cannot be
+// reproduced here, and a countersigned contract carries the peer's evidence next
+// to ours. So a document that merely decodes is the author of those bytes telling
+// us who signed — which is the claim being checked, not evidence for it.
+//
+// A credential that does not verify is dropped and reported. An absent or
+// undecodable attachment yields no documents, which is how an unsigned contract
+// reads.
+func (h *Validator) readSigningEvidence(ctx context.Context, tx *sqlx.Tx, did string) verifiedSigningEvidence {
 	if h.PDFCore == nil {
-		return nil
+		return verifiedSigningEvidence{}
 	}
 	pdfBytes, err := h.CRepo.FetchContractPDFBytes(ctx, tx, did)
 	if err != nil || len(pdfBytes) == 0 {
-		return nil
+		return verifiedSigningEvidence{}
 	}
-	evidence, found, err := h.PDFCore.ExtractEvidence(ctx, pdfBytes)
-	if err != nil || !found || len(evidence) == 0 {
-		return nil
+	attachments, err := h.PDFCore.ExtractEvidence(ctx, pdfBytes)
+	if err != nil {
+		return verifiedSigningEvidence{Findings: []string{fmt.Sprintf("Could not extract embedded signing evidence: %v", err)}}
 	}
-
-	documents := []json.RawMessage{evidence}
-	var bundle []json.RawMessage
-	if err := json.Unmarshal(evidence, &bundle); err == nil && len(bundle) > 0 {
-		documents = bundle
+	if len(attachments) == 0 {
+		return verifiedSigningEvidence{}
 	}
 
-	out := make([]SigningEvidence, 0, len(documents))
-	for _, doc := range documents {
+	out := verifiedSigningEvidence{Documents: make([]json.RawMessage, 0, len(attachments))}
+	for _, raw := range attachments {
+		attachment, subject, err := provenance.ReadSigningEvidence(raw)
+		if err != nil {
+			out.Findings = append(out.Findings, fmt.Sprintf("Embedded signing evidence is unreadable: %v", err))
+			continue
+		}
+		err = h.Credentials.Verify(attachment.Summary)
+		switch {
+		case err == nil:
+			out.Documents = append(out.Documents, attachment.Summary)
+			out.Statuses = append(out.Statuses, h.presentedCredentialStatus(ctx, attachment, subject))
+			out.Findings = append(out.Findings, h.verifyEmbeddedPoA(attachment, subject)...)
+		case errors.Is(err, provenance.ErrIssuerUnresolved):
+			out.Findings = append(out.Findings,
+				fmt.Sprintf("Embedded signing evidence is indeterminate — its issuer was not resolved to a key published for assertions: %v", err))
+		default:
+			out.Findings = append(out.Findings, fmt.Sprintf("Embedded signing evidence is invalid: %v", err))
+		}
+	}
+	return out
+}
+
+// verifyEmbeddedPoA re-runs the counterparty check on the Power of Attorney a
+// peer embedded before its own signature, so a contract inspected or downloaded
+// here answers "was the other side authorized to sign this" from the artifact
+// alone, and not only at the moment the ship crossed the trust gate.
+//
+// Our OWN signatures are skipped: that ceremony ran here, where the credential
+// is a `login` question and was answered as one (ADR-35). A ceremony that
+// presented none is not a finding here either — the compliance viewer raises
+// that from the contract.
+func (h *Validator) verifyEmbeddedPoA(attachment provenance.SigningEvidenceAttachment, subject provenance.SigningEvidenceSubject) []string {
+	if attachment.PoAPresentation == "" || subject.FieldName == "" {
+		return nil
+	}
+	if identity.SameDIDWeb(subject.FieldName, strings.TrimSpace(h.LocalPeer)) {
+		return nil
+	}
+	if h.Trust == nil {
+		return []string{fmt.Sprintf(
+			"The Power of Attorney embedded for %s cannot be checked: no issuer trust is configured on this instance", subject.FieldName)}
+	}
+	if _, err := oid4vp.VerifyCounterpartyPoA(attachment.PoAPresentation, h.Trust, oid4vp.CounterpartyPoAExpectation{
+		Organization: subject.FieldName,
+		SignatoryDID: subject.Signatory,
+	}); err != nil {
+		return []string{fmt.Sprintf("The Power of Attorney embedded for %s does not verify: %v", subject.FieldName, err)}
+	}
+	return nil
+}
+
+// presentedCredentialStatus reads, live, the status list of the Power of
+// Attorney embedded for this signature (DCS-FR-SM-18). Our own ceremony
+// verified it as a `login` credential, a peer's as a `peer` one (ADR-35).
+// Every state that is not read from a verified list is UNKNOWN with a reason.
+func (h *Validator) presentedCredentialStatus(ctx context.Context, attachment provenance.SigningEvidenceAttachment, subject provenance.SigningEvidenceSubject) CredentialStatus {
+	if attachment.PoAPresentation == "" {
+		return CredentialStatus{State: CredentialUnknown, Reason: "no Power of Attorney presentation is embedded for this signature"}
+	}
+	if h.Trust == nil {
+		return CredentialStatus{State: CredentialUnknown, Reason: "no issuer trust is configured on this instance"}
+	}
+	purpose := oid4vp.PurposePeer
+	if identity.SameDIDWeb(subject.FieldName, strings.TrimSpace(h.LocalPeer)) {
+		purpose = oid4vp.PurposeLogin
+	}
+	state, err := oid4vp.PresentedCredentialState(ctx, attachment.PoAPresentation, h.Trust, purpose)
+	return credentialStatusFromState(state, err)
+}
+
+func credentialStatusFromState(state status.State, err error) CredentialStatus {
+	if err != nil {
+		return CredentialStatus{State: CredentialUnknown, Reason: err.Error()}
+	}
+	switch state {
+	case status.StateValid:
+		return CredentialStatus{State: CredentialValid}
+	case status.StateInvalid:
+		return CredentialStatus{State: CredentialRevoked}
+	case status.StateSuspended:
+		return CredentialStatus{State: CredentialSuspended}
+	default:
+		return CredentialStatus{State: CredentialUnknown, Reason: fmt.Sprintf("the status list entry reads %q", state)}
+	}
+}
+
+// collectSigningEvidence distills each verified summary credential to the
+// compliance fields the Signature Compliance Viewer surfaces (DCS-FR-SM-26):
+// signer DID, ceremony, content/PDF hashes, credential type, the KB-JWT
+// binding, and the credential status.
+func collectSigningEvidence(evidence verifiedSigningEvidence) []SigningEvidence {
+	out := make([]SigningEvidence, 0, len(evidence.Documents))
+	for i, doc := range evidence.Documents {
 		if ev, ok := parseSigningEvidence(doc); ok {
+			ev.CredentialStatus = evidence.Statuses[i]
 			out = append(out, ev)
 		}
 	}
@@ -208,6 +400,7 @@ func (h *Validator) collectSigningEvidence(ctx context.Context, tx *sqlx.Tx, did
 // ok is false for a document that is not a signing-summary VC (no signer id).
 func parseSigningEvidence(evidence []byte) (SigningEvidence, bool) {
 	var vc struct {
+		Issuer            json.RawMessage `json:"issuer"`
 		CredentialSubject struct {
 			ID                   string `json:"id"`
 			CeremonyID           string `json:"ceremony_id"`
@@ -232,41 +425,34 @@ func parseSigningEvidence(evidence []byte) (SigningEvidence, bool) {
 		CredentialType:       cs.CredentialType,
 		KBSDHash:             cs.KBSDHash,
 		ValidationReportHash: cs.ValidationReportHash,
+		Issuer:               issuerDIDFromRaw(vc.Issuer),
 	}, true
 }
 
-// crossCheckEmbeddedPID re-verifies the embedded PID presentation against the
-// signature record (UC-04-03): it extracts the signing evidence from the
-// stored signed PDF, re-verifies the SD-JWT VC + KB-JWT, and confirms the
-// resolved signer DID matches the signature row. Absence of evidence (an
-// unsigned contract) yields no findings; any mismatch or verification
-// failure is reported as a finding so validate surfaces it.
-func (h *Validator) crossCheckEmbeddedPID(ctx context.Context, tx *sqlx.Tx, did string) []string {
-	if h.PDFCore == nil {
-		return nil
+func issuerDIDFromRaw(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
 	}
+	var asString string
+	if err := json.Unmarshal(raw, &asString); err == nil {
+		return strings.TrimSpace(asString)
+	}
+	var asObj struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &asObj); err == nil {
+		return strings.TrimSpace(asObj.ID)
+	}
+	return ""
+}
 
-	pdfBytes, err := h.CRepo.FetchContractPDFBytes(ctx, tx, did)
-	if err != nil || len(pdfBytes) == 0 {
+// crossCheckEmbeddedPID re-verifies the embedded signer binding against the
+// signature record (UC-04-03), from the summary credentials readSigningEvidence
+// already verified. Absence of evidence (an unsigned contract) yields no
+// findings; any mismatch is reported as a finding so validate surfaces it.
+func (h *Validator) crossCheckEmbeddedPID(ctx context.Context, tx *sqlx.Tx, did string, documents []json.RawMessage) []string {
+	if len(documents) == 0 {
 		return nil
-	}
-
-	evidence, found, err := h.PDFCore.ExtractEvidence(ctx, pdfBytes)
-	if err != nil {
-		return []string{fmt.Sprintf("Could not extract embedded PID evidence: %v", err)}
-	}
-	if !found || len(evidence) == 0 {
-		return nil
-	}
-
-	// The evidence attachment is a single ContractSigningSummaryCredential
-	// for single-signature contracts, or a JSON ARRAY of them for
-	// multi-signer contracts (one per declared field, all embedded before
-	// the first signature — DCS-FR-SM-07/-17).
-	documents := []json.RawMessage{evidence}
-	var bundle []json.RawMessage
-	if err := json.Unmarshal(evidence, &bundle); err == nil && len(bundle) > 0 {
-		documents = bundle
 	}
 
 	// Privacy: the PID is never embedded (no personal data in the shared PDF),
@@ -305,24 +491,13 @@ func (h *Validator) crossCheckEmbeddedPID(ctx context.Context, tx *sqlx.Tx, did 
 // modification, not just a hub schema version bump (evidence is pinned to
 // the version active at signing time, ADR-8, so rolling the hub forward
 // never causes a false drift finding). Absence of embedded evidence (an
-// unsigned contract) yields no finding.
-func (h *Validator) crossCheckSHACLDrift(ctx context.Context, tx *sqlx.Tx, did string) []string {
-	if h.PDFCore == nil {
+// unsigned contract) yields no finding. The comparison runs against the summary
+// credentials readSigningEvidence verified: the hash it compares to is the one
+// the ISSUER sealed, so an unverified attachment could otherwise supply a hash
+// that always matches.
+func (h *Validator) crossCheckSHACLDrift(ctx context.Context, tx *sqlx.Tx, did string, documents []json.RawMessage) []string {
+	if len(documents) == 0 {
 		return nil
-	}
-	pdfBytes, err := h.CRepo.FetchContractPDFBytes(ctx, tx, did)
-	if err != nil || len(pdfBytes) == 0 {
-		return nil
-	}
-	evidence, found, err := h.PDFCore.ExtractEvidence(ctx, pdfBytes)
-	if err != nil || !found || len(evidence) == 0 {
-		return nil
-	}
-
-	documents := []json.RawMessage{evidence}
-	var bundle []json.RawMessage
-	if err := json.Unmarshal(evidence, &bundle); err == nil && len(bundle) > 0 {
-		documents = bundle
 	}
 
 	embeddedHash := ""

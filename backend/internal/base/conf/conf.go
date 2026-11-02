@@ -5,7 +5,10 @@
 package conf
 
 import (
+	"log"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -13,15 +16,20 @@ func TransactionTimeout() time.Duration {
 	return 1 * time.Minute
 }
 
-// SystemToken is the in-cluster service credential the background PDF
-// regenerator presents to the internal signing primitives (it runs on NATS
-// events with no user JWT). Empty when unset — no system caller is accepted.
-func SystemToken() string {
-	return os.Getenv("DCS_SYSTEM_TOKEN")
-}
-
 func HTTPClientTimeout() time.Duration {
 	return 1 * time.Minute
+}
+
+// PACAuditEvidenceTimeout bounds only the DCS-side evidence collection for a
+// PAC audit. PAC_AUDIT_EVIDENCE_TIMEOUT accepts a positive Go duration; empty,
+// invalid and non-positive values retain the default.
+func PACAuditEvidenceTimeout() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("PAC_AUDIT_EVIDENCE_TIMEOUT")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 2 * time.Minute
 }
 
 func OutboxProcessorTimeOut() time.Duration {
@@ -85,4 +93,92 @@ func SyncFailCronJobTimeOut() time.Duration {
 		}
 	}
 	return 5 * time.Minute
+}
+
+// PDFRegenerationRetryTimeOut is how often the background regenerator
+// re-attempts entities left without a stored PDF. Lifecycle events arrive over
+// NATS at-most-once and a regeneration that fails is not redelivered, so a
+// single transient pdf-core or IPFS failure otherwise leaves the artifact
+// missing permanently: the contract cannot be exported, and a cross-instance
+// contract cannot be shipped at all — the sync-fail scheduler keeps retrying a
+// ship that has nothing to send. This is that path's counterpart, so it shares
+// its cadence. DCS_PDF_REGENERATION_RETRY_INTERVAL (a Go duration, e.g. "10s")
+// overrides the default; BDD/e2e set it low.
+func PDFRegenerationRetryTimeOut() time.Duration {
+	if v := os.Getenv("DCS_PDF_REGENERATION_RETRY_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 5 * time.Minute
+}
+
+// ArchiveExpiringWindow is how far ahead the archive dashboard's
+// expiring-contracts list looks (DCS-FR-CSA-04, DCS-FR-CSA-21).
+// DCS_ARCHIVE_EXPIRING_WINDOW_DAYS (a positive integer number of days)
+// overrides the 30-day default; any non-positive or unparsable value keeps
+// the default, like the other env-overridable accessors in this package.
+func ArchiveExpiringWindow() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("DCS_ARCHIVE_EXPIRING_WINDOW_DAYS")); v != "" {
+		if days, err := strconv.Atoi(v); err == nil && days > 0 {
+			return time.Duration(days) * 24 * time.Hour
+		}
+	}
+	return 30 * 24 * time.Hour
+}
+
+// ArchiveRetentionYears is the configured retention policy for archived
+// contracts (DCS-FR-CSA-14, DCS-FR-CSA-17), read from
+// DCS_ARCHIVE_RETENTION_YEARS. 0 means no retention policy: archive entries get
+// no retention_until and deletion stays permitted. Any non-positive or
+// unparsable value counts as 0. Values above maxArchiveRetentionYears count as
+// that maximum, with a log line: far larger values overflow the Postgres
+// timestamp range and fail archival at signing.
+func ArchiveRetentionYears() int {
+	if v := strings.TrimSpace(os.Getenv("DCS_ARCHIVE_RETENTION_YEARS")); v != "" {
+		if years, err := strconv.Atoi(v); err == nil && years > 0 {
+			if years > maxArchiveRetentionYears {
+				log.Printf("DCS_ARCHIVE_RETENTION_YEARS=%d exceeds the maximum; using %d", years, maxArchiveRetentionYears)
+				return maxArchiveRetentionYears
+			}
+			return years
+		}
+	}
+	return 0
+}
+
+const maxArchiveRetentionYears = 100
+
+// APIRateLimitPerMinute is the per-credential request budget for
+// authenticated API interactions (DCS-FR-CWE-28). DCS_API_RATE_LIMIT_PER_MINUTE
+// (a positive integer) overrides the default; any non-positive or unparsable
+// value keeps the default, like the other env-overridable accessors here.
+func APIRateLimitPerMinute() int {
+	if v := strings.TrimSpace(os.Getenv("DCS_API_RATE_LIMIT_PER_MINUTE")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 3000
+}
+
+// AESCertNameMatchRequired reports whether the sole-control gate (ADR-20)
+// enforces cert-subject to PID name matching for an AES-level signature. It
+// is mandatory and non-configurable for QES (eIDAS Annex I requires a
+// qualified certificate to carry the signatory's verified name); for AES it
+// defaults to enforced too — closing exactly the shared/self-signed-key hole
+// the gate exists for — but an operator can relax it with
+// DCS_AES_CERT_NAME_MATCH_REQUIRED=false for a deployment whose AES ceremony
+// legitimately cannot bind a certificate name (documented operator choice,
+// never the default).
+func AESCertNameMatchRequired() bool {
+	v := strings.TrimSpace(os.Getenv("DCS_AES_CERT_NAME_MATCH_REQUIRED"))
+	if v == "" {
+		return true
+	}
+	enabled, err := strconv.ParseBool(v)
+	if err != nil {
+		return true
+	}
+	return enabled
 }

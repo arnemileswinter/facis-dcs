@@ -1,9 +1,18 @@
+{{- $tls := dig "internalTLS" "enabled" false (.Values.global | default dict) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ .Release.Name }}-ipfs
 spec:
   replicas: 1
+  # The repo volume is RWO, so an update must terminate the current pod before
+  # creating its replacement. Keeping RollingUpdate avoids an invalid
+  # server-side-apply migration from the chart's previous strategy.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: ipfs
@@ -14,14 +23,25 @@ spec:
         app.kubernetes.io/name: ipfs
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
-      {{- if .Values.api.cors.enabled }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       initContainers:
         - name: ipfs-config
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}{{ with .Values.image.digest }}@{{ . }}{{ end }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           command:
             - /bin/sh
             - -c
+          {{- if .Values.api.auth.enabled }}
+          env:
+            {{- include "ipfs.apiTokenEnv" . | nindent 12 }}
+          {{- end }}
           args:
             - |
               set -eu
@@ -30,19 +50,50 @@ spec:
               fi
               ipfs config Addresses.API /ip4/0.0.0.0/tcp/5001
               ipfs config Addresses.Gateway /ip4/0.0.0.0/tcp/8080
+              {{- if .Values.api.auth.enabled }}
+              ipfs config --json API.Authorizations "{\"dcs\":{\"AuthSecret\":\"bearer:$IPFS_API_TOKEN\",\"AllowedPaths\":[\"/api/v0\"]}}"
+              {{- else }}
+              ipfs config --json API.Authorizations '{}'
+              {{- end }}
+              {{- if .Values.api.cors.enabled }}
               ipfs config --json API.HTTPHeaders.Access-Control-Allow-Origin '{{ toJson .Values.api.cors.allowOrigins }}'
               ipfs config --json API.HTTPHeaders.Access-Control-Allow-Methods '{{ toJson .Values.api.cors.allowMethods }}'
               ipfs config --json API.HTTPHeaders.Access-Control-Allow-Headers '{{ toJson .Values.api.cors.allowHeaders }}'
               ipfs config --json API.HTTPHeaders.Access-Control-Allow-Credentials '["{{ .Values.api.cors.allowCredentials }}"]'
-              chown -R 1000:100 /data/ipfs
+              {{- end }}
+              {{- if .Values.config.routingType }}
+              ipfs config Routing.Type {{ .Values.config.routingType }}
+              {{- end }}
+              {{- if eq .Values.config.routingType "none" }}
+              # Routing.Type=none stops the DHT, not the swarm: the daemon still
+              # dials every bootstrap peer it ships with and keeps those
+              # connections alive over TCP and QUIC. On a shared CI runner that
+              # is pure contention against the very writes the node is being
+              # timed on, so a node that is meant to talk to nobody is given
+              # nobody to talk to.
+              ipfs bootstrap rm --all
+              {{- end }}
+              {{- if .Values.config.noSync }}
+              ipfs config --json Datastore.NoSync true
+              {{- end }}
+          {{- with .Values.resources }}
+          # A pod's effective limit is max(sum of containers, max of init
+          # containers), so mirroring the main block here costs nothing while an
+          # unset one lets a LimitRange default size the whole pod.
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: ipfs-data
               mountPath: /data/ipfs
-      {{- end }}
       containers:
         - name: ipfs
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}{{ with .Values.image.digest }}@{{ . }}{{ end }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: gateway
               containerPort: 8080
@@ -53,6 +104,11 @@ spec:
             - name: swarm-tcp
               containerPort: 4001
               protocol: TCP
+          {{- if .Values.api.auth.enabled }}
+          # For the ipfs CLI in this container (kubectl exec).
+          env:
+            {{- include "ipfs.apiTokenEnv" . | nindent 12 }}
+          {{- end }}
           readinessProbe:
             tcpSocket:
               port: api
@@ -65,7 +121,13 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- end }}
+        {{- if $tls }}
+        {{- include "digital-contracting-service.internalTLSProxy" (dict "root" . "upstreamPort" 5001) | nindent 8 }}
+        {{- end }}
       volumes:
+        {{- if $tls }}
+        {{- include "digital-contracting-service.internalTLSVolume" . | nindent 8 }}
+        {{- end }}
         - name: ipfs-data
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:

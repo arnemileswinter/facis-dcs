@@ -1,6 +1,7 @@
 package command
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -9,14 +10,16 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype"
-	"digital-contracting-service/internal/base/ipfs"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
+	pacevent "digital-contracting-service/internal/processauditandcompliance/event"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -38,24 +41,44 @@ type PeerPdfReceiveCmd struct {
 	// instance's copy (not regenerated), so the counterparty's C2PA provenance
 	// chain embedded in it is preserved (ADR-13).
 	Pdf []byte
+	// AdoptRevoked is set when the authenticated counterparty declared the
+	// shipped contract REVOKED: it revoked its own applied signature, which
+	// voids the agreement regardless of this instance's own workflow progress
+	// (DCS-NFR-BR-06). The sole exception to intrinsic-state privacy.
+	AdoptRevoked bool
 }
+
+// ErrSigningConflict refuses a shipped PDF that does not extend the signed
+// revision the local copy holds. Signatures are applied in sequence (ADR-38
+// §2): two signatures over the same revision are refused, never merged, and
+// the local copy is not overwritten.
+var ErrSigningConflict = errors.New("the shipped PDF does not extend the signed revision this instance holds: signatures over the same revision are refused, never merged or overwritten")
+
+// ErrClosedCopy refuses a shipped PDF for a local copy that is TERMINATED,
+// EXPIRED or WITHDRAWN. These states have no exit other than termination, so
+// no ship can change such a copy.
+var ErrClosedCopy = errors.New("the local copy of the contract is closed and takes no ship")
+
+var closedStates = []contractstate.ContractState{contractstate.Terminated, contractstate.Expired, contractstate.Withdrawn}
 
 // PeerPdfReceiver upserts a peer-shipped contract into this instance's own
 // store and opens its own local workflow tasks (ADR-13): each DCS runs its own
 // RBAC; nothing crosses the boundary.
 type PeerPdfReceiver struct {
-	DB         *sqlx.DB
-	CRepo      db.ContractRepo
-	RTRepo     db.ReviewTaskRepo
-	ATRepo     db.ApprovalTaskRepo
-	NTRepo     db.NegotiationTaskRepo
-	IPFSClient *ipfs.APIClient
+	DB        *sqlx.DB
+	CRepo     db.ContractRepo
+	NRepo     db.NegotiationRepo
+	RTRepo    db.ReviewTaskRepo
+	ATRepo    db.ApprovalTaskRepo
+	NTRepo    db.NegotiationTaskRepo
+	Artifacts *artifactstore.Store
 }
 
 // Handle upserts the local copy from the shipped contract's JSON-LD. A first
 // ship creates the copy owned by the counterparty (its origin); a later ship
-// updates the content and bumps the local version. The contract lands in
-// NEGOTIATION — the settlement and signing phases are separate ships (ADR-13).
+// snapshots the held version, updates the content and bumps the local version.
+// The contract lands in NEGOTIATION — the settlement and signing phases are
+// separate ships (ADR-13).
 func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) error {
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -67,16 +90,63 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		}
 	}(tx)
 
+	// Serialize receipts per contract IRI: a peer ships once per render, so two
+	// ships of the same contract can be in flight at once. Both would read no
+	// local copy yet, both would insert, and the loser dies on the primary key
+	// with its payload — the newer document — dropped, leaving this instance
+	// holding the older one until a retry lands. Queuing here makes the second
+	// receipt see the first one's copy and update it. Released on tx
+	// commit/rollback.
+	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtext($1))", cmd.ContractIRI); err != nil {
+		return fmt.Errorf("could not acquire the per-contract receipt lock for %s: %w", cmd.ContractIRI, err)
+	}
+
 	existing, err := h.CRepo.ReadProcessDataByDIDOrNil(ctx, tx, cmd.ContractIRI)
 	if err != nil {
 		return fmt.Errorf("could not read local contract copy: %w", err)
+	}
+	// A closed copy has no workflow left that a ship could feed: its content,
+	// version, PDF and tasks stay as they were closed (DCS-FR-CWE-23).
+	if existing != nil && slices.Contains(closedStates, contractstate.ContractState(existing.State)) {
+		return fmt.Errorf("%w: the local copy of %s is %s", ErrClosedCopy, cmd.ContractIRI, existing.State)
+	}
+
+	// A shipped PDF replaces the local copy only if it extends the signed
+	// revision this instance holds (ADR-38 §2). The local signing path takes
+	// the same lock, so this reads the latest local signature.
+	keepLocalPDF := false
+	if existing != nil && len(cmd.Pdf) > 0 {
+		current, err := h.currentPDF(ctx, tx, cmd.ContractIRI)
+		if err != nil {
+			return err
+		}
+		if !provenance.ExtendsSignedRevision(current, cmd.Pdf) {
+			switch {
+			case cmd.AdoptRevoked:
+				// The revocation voids the agreement; the local signed copy stays.
+				keepLocalPDF = true
+			case bytes.HasPrefix(current, cmd.Pdf):
+				// The local copy already contains the shipped revision.
+				return nil
+			default:
+				if err := pacevent.RecordSigningConflictTx(ctx, tx, cmd.ContractIRI, cmd.Counterparty,
+					pacevent.SigningConflictReceived, ErrSigningConflict.Error()); err != nil {
+					return err
+				}
+				if err := tx.Commit(); err != nil {
+					return fmt.Errorf("could not record the signing conflict on %s: %w", cmd.ContractIRI, err)
+				}
+				return ErrSigningConflict
+			}
+		}
 	}
 
 	// pdf-core carries the contract JSON-LD VERBATIM (ADR-13): the shipped payload
 	// is already this instance's native DCS form — the exact bytes the originator
 	// embedded — so it is used as-is, with no dialect round-trip.
 	payload := datatype.JSON(cmd.Payload)
-	templateIRI, templateVersion, name := parseShippedContractMeta(cmd.Payload)
+	templateIRI, templateVersion := parseShippedTemplateProvenance(cmd.Payload)
+	shared := parseShippedSharedDetails(cmd.Payload)
 	now := time.Now().UTC()
 
 	data := db.Contract{
@@ -85,27 +155,76 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		ContractData:    &payload,
 		TemplateDID:     templateIRI,
 		TemplateVersion: templateVersion,
-		Name:            name,
+		Name:            shared.Name,
+		Description:     shared.Description,
+		StartDate:       shared.StartDate,
+		ExpDate:         shared.ExpDate,
+		ExpPolicy:       shared.ExpPolicy,
+		ExpNoticePeriod: shared.ExpNoticePeriod,
 	}
 
 	if existing != nil {
+		// Before adopting a post-Submit re-ship, rebuild the expected document
+		// from this instance's formal base and confirmed Accepts.
+		// Counteroffer / signed-artifact re-ships with no local Accepts adopt
+		// without reconstruct (ADR-13 PDF exchange).
+		if h.NRepo != nil {
+			if err := VerifyShippedAgainstLocalRound(ctx, tx, h.CRepo, h.NRepo, cmd.ContractIRI, existing.ContractVersion, cmd.Payload); err != nil {
+				return err
+			}
+		}
 		// A re-ship (a counteroffer or a settled/signed version) refreshes the
 		// content but must not clobber this instance's own local RBAC progress —
 		// its intrinsic state is private and advances through its own workflow.
-		data.State = existing.State
+		// The one exception is a revocation ship (DCS-NFR-BR-06): the
+		// counterparty voided the agreement, so the local copy hard-stops in
+		// REVOKED no matter where its own workflow stood.
 		data.Origin = existing.Origin
 		data.CreatedBy = existing.CreatedBy
 		data.ContractVersion = existing.ContractVersion + 1
-		if err := h.CRepo.RemoteUpdate(ctx, tx, data); err != nil {
+		// Snapshot the current row to contract_history before the re-ship
+		// replaces it and bumps contract_version (ADR-0006).
+		if err := h.CRepo.CreateHistoryEntryForDID(ctx, tx, cmd.ContractIRI, cmd.Counterparty); err != nil {
+			return fmt.Errorf("could not create history entry for did %s: %w", cmd.ContractIRI, err)
+		}
+		// The content update leaves the state column alone (an empty state is
+		// not written); the state changes only through the guarded transition.
+		content := data
+		content.State = ""
+		if err := h.CRepo.RemoteUpdate(ctx, tx, content); err != nil {
 			return fmt.Errorf("could not update local contract copy: %w", err)
+		}
+		data.State = existing.State
+		if cmd.AdoptRevoked && existing.State != contractstate.Revoked.String() {
+			if err := h.CRepo.UpdateState(ctx, tx, cmd.ContractIRI, existing.State, contractstate.Revoked.String()); err != nil {
+				return fmt.Errorf("could not adopt the revocation of %s: %w", cmd.ContractIRI, err)
+			}
+			data.State = contractstate.Revoked.String()
+		}
+		// A new document arrived, so the round it belongs to is a new one: any
+		// engagement this instance had with the superseded version is owed again
+		// against this one. This carries tasks forward, it never mints a first
+		// one — receiving a document is not engaging with it.
+		if isSignedArtifactReship(cmd) {
+			// Peer sent an already-signed PDF: bump version, but do not reopen negotiation tasks.
+			if err := h.NTRepo.RollForwardKeepingState(ctx, tx, cmd.ContractIRI, existing.ContractVersion, data.ContractVersion); err != nil {
+				return fmt.Errorf("could not carry negotiation tasks to the new contract version: %w", err)
+			}
+		} else if err := h.NTRepo.RollForward(ctx, tx, cmd.ContractIRI, existing.ContractVersion, data.ContractVersion); err != nil {
+			return fmt.Errorf("could not carry negotiation tasks to the new contract version: %w", err)
 		}
 	} else {
 		// A first receipt is an inbound offer: this instance's intrinsic state
 		// starts at OFFERED (an offer on our table, awaiting our own review),
 		// which its local review/approval tasks then advance. The peer-facing
-		// extrinsic lifecycle (offered → accepted → executed) is inferred from
-		// this plus the shipped PDF.
+		// extrinsic lifecycle (proposed → agreed → executed) is inferred from
+		// this plus the shipped PDF. A first receipt that already declares a
+		// revocation (this instance never saw the offer) lands directly in
+		// REVOKED — there is nothing left to review.
 		data.State = contractstate.Offered.String()
+		if cmd.AdoptRevoked {
+			data.State = contractstate.Revoked.String()
+		}
 
 		// The two parties are objective on both copies: the origin (the peer that
 		// created and offered the contract) and this instance. This instance's own
@@ -125,7 +244,12 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		if err := h.CRepo.RemoteCreate(ctx, tx, data); err != nil {
 			return fmt.Errorf("could not create local contract copy: %w", err)
 		}
-		if err := createTasks(ctx, tx, h.RTRepo, h.ATRepo, h.NTRepo, cmd.ContractIRI, cmd.LocalPeer, resp); err != nil {
+		// Review and approval tasks only. No negotiation task is minted here:
+		// receiving an offer is not engaging with it, and a task on arrival would
+		// make submit's "no open tasks" gate answer for a round nobody entered.
+		// The counterparty mints its own by accepting the offer or by proposing a
+		// redline on it (command/acceptoffer.go, command/negotiate.go).
+		if err := createReviewAndApprovalTasks(ctx, tx, h.RTRepo, h.ATRepo, cmd.ContractIRI, cmd.LocalPeer, resp); err != nil {
 			return err
 		}
 	}
@@ -136,12 +260,25 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 	// service verified the human-readable render matches the embedded JSON-LD
 	// before this; this instance's own later changes append to this base (so the
 	// C2PA chain grows rather than resetting).
-	if len(cmd.Pdf) > 0 {
-		stored, err := h.IPFSClient.CreateFile(ctx, cmd.Pdf)
+	if len(cmd.Pdf) > 0 && !keepLocalPDF {
+		// The receiver encrypts the peer's verbatim bytes with its OWN CEK; the
+		// inbound PDF stays authoritative and byte-identical after decrypt.
+		storedCID, err := h.Artifacts.Put(ctx, artifactstore.ContractScope(cmd.ContractIRI), cmd.Pdf)
 		if err != nil {
 			return fmt.Errorf("could not store carried-over peer PDF in IPFS: %w", err)
 		}
-		c2paState, err := provenance.MapCWEStateToC2PA(data.State)
+		// pdf_c2pa_state describes the STORED ARTIFACT, not this instance's
+		// workflow. The peer ships a PDF it may already have signed while our own
+		// copy starts at OFFERED, so mapping the local state alone files a
+		// PAdES-signed artifact as "draft": a later local terminate, or the expiry
+		// cron, would then see a re-renderable draft and append a C2PA manifest
+		// onto the counterparty's signed bytes. The shipped bytes are in hand
+		// here, so the artifact answers for itself once, at the moment it is
+		// stored, instead of every lifecycle event afterwards having to ask. It is
+		// also this instance's record that the agreement is settled, which
+		// requireUnsettledAgreement reads to refuse a renegotiation of a document
+		// the peer already signed.
+		c2paState, err := provenance.ArtifactC2PAState(data.State, cmd.Pdf)
 		if err != nil {
 			return fmt.Errorf("could not map contract state to C2PA lifecycle: %w", err)
 		}
@@ -161,9 +298,10 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		}
 		payloadSum := sha256.Sum256(persistedData)
 		if err := h.CRepo.UpdatePDFState(ctx, tx, cmd.ContractIRI, db.ContractPDFState{
-			IPFSCID:     stored.Identifier.Value,
+			IPFSCID:     storedCID,
 			C2PAState:   c2paState,
 			PayloadHash: hex.EncodeToString(payloadSum[:]),
+			Signed:      provenance.CarriesPAdESSignature(cmd.Pdf),
 		}); err != nil {
 			return fmt.Errorf("could not record carried-over PDF state: %w", err)
 		}
@@ -172,12 +310,36 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 	return tx.Commit()
 }
 
-// parseShippedContractMeta pulls the template provenance and title out of the
+// currentPDF returns the PDF bytes of the local copy, or nil if no PDF is
+// stored yet.
+func (h *PeerPdfReceiver) currentPDF(ctx context.Context, tx *sqlx.Tx, did string) ([]byte, error) {
+	state, err := h.CRepo.ReadPDFState(ctx, tx, did)
+	if err != nil {
+		return nil, fmt.Errorf("could not read the PDF state of the local copy of %s: %w", did, err)
+	}
+	if state == nil || state.IPFSCID == "" {
+		return nil, nil
+	}
+	current, err := h.Artifacts.Get(ctx, artifactstore.ContractScope(did), state.IPFSCID)
+	if err != nil {
+		return nil, fmt.Errorf("could not read the PDF of the local copy of %s: %w", did, err)
+	}
+	return current, nil
+}
+
+func isSignedArtifactReship(cmd PeerPdfReceiveCmd) bool {
+	if cmd.AdoptRevoked {
+		return false
+	}
+	return provenance.CarriesPAdESSignature(cmd.Pdf)
+}
+
+// parseShippedTemplateProvenance pulls the template DID and version out of the
 // shipped contract's JSON-LD (derivedFromTemplate.@id ends in the template IRI).
-func parseShippedContractMeta(payload []byte) (templateIRI string, templateVersion int, name *string) {
+func parseShippedTemplateProvenance(payload []byte) (templateIRI string, templateVersion int) {
 	var doc map[string]any
 	if err := json.Unmarshal(payload, &doc); err != nil {
-		return "", 0, nil
+		return "", 0
 	}
 	if prov, ok := doc["derivedFromTemplate"].(map[string]any); ok {
 		if id, ok := prov["@id"].(string); ok {
@@ -187,10 +349,5 @@ func parseShippedContractMeta(payload []byte) (templateIRI string, templateVersi
 			templateVersion = int(v)
 		}
 	}
-	if meta, ok := doc["dcs:metadata"].(map[string]any); ok {
-		if t, ok := meta["dcs:title"].(string); ok && t != "" {
-			name = &t
-		}
-	}
-	return templateIRI, templateVersion, name
+	return templateIRI, templateVersion
 }

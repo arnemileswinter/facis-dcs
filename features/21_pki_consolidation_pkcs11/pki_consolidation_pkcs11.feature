@@ -9,10 +9,10 @@
 #     their respective HSM labels;
 #   - a PDF export's embedded Contract-Lifecycle-VC declares an ECDSA/ES256
 #     proof suite;
-#   - pdf-core holds NO signature material: it builds the COSE
-#     Sig_structure bytes and calls the authenticated backend endpoint
-#     POST /internal/c2pa/sign (backend/design/internal_signing.go), which
-#     signs via hsm.Signer("dcs-c2pa"); the embedded C2PA manifest declares
+#   - pdf-core holds NO signature material: its prepare step returns the
+#     COSE Sig_structure bytes, the DCS backend signs them in-process with
+#     the dcs-c2pa HSM key and posts them back to pdf-core's stateless
+#     POST /c2pa/embed; the embedded C2PA manifest declares
 #     COSE alg ES256(-7), not EdDSA(-8);
 #   - (two-instance) the did:web peer-sync challenge is signed with the HSM
 #     DID key and verified by the receiving instance against the
@@ -39,7 +39,7 @@
 @DCS-IR-HI-01 @DCS-NFR-SEC-02
 Feature: PKI consolidation - PKCS#11 + SoftHSM2, ECDSA P-256, trust anchors, rotation
 
-  @DCS-IR-HI-01
+  @DCS-IR-HI-01 @DCS-IR-SI-12 @DCS-NFR-SEC-06
   Scenario: A correctly PKCS#11-configured backend is reachable and serves its HSM-backed DID document
     # See the header comment for why only the positive path is modeled: a
     # reachable, 200-responding /.well-known/did.json can only happen if
@@ -62,12 +62,19 @@ Feature: PKI consolidation - PKCS#11 + SoftHSM2, ECDSA P-256, trust anchors, rot
     Then get http 200:Success code
     And the DID document's verificationMethod key is an ECDSA P-256 JWK, not RSA
 
+  # The key custody requirement is unchanged: a real HSM ECDSA P-256 operation
+  # signs the request object. What it carries changed. A wallet is given an
+  # x509_san_dns client identifier, so it resolves trust from the certificate
+  # chain naming that hostname — the signature must therefore verify against
+  # that chain, which is the DID key's, and the header carries x5c rather than
+  # a bare jwk. A self-describing jwk proves possession of a key the wallet has
+  # no reason to trust.
   @DCS-IR-HI-01
-  Scenario: The OpenID4VP authorization request JWT (JAR) is ES256-signed by the dcs-oid4vp-jar HSM key
+  Scenario: The OpenID4VP authorization request JWT (JAR) is ES256-signed by an HSM key
     When I start an OpenID4VP login and fetch the signed authorization request object
     Then get http 200:Success code
-    And the authorization request JWT is ES256-signed with an embedded EC P-256 JWK verifiable against itself
-    And the authorization request JWT's kid names the dcs-oid4vp-jar HSM key label
+    And the authorization request JWT is ES256-signed with an EC P-256 key verifiable against its own certificate chain
+    And the authorization request JWT's certificate names the hostname its client_id claims
 
   @DCS-IR-HI-01
   Scenario: The exported PDF's Contract-Lifecycle-VC proof is ECDSA/ES256, not Ed25519Signature2020
@@ -114,7 +121,7 @@ Feature: PKI consolidation - PKCS#11 + SoftHSM2, ECDSA P-256, trust anchors, rot
     # of pass/fail counts.
     Given I am authenticated with roles: "Contract Manager"
 
-  @DCS-OR-C2PA-007
+  @DCS-OR-C2PA-007 @DCS-IR-CI-09
   Scenario: Revoking the dev signing certificate in the CRL flips a previously valid signature to invalid
     Given contract "PKI CRL Revocation Contract" has reached contract state "SIGNED"
     And signature validation for contract "PKI CRL Revocation Contract" currently reports no certificate-revocation finding
@@ -123,16 +130,16 @@ Feature: PKI consolidation - PKCS#11 + SoftHSM2, ECDSA P-256, trust anchors, rot
     Then get http 200:Success code
     And signature validation for contract "PKI CRL Revocation Contract" reports the certificate as revoked
 
-  @DCS-OR-C2PA-007
-  Scenario: A historical signature made with the old HSM key keeps validating after rotation, while a new signature uses the new key
-    Given I am authenticated with roles: "Contract Manager"
-    And contract "PKI Rotation Old Contract" has reached contract state "SIGNED"
-    When I validate the signature for contract "PKI Rotation Old Contract"
-    Then get http 200:Success code
-    And signature validation for contract "PKI Rotation Old Contract" reports the signature as still valid after rotation
-    Given the active dcs-contract-pades HSM key version has been rotated to a new version
-    And contract "PKI Rotation New Contract" has reached contract state "SIGNED"
-    When I validate the signature for contract "PKI Rotation Old Contract"
-    Then get http 200:Success code
-    And signature validation for contract "PKI Rotation Old Contract" reports the signature as still valid after rotation
-    And the applied signatures for contracts "PKI Rotation Old Contract" and "PKI Rotation New Contract" are attributed to different HSM key versions
+  # A prior version of this pack covered dcs-contract-pades key rotation
+  # (a historical PAdES contract signature staying valid across a version
+  # bump, old vs new signatures attributed to distinct key versions). That
+  # key, and the DCS-as-signatory PAdES signing path that produced such
+  # signatures, is gone by design (ADR-20/ADR-12: the DCS holds no contract-
+  # signing key: the wallet signs, DCS only validates and records). Contract
+  # signatures no longer carry any DCS HSM key attribution to rotate. No
+  # remaining DCS-held key exercises version-aware rotation in production
+  # either: hsm.VersionedLabel has no caller, and C2PA signing
+  # (hsm.Signer(KeyLabelC2PA())) always resolves the base "dcs-c2pa" label.
+  # Not replacing this scenario against dcs-c2pa: that would mean adding
+  # unused-in-production rotation wiring solely to keep a test green, rather
+  # than testing an existing behavior.

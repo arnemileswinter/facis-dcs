@@ -13,15 +13,18 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/base"
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/db"
 	"digital-contracting-service/internal/base/ipfs"
 	"digital-contracting-service/internal/base/tsa"
+	cweeventtype "digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -29,6 +32,7 @@ import (
 type OutboxProcessor struct {
 	DB           *sqlx.DB
 	IPFSClient   *ipfs.APIClient
+	Artifacts    *artifactstore.Store
 	TSAClient    *tsa.APIClient
 	ARepo        db.AuditTrailRepository
 	CEPPubClient *CloudEventPubClient
@@ -49,68 +53,109 @@ func (j OutboxProcessor) Start(ctx context.Context) error {
 // sequential, network-bound anchoring of earlier events in the same
 // backlog — that decoupling is why `published` is a separate flag from
 // `processed`.
+//
+// Events go out in outbox order (DCS-NFR-SF-01): one replica at a time
+// publishes, and a batch stops at the first event that cannot be published,
+// so no later event overtakes it.
 func (j OutboxProcessor) startPublishingJob(ctx context.Context, interval time.Duration) {
 	schedulerLogic := func() error {
-		tx, err := j.DB.BeginTxx(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("could not start transaction: %w", err)
-		}
-		defer func(tx *sqlx.Tx) {
-			if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-				log.Printf("could not rollback transaction: %v", err)
-			}
-		}(tx)
-
-		rows, err := tx.QueryxContext(ctx, `
-			SELECT id, component, event_type, event_data, did, created_at
-			FROM outbox_events
-			WHERE published = FALSE
-			ORDER BY created_at ASC
-			LIMIT 200
-			FOR UPDATE SKIP LOCKED
-		`)
-		if err != nil {
-			return fmt.Errorf("could not query unpublished outbox events: %w", err)
-		}
-
-		var events []datatype.OutboxEvent
-		for rows.Next() {
-			var event datatype.OutboxEvent
-			if err := rows.StructScan(&event); err != nil {
-				if closeErr := rows.Close(); closeErr != nil {
-					return closeErr
-				}
-				return fmt.Errorf("could not scan event: %w", err)
-			}
-			events = append(events, event)
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-
-		for _, event := range events {
-			if err := j.CEPPubClient.Publish(event.Component, event.EventType, event.EventData); err != nil {
-				log.Printf("could not publish event %d: %v", event.ID, err)
-				continue
-			}
-			if err := db.MarkOutboxEventPublished(ctx, tx, event.ID); err != nil {
-				return fmt.Errorf("could not mark event %d published: %w", event.ID, err)
-			}
-		}
-
-		return tx.Commit()
+		_, err := db.RunExclusive(ctx, j.DB, "outbox-publishing", func() error { return j.publishPending(ctx) })
+		return err
 	}
 
 	ticker := time.NewTicker(interval)
 	for range ticker.C {
-		if err := schedulerLogic(); err != nil {
+		if err := trackRun("outbox-publishing", schedulerLogic); err != nil {
 			log.Printf("could not publish outbox entries: %v", err)
 		}
 	}
 }
 
+func (j OutboxProcessor) publishPending(ctx context.Context) error {
+	tx, err := j.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("could not start transaction: %w", err)
+	}
+	defer func(tx *sqlx.Tx) {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Printf("could not rollback transaction: %v", err)
+		}
+	}(tx)
+
+	rows, err := tx.QueryxContext(ctx, `
+		SELECT id, component, event_type, event_data, did, created_at
+		FROM outbox_events
+		WHERE published = FALSE
+		ORDER BY created_at ASC, id ASC
+		LIMIT 200
+		FOR UPDATE SKIP LOCKED
+	`)
+	if err != nil {
+		return fmt.Errorf("could not query unpublished outbox events: %w", err)
+	}
+
+	var events []datatype.OutboxEvent
+	for rows.Next() {
+		var event datatype.OutboxEvent
+		if err := rows.StructScan(&event); err != nil {
+			if closeErr := rows.Close(); closeErr != nil {
+				return closeErr
+			}
+			return fmt.Errorf("could not scan event: %w", err)
+		}
+		events = append(events, event)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	err = publishInOrder(events, j.CEPPubClient.Publish, func(id int64) error {
+		return db.MarkOutboxEventPublished(ctx, tx, id)
+	})
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// publishInOrder publishes events in their order and marks each one published.
+// It stops at the first event that cannot be published: the next run starts
+// with it again, and no later event goes out ahead of it.
+func publishInOrder(events []datatype.OutboxEvent, publish func(id, component, eventType string, data json.RawMessage) error, markPublished func(id int64) error) error {
+	for _, event := range events {
+		if err := publish(cloudEventID(event), event.Component, event.EventType, event.EventData); err != nil {
+			log.Printf("could not publish event %d, stopping the batch: %v", event.ID, err)
+			return nil
+		}
+		if err := markPublished(event.ID); err != nil {
+			return fmt.Errorf("could not mark event %d published: %w", event.ID, err)
+		}
+	}
+	return nil
+}
+
+// cloudEventID is the CloudEvent id of an outbox event. It is the same on
+// every publish of the event, so the stream stores a republished event once
+// and a consumer recognizes a redelivered one.
+func cloudEventID(event datatype.OutboxEvent) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, fmt.Appendf(nil, "dcs-outbox-event:%d:%d", event.ID, event.CreatedAt.UnixNano())).String()
+}
+
 func (j OutboxProcessor) startProcessingJob(ctx context.Context, interval time.Duration) {
-	schedulerLogic := func() error {
+	ticker := time.NewTicker(interval)
+	for range ticker.C {
+		if err := trackRun("outbox-anchoring", func() error { return j.anchorPending(ctx) }); err != nil {
+			log.Printf("could not process outbox entries: %v", err)
+		}
+	}
+}
+
+// anchorPending anchors the next batch of unprocessed outbox events. One
+// replica at a time does this: the batch, the per-resource chain heads and the
+// checkpoint chain are read and then extended, and two replicas doing that at
+// once anchor the same events twice and fork the chains.
+func (j OutboxProcessor) anchorPending(ctx context.Context) error {
+	_, err := db.RunExclusive(ctx, j.DB, "outbox-anchoring", func() error {
 		tx, err := j.DB.BeginTxx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("could not start transaction: %w", err)
@@ -179,14 +224,8 @@ func (j OutboxProcessor) startProcessingJob(ctx context.Context, interval time.D
 			return nil
 		}
 		return j.anchorBatch(ctx, anchorable)
-	}
-
-	ticker := time.NewTicker(interval)
-	for range ticker.C {
-		if err := schedulerLogic(); err != nil {
-			log.Printf("could not process outbox entries: %v", err)
-		}
-	}
+	})
+	return err
 }
 
 // anchorBatch anchors one batch of audit-visible events and commits to it with
@@ -249,12 +288,16 @@ func (j OutboxProcessor) anchorBatch(ctx context.Context, events []datatype.Outb
 		LeafCIDs:   leafCIDs,
 		CreatedAt:  time.Now().UTC(),
 	}
-	stored, err := j.IPFSClient.CreateFile(ctx, checkpoint)
+	checkpointRaw, err := json.Marshal(checkpoint)
+	if err != nil {
+		return fmt.Errorf("could not encode checkpoint: %w", err)
+	}
+	checkpointCID, err := j.Artifacts.Put(ctx, j.Artifacts.InstanceScope(), checkpointRaw)
 	if err != nil {
 		return fmt.Errorf("could not store checkpoint: %w", err)
 	}
-	if _, err := j.IPFSClient.FetchFile(stored.Identifier.Value); err != nil {
-		return fmt.Errorf("checkpoint CID %s not resolvable after store: %w", stored.Identifier.Value, err)
+	if _, err := j.IPFSClient.FetchFile(checkpointCID); err != nil {
+		return fmt.Errorf("checkpoint CID %s not resolvable after store: %w", checkpointCID, err)
 	}
 
 	// The root is immutable, so a TSA that is slow or down must not hold up the
@@ -267,7 +310,7 @@ func (j OutboxProcessor) anchorBatch(ctx context.Context, events []datatype.Outb
 		tsaSignature = &signature
 	}
 
-	seq, err := j.ARepo.AppendCheckpoint(ctx, tx, stored.Identifier.Value, root, prevRoot, len(leafHashes), tsaSignature)
+	seq, err := j.ARepo.AppendCheckpoint(ctx, tx, checkpointCID, root, prevRoot, len(leafHashes), tsaSignature)
 	if err != nil {
 		return fmt.Errorf("could not append checkpoint: %w", err)
 	}
@@ -442,23 +485,99 @@ func (j OutboxProcessor) recordAnchorFailure(ctx context.Context, event datatype
 		event.ID, event.Component, event.EventType, cause)
 }
 
+// erasureRecordEventTypes are the events that document a contract's erasure
+// (DCS-NFR-SEC-13: logged destruction). Their bodies must stay readable after
+// the contract's CEK is shredded, so they are encrypted under the
+// non-shreddable instance scope even though they carry the contract's DID.
+var erasureRecordEventTypes = map[string]bool{
+	cweeventtype.KeyShredded.String():    true,
+	cweeventtype.DeleteArchived.String(): true,
+}
+
+// scopeForEvent maps an event to the CEK scope its audit-entry body is
+// encrypted under: the contract's scope for contract-bound components, the
+// template's for template-bound ones, and the non-shreddable instance scope
+// for everything without a resource attribution — plus the erasure records
+// themselves, which must outlive the shredding they document.
+func (j OutboxProcessor) scopeForEvent(event datatype.OutboxEvent) artifactstore.Scope {
+	return ScopeForEvent(event, j.Artifacts.InstanceScope())
+}
+
+// ScopeForEvent shares the audit-body erasure boundary with persisted evidence.
+func ScopeForEvent(event datatype.OutboxEvent, instance artifactstore.Scope) artifactstore.Scope {
+	if !isResourceDID(event.DID) || erasureRecordEventTypes[event.EventType] {
+		return instance
+	}
+	switch event.Component {
+	case componenttype.ContractWorkflowEngine.String(),
+		componenttype.SignatureManagement.String(),
+		componenttype.ContractStorageArchive.String():
+		return artifactstore.ContractScope(*event.DID)
+	case componenttype.ContractTemplateRepo.String(),
+		componenttype.TemplateCatalogueIntegration.String():
+		return artifactstore.TemplateScope(*event.DID)
+	default:
+		return instance
+	}
+}
+
 // writeEntry stores one audit entry and returns its CID and leaf hash. The leaf
 // hash is taken over the exact bytes stored, so an auditor can refetch the entry
-// and recompute its membership in the checkpoint.
+// and recompute its membership in the checkpoint. The header stays plaintext;
+// event_data is encrypted under the event's CEK scope before storage, so a later
+// shred erases the body without moving a single stored byte — the chain and the
+// checkpoint proofs keep verifying.
+// sealBody encrypts an event's body under its CEK scope and reports the body to
+// store plus the scope to name on the entry.
+//
+// An event still queued when its contract's CEK was shredded can never be
+// encrypted. It is stored under the erased marker instead — the same body a
+// reader gets for an entry shredded AFTER anchoring, and under no scope, since
+// there is no key. Failing here instead retried the event to its dead-letter
+// budget and then dropped it: a PAC_AUDIT_EXECUTED that happened to be in
+// flight at erasure time left the tamper-evident trail altogether, which is not
+// what erasing a body means. Erasure destroys the content, not the record that
+// something happened.
+func (j OutboxProcessor) sealBody(ctx context.Context, event datatype.OutboxEvent) (json.RawMessage, string, string, error) {
+	scope := j.scopeForEvent(event)
+	body, err := j.Artifacts.Encrypt(ctx, scope, event.EventData)
+	switch {
+	case err == nil:
+		encrypted, marshalErr := json.Marshal(body)
+		if marshalErr != nil {
+			return nil, "", "", fmt.Errorf("could not encode the body of event %d: %w", event.ID, marshalErr)
+		}
+		return encrypted, string(scope.Kind), scope.ID, nil
+	case artifactstore.IsShredded(err):
+		log.Printf("event %d (%s/%s) is anchored with an erased body: %v",
+			event.ID, event.Component, event.EventType, err)
+		return datatype.ErasedEventData, "", "", nil
+	default:
+		return nil, "", "", fmt.Errorf("could not encrypt the body of event %d: %w", event.ID, err)
+	}
+}
+
 func (j OutboxProcessor) writeEntry(ctx context.Context, event datatype.OutboxEvent, predCID *string) (anchoredEntry, error) {
 	nonce := make([]byte, 16)
 	if _, err := rand.Read(nonce); err != nil {
 		return anchoredEntry{}, fmt.Errorf("could not draw a blinding nonce for event %d: %w", event.ID, err)
 	}
 
+	entryBody, scopeKind, scopeID, err := j.sealBody(ctx, event)
+	if err != nil {
+		return anchoredEntry{}, err
+	}
+
 	entry := datatype.AuditLogEntry{
 		ID:            event.ID,
 		Component:     event.Component,
 		EventType:     event.EventType,
-		EventData:     event.EventData,
+		EventData:     entryBody,
 		DID:           event.DID,
 		CreatedAt:     event.CreatedAt,
 		ResLogPredCID: predCID,
+		CEKScopeKind:  scopeKind,
+		CEKScopeID:    scopeID,
 		Nonce:         hex.EncodeToString(nonce),
 	}
 	raw, err := json.Marshal(entry)
@@ -532,7 +651,10 @@ func (j OutboxProcessor) startTimestampingJob(ctx context.Context, interval time
 
 	ticker := time.NewTicker(interval)
 	for range ticker.C {
-		if err := schedulerLogic(); err != nil {
+		if err := trackRun("checkpoint-timestamping", func() error {
+			_, err := db.RunExclusive(ctx, j.DB, "audit-checkpoint-timestamping", schedulerLogic)
+			return err
+		}); err != nil {
 			log.Printf("could not timestamp pending checkpoints: %v", err)
 		}
 	}

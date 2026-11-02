@@ -8,10 +8,13 @@ import (
 	"log"
 	"time"
 
+	"digital-contracting-service/internal/base"
+	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/base/identity"
+	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
@@ -63,9 +66,9 @@ func (h *Offerer) Handle(ctx context.Context, cmd OfferCmd) error {
 	// older than what's stored (see package doc / ADR-0007).
 	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
 		if localPeer != cmd.CauserDID {
-			return errors.New("contract was updated elsewhere, please force synchronisation and reload")
+			return fmt.Errorf("contract %w, please force synchronisation and reload", base.ErrUpdatedElsewhere)
 		}
-		return errors.New("contract was updated elsewhere, please reload")
+		return fmt.Errorf("contract %w, please reload", base.ErrUpdatedElsewhere)
 	}
 
 	if !cmd.UserRoles.HasRoles(userrole.ContractCreator, userrole.SystemContractCreator) {
@@ -82,7 +85,41 @@ func (h *Offerer) Handle(ctx context.Context, cmd OfferCmd) error {
 		return err
 	}
 
-	err = h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Offered.String())
+	contract, err := h.CRepo.ReadDataByDID(ctx, tx, cmd.DID)
+	if err != nil {
+		return fmt.Errorf("could not read contract data: %w", err)
+	}
+
+	// Ensure Shared Contract Details on the contracts row are in dcs:metadata
+	// before the Offer PDF is rendered and shipped.
+	stamped, stampedChanged, err := stampSharedDetailsIntoContractData(contract.ContractData, sharedContractDetails{
+		Name:            contract.Name,
+		Description:     contract.Description,
+		StartDate:       contract.StartDate,
+		ExpDate:         contract.ExpDate,
+		ExpPolicy:       contract.ExpPolicy,
+		ExpNoticePeriod: contract.ExpNoticePeriod,
+	})
+
+	if err != nil {
+		return err
+	}
+
+	if stampedChanged {
+		if err := h.CRepo.Update(ctx, tx, db.ContractUpdateData{
+			DID:          cmd.DID,
+			ContractData: stamped,
+		}); err != nil {
+			return fmt.Errorf("could not stamp shared contract details before offer: %w", err)
+		}
+		contract.ContractData = stamped
+	}
+
+	if err := validateOfferReady(ctx, contract.ContractData); err != nil {
+		return err
+	}
+
+	err = h.CRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contractstate.Offered.String())
 	if err != nil {
 		return fmt.Errorf("could not update contract state: %w", err)
 	}
@@ -101,4 +138,25 @@ func (h *Offerer) Handle(ctx context.Context, cmd OfferCmd) error {
 	}
 
 	return tx.Commit()
+}
+
+// validateOfferReady gates the offer on the same content checks submission
+// runs, plus contract closedness: the offer is the first transmission to the
+// counterparty, and SRS 2.2.2 requires the filled-out contract to be ready to
+// be sent — an offer must be a definite proposal (SRS 1.2), so a draft still
+// carrying unresolved placeholders must not leave the instance.
+func validateOfferReady(ctx context.Context, contractData *datatype.JSON) error {
+	if contractData == nil {
+		return fmt.Errorf("%w: contract has no contract data", validation.ErrContractNotClosed)
+	}
+	if err := validation.ValidateContractSemantics(contractData); err != nil {
+		return fmt.Errorf("contract semantic validation failed: %w", err)
+	}
+	if err := validation.ValidateContractClosed(*contractData); err != nil {
+		return err
+	}
+	if err := validation.RequireHubConformance(ctx, contractData); err != nil {
+		return fmt.Errorf("contract offer blocked: %w", err)
+	}
+	return nil
 }

@@ -20,18 +20,18 @@ type PostgresDeploymentRepo struct {
 func (r *PostgresDeploymentRepo) CreateDeployment(ctx context.Context, tx *sqlx.Tx, data db.ContractDeployment) error {
 	statement := `
         INSERT INTO contract_deployments (
-            did, contract_version, correlation_id, content_hash, target_url, status, requested_by, requested_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            did, contract_version, correlation_id, content_hash, target_id, target_url, status, requested_by, requested_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     `
 	_, err := tx.ExecContext(ctx, statement,
-		data.DID, data.ContractVersion, data.CorrelationID, data.ContentHash, data.TargetURL, data.Status, data.RequestedBy, data.RequestedAt)
+		data.DID, data.ContractVersion, data.CorrelationID, data.ContentHash, data.TargetID, data.TargetURL, data.Status, data.RequestedBy, data.RequestedAt)
 	return err
 }
 
 func (r *PostgresDeploymentRepo) FindDeploymentByCorrelationID(ctx context.Context, tx *sqlx.Tx, correlationID string) (*db.ContractDeployment, error) {
 	query := `
-        SELECT id, did, contract_version, correlation_id, content_hash, target_url, status, requested_by, requested_at,
-               acknowledged_at, receipt_hash, tsa_token
+        SELECT id, did, contract_version, correlation_id, content_hash, target_id, target_url, status, requested_by, requested_at,
+               acknowledged_at, receipt_hash, tsa_token, dispatch_error
         FROM contract_deployments
         WHERE correlation_id = $1
     `
@@ -56,18 +56,31 @@ func (r *PostgresDeploymentRepo) AcknowledgeDeployment(ctx context.Context, tx *
 	return err
 }
 
+// MarkDispatchFailed records that the outbound call never reached the target.
+// Only rows still claiming DISPATCHED are touched, so a target that
+// acknowledged before this ran is not retroactively marked failed.
+func (r *PostgresDeploymentRepo) MarkDispatchFailed(ctx context.Context, tx *sqlx.Tx, correlationID string, reason string) error {
+	statement := `
+        UPDATE contract_deployments
+        SET status = 'DISPATCH_FAILED', dispatch_error = $2
+        WHERE correlation_id = $1 AND status = 'DISPATCHED'
+    `
+	_, err := tx.ExecContext(ctx, statement, correlationID, reason)
+	return err
+}
+
 func (r *PostgresDeploymentRepo) CreateKPI(ctx context.Context, tx *sqlx.Tx, data db.ContractKPI) error {
 	statement := `
-        INSERT INTO contract_kpis (did, correlation_id, metric, value, observed_at, violation)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO contract_kpis (did, correlation_id, metric, value, observed_at, verdict, rule_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
     `
-	_, err := tx.ExecContext(ctx, statement, data.DID, data.CorrelationID, data.Metric, data.Value, data.ObservedAt, data.Violation)
+	_, err := tx.ExecContext(ctx, statement, data.DID, data.CorrelationID, data.Metric, data.Value, data.ObservedAt, data.Verdict, data.RuleID)
 	return err
 }
 
 func (r *PostgresDeploymentRepo) ReadKPIsByDID(ctx context.Context, tx *sqlx.Tx, did string) ([]db.ContractKPI, error) {
 	query := `
-        SELECT id, did, correlation_id, metric, value, observed_at, violation
+        SELECT id, did, correlation_id, metric, value, observed_at, verdict, rule_id
         FROM contract_kpis
         WHERE did = $1
         ORDER BY observed_at ASC, id ASC

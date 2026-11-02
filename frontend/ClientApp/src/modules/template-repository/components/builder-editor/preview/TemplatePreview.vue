@@ -4,7 +4,7 @@ import ConditionalWrapper from '@core/components/ConditionalWrapper.vue'
 import PreviewClauseBlock from './PreviewClauseBlock.vue'
 import PreviewSectionBlock from './PreviewSectionBlock.vue'
 import PreviewTextBlock from './PreviewTextBlock.vue'
-import type { SemanticConditionValue } from '@/models/contract-data'
+import type { SemanticConditionValue } from '@/models/contract/contract-data'
 import type { DcsBlock, DcsContentSegment, DcsLayoutNode } from '@/models/dcs-jsonld'
 import type { VerificationResult } from '@contract-workflow-engine/composables/useSemanticValueVerification'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
@@ -22,11 +22,23 @@ const props = withDefaults(
     semanticConditionValues?: SemanticConditionValue[]
     verificationResult?: VerificationResult | null
     setSemanticConditionValue?: SemanticConditionValueSetter
+    disabled?: boolean
+    /** Blocks a reviewer marked; each is rendered highlighted (DCS-FR-CWE-25). */
+    highlightedBlockIds?: string[]
   }>(),
-  { sectionLevel: 1, semanticConditionValues: () => [], verificationResult: null, setSemanticConditionValue: null },
+  {
+    sectionLevel: 1,
+    highlightedBlockIds: () => [],
+    semanticConditionValues: () => [],
+    verificationResult: null,
+    setSemanticConditionValue: null,
+    disabled: false,
+  },
 )
 
 const hasBlockId = computed(() => props.blockId != null)
+
+const isHighlighted = computed(() => !!props.blockId && props.highlightedBlockIds.includes(props.blockId))
 
 const rootChildren = computed(() => {
   const root = props.layout.find((n) => n['dcs:isRoot'])
@@ -67,14 +79,14 @@ const clauseContent = computed((): DcsContentSegment[] => {
   return content['@list']
 })
 
-// Under ADR-15 every placeholder is a self-contained top-level node wired by
+// Every ContractField is a self-contained top-level declaration wired by
 // @id, so a clause always resolves against the top-level conditions.
 const clauseSemanticConditions = computed(() => props.semanticConditions)
 </script>
 
 <template>
   <!-- Root-level blocks -->
-  <template v-if="!hasBlockId">
+  <div v-if="!hasBlockId" class="space-y-4">
     <template v-for="id in rootChildren" :key="id">
       <TemplatePreview
         :block-id="id"
@@ -85,17 +97,23 @@ const clauseSemanticConditions = computed(() => props.semanticConditions)
         :semantic-condition-values="semanticConditionValues"
         :verification-result="verificationResult"
         :set-semantic-condition-value="setSemanticConditionValue"
+        :disabled="disabled"
+        :highlighted-block-ids="highlightedBlockIds"
       />
     </template>
-  </template>
+  </div>
   <!-- Nested blocks -->
-  <template v-else>
+  <ConditionalWrapper
+    v-else
+    :enabled="isHighlighted"
+    wrapper-class="review-highlight rounded-box bg-warning/20 ring-2 ring-warning"
+  >
     <!-- Section block -->
     <ConditionalWrapper
       v-if="block && block['@type'] === 'dcs:Section'"
       :enabled="true"
       tag="section"
-      wrapper-class="w-full mb-4"
+      wrapper-class="w-full"
     >
       <PreviewSectionBlock :title="sectionTitle" :has-children="childrenIds.length > 0" :level="sectionLevel">
         <template v-for="childId in childrenIds" :key="childId">
@@ -108,21 +126,27 @@ const clauseSemanticConditions = computed(() => props.semanticConditions)
             :semantic-condition-values="semanticConditionValues"
             :verification-result="verificationResult"
             :set-semantic-condition-value="setSemanticConditionValue"
+            :disabled="disabled"
+            :highlighted-block-ids="highlightedBlockIds"
           />
         </template>
       </PreviewSectionBlock>
     </ConditionalWrapper>
     <!-- Text block -->
-    <PreviewTextBlock v-else-if="block && block['@type'] === 'dcs:TextBlock'" :text="textBlockText" />
+    <div v-else-if="block && block['@type'] === 'dcs:TextBlock'" class="w-full">
+      <PreviewTextBlock :text="textBlockText" />
+    </div>
     <!-- Clause block -->
-    <PreviewClauseBlock
-      v-else-if="block && block['@type'] === 'dcs:Clause'"
-      :block-id="block['@id']"
-      :content="clauseContent"
-      :semantic-conditions="clauseSemanticConditions"
-      :semantic-condition-values="semanticConditionValues"
-      :verification-result="verificationResult"
-      :set-semantic-condition-value="setSemanticConditionValue"
-    />
-  </template>
+    <div v-else-if="block && block['@type'] === 'dcs:Clause'" class="w-full">
+      <PreviewClauseBlock
+        :block-id="block['@id']"
+        :content="clauseContent"
+        :semantic-conditions="clauseSemanticConditions"
+        :semantic-condition-values="semanticConditionValues"
+        :verification-result="verificationResult"
+        :set-semantic-condition-value="setSemanticConditionValue"
+        :disabled="disabled"
+      />
+    </div>
+  </ConditionalWrapper>
 </template>

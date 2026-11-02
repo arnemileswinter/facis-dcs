@@ -2,17 +2,19 @@ package design
 
 import (
 	. "goa.design/goa/v3/dsl"
+
+	"digital-contracting-service/internal/templaterepository/datatype/partytype"
 )
 
 var TemplateCatalogueItem = Type("TemplateCatalogueItem", func() {
 	Description("Template catalogue item returned to the client")
 
 	Attribute("did", String, "Decentralized Identifier of the contract template")
-	Attribute("document_number", String, "The number of the contract template")
 	Attribute("version", Int, "The version of the contract template")
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
 	Attribute("template_type", String, "The type of the template")
+	Attribute("party_type", String, "Party classification", func() { Enum(partytype.SingleParty.String(), partytype.MultiParty.String()) })
 	Attribute("schema_version", Int, "Schema version of the contract template")
 	Attribute("participant_id", String, "Participant id")
 	Attribute("created_at", String, "The timestamp when the contract template was created")
@@ -46,8 +48,9 @@ var TemplateCatalogueSearchRequest = Type("TemplateCatalogueSearchRequest", func
 
 	Token("token", String, "JWT token")
 
+	Attribute("party_type", String, "Party classification", func() { Enum(partytype.SingleParty.String(), partytype.MultiParty.String()) })
+	Attribute("template_type", String, "Template type", func() { Enum("CONTRACT_TEMPLATE", "COMPONENT") })
 	Attribute("did", String, "Decentralized Identifier of the contract template")
-	Attribute("document_number", String, "The number of the contract template")
 	Attribute("version", Int, "The version of the contract template")
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
@@ -71,12 +74,15 @@ var TemplateCatalogueRetrieveByIDResponse = Type("TemplateCatalogueRetrieveByIDR
 	Description("Template catalogue detail response")
 
 	Attribute("did", String, "Decentralized Identifier of the contract template")
-	Attribute("document_number", String, "The number of the contract template")
 	Attribute("version", Int, "The version of the contract template")
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
 	Attribute("template_type", String, "The type of the template")
+	Attribute("party_type", String, "Party classification", func() { Enum(partytype.SingleParty.String(), partytype.MultiParty.String()) })
 	Attribute("schema_version", Int, "Schema version of the contract template")
+	Attribute("jurisdiction", String, "Jurisdiction the template is drafted for (DCS-FR-TR-10)")
+	Attribute("industry", String, "Industry the template is drafted for (DCS-FR-TR-10)")
+	Attribute("template_level", String, "Hierarchy level of the template (DCS-FR-TR-02)")
 	Attribute("template_data", Any, "The template data of the contract template")
 	// Optional participant summary
 	Attribute("participant_id", String, "Issuer participant DID")
@@ -95,7 +101,14 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Description("Retrieve templates via XFSC Catalogue.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
+		// The Template Manager owns the Template Catalogue view and the register
+		// that follows it, and the catalogue pages load the local template
+		// repository (/template/retrieve, Template roles only) to tell an
+		// already-registered entry from a new one. A contract role draws its
+		// contract from the registered templates of /contract/templates, never
+		// from the catalogue, so the catalogue is a Template Manager surface.
 		Security(JWTAuth, func() {
+			Scope("Template Manager")
 			Scope("Contract Creator")
 			Scope("Contract Reviewer")
 			Scope("Contract Approver")
@@ -123,6 +136,7 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
 		Security(JWTAuth, func() {
+			Scope("Template Manager")
 			Scope("Contract Creator")
 			Scope("Contract Reviewer")
 			Scope("Contract Approver")
@@ -150,6 +164,7 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
 		Security(JWTAuth, func() {
+			Scope("Template Manager")
 			Scope("Contract Creator")
 			Scope("Contract Reviewer")
 			Scope("Contract Approver")
@@ -166,10 +181,11 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		HTTP(func() {
 			GET("/catalogue/template/search")
 			Param("did")
-			Param("document_number")
 			Param("version")
 			Param("name")
 			Param("description")
+			Param("party_type")
+			Param("template_type")
 			Param("offset")
 			Param("limit")
 			Response(StatusOK)

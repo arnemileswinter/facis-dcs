@@ -8,10 +8,10 @@ func TestVersionedLabel(t *testing.T) {
 		version int
 		want    string
 	}{
-		{"dcs-contract-pades", 0, "dcs-contract-pades"},
-		{"dcs-contract-pades", 1, "dcs-contract-pades"},
-		{"dcs-contract-pades", 2, "dcs-contract-pades-v2"},
-		{"dcs-contract-pades", 5, "dcs-contract-pades-v5"},
+		{"dcs-c2pa", 0, "dcs-c2pa"},
+		{"dcs-c2pa", 1, "dcs-c2pa"},
+		{"dcs-c2pa", 2, "dcs-c2pa-v2"},
+		{"dcs-c2pa", 5, "dcs-c2pa-v5"},
 	}
 	for _, c := range cases {
 		if got := VersionedLabel(c.base, c.version); got != c.want {

@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"time"
 )
@@ -31,15 +32,64 @@ type Client struct {
 	// never lets pdf-core see key material, so every C2PA signature is produced
 	// here and posted back to pdf-core's /c2pa/embed.
 	sign C2PASignFunc
+	// authority is this instance's DID, recorded as the asserting party in every
+	// C2PA lifecycle assertion pdf-core writes for this client's renders. It is
+	// sent per request because pdf-core is stateless and may be shared.
+	authority string
+	// x5chainPEM is the certificate chain naming the dcs-c2pa key `sign` uses,
+	// leaf first. It travels with every request that renders a manifest, for the
+	// same reason the key never leaves this process: pdf-core is shared, and a
+	// chain it kept of its own would sign this instance's documents under
+	// whichever instance configured it.
+	x5chainPEM []byte
 }
+
+// lifecycleAuthorityHeader carries the asserting instance's DID to pdf-core.
+const lifecycleAuthorityHeader = "X-DCS-Lifecycle-Authority"
+
+// signingChainHeader carries this instance's C2PA x5chain to pdf-core as
+// base64-encoded PEM. pdf-core holds no signing material and refuses a render
+// that names none.
+const signingChainHeader = "X-DCS-C2PA-X5Chain"
 
 // New returns a Client pointed at baseURL. sign is the in-process dcs-c2pa
 // signer the two-step render flow uses; it must be non-nil.
 func New(baseURL string, sign C2PASignFunc) *Client {
+	return NewWithAuthority(baseURL, sign, "")
+}
+
+// NewWithAuthority returns a Client that names issuerDID as the party asserting
+// the lifecycle events of every render it requests.
+func NewWithAuthority(baseURL string, sign C2PASignFunc, issuerDID string) *Client {
 	return &Client{
 		BaseURL:    strings.TrimRight(baseURL, "/"),
 		HTTPClient: &http.Client{Timeout: 60 * time.Second},
 		sign:       sign,
+		authority:  strings.TrimSpace(issuerDID),
+	}
+}
+
+// WithSigningChain names the PEM certificate chain this client's renders are
+// signed under — the chain issued for the same dcs-c2pa key `sign` uses.
+func (c *Client) WithSigningChain(chainPEM []byte) *Client {
+	c.x5chainPEM = append([]byte(nil), chainPEM...)
+	return c
+}
+
+// setLifecycleAuthority tags a render request with this instance's DID, leaving
+// the header off entirely when none is configured.
+func (c *Client) setLifecycleAuthority(req *http.Request) {
+	if c.authority != "" {
+		req.Header.Set(lifecycleAuthorityHeader, c.authority)
+	}
+}
+
+// setSigningChain names the identity this request signs under. An unset chain
+// leaves the header off, which pdf-core refuses — a render that named no signer
+// must fail at the boundary rather than proceed under an assumed one.
+func (c *Client) setSigningChain(req *http.Request) {
+	if len(c.x5chainPEM) > 0 {
+		req.Header.Set(signingChainHeader, base64.StdEncoding.EncodeToString(c.x5chainPEM))
 	}
 }
 
@@ -125,16 +175,14 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 // Download posts jsonld to POST /render and returns the resulting PDF bytes
 // plus the renderer version from the X-PDF-Core-Version response header.
 func (c *Client) Download(ctx context.Context, jsonld []byte) (pdf []byte, version string, err error) {
-	jsonld, err = inlinePlaceholderRenderText(jsonld)
-	if err != nil {
-		return nil, "", fmt.Errorf("pdf-core download: inline placeholder text: %w", err)
-	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.BaseURL+"/render", bytes.NewReader(jsonld))
 	if err != nil {
 		return nil, "", fmt.Errorf("pdf-core download request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/ld+json")
+	c.setLifecycleAuthority(req)
+	c.setSigningChain(req)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -164,10 +212,6 @@ func (c *Client) Download(ctx context.Context, jsonld []byte) (pdf []byte, versi
 // (DCS-OR-C2PA-008). Returns the updated PDF bytes and the renderer version
 // header.
 func (c *Client) Update(ctx context.Context, existingPDF, jsonld, vcBytes []byte, manifestURL string) (pdf []byte, version string, err error) {
-	jsonld, err = inlinePlaceholderRenderText(jsonld)
-	if err != nil {
-		return nil, "", fmt.Errorf("pdf-core update: inline placeholder text: %w", err)
-	}
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 
@@ -197,6 +241,8 @@ func (c *Client) Update(ctx context.Context, existingPDF, jsonld, vcBytes []byte
 		return nil, "", fmt.Errorf("pdf-core update request: %w", err)
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
+	c.setLifecycleAuthority(req)
+	c.setSigningChain(req)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -218,11 +264,48 @@ func (c *Client) Update(ctx context.Context, existingPDF, jsonld, vcBytes []byte
 	return pdf, version, nil
 }
 
+// Reanchor appends a provenance-only C2PA manifest binding the signed PDF's
+// current bytes (ADR-26), returning the re-anchored PDF. It changes no payload:
+// the signature is applied after the lifecycle manifest so that it commits to
+// the provenance, and this restores a whole-file binding over the result
+// without touching the signature's byte range.
+func (c *Client) Reanchor(ctx context.Context, pdf []byte, manifestURL string) ([]byte, error) {
+	url := c.BaseURL + "/render/reanchor"
+	if manifestURL != "" {
+		url += "?manifest_url=" + neturl.QueryEscape(manifestURL)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(pdf))
+	if err != nil {
+		return nil, fmt.Errorf("pdf-core reanchor request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/pdf")
+	c.setLifecycleAuthority(req)
+	c.setSigningChain(req)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("pdf-core reanchor: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if err := checkStatus(resp); err != nil {
+		return nil, err
+	}
+	var prepared preparedC2PA
+	if err := json.NewDecoder(resp.Body).Decode(&prepared); err != nil {
+		return nil, fmt.Errorf("pdf-core reanchor decode prepared: %w", err)
+	}
+	return c.signAndEmbed(ctx, prepared)
+}
+
 // EmbedEvidence posts pdf + evidence to POST /evidence/embed and returns the
-// PDF with the evidence attached but NOT signed — the attach-only step a remote
-// DSS signer performs before it produces the PAdES signature (so the /ByteRange
-// covers the evidence). The default pdf-core signer embeds and signs in one
-// call (Sign); this seam splits the two for the DSS backend.
+// PDF with the evidence attached but NOT signed — the attach-only step before
+// an external PAdES signer (wallet/QTSP/DSS) produces the signature, so the
+// signature's /ByteRange covers the evidence (embed-first-sign-second,
+// DCS-FR-SM-08). pdf-core holds no key and never signs.
+//
+// Every call appends one more attachment under its own filename, including on a
+// PDF that already carries a signature: the append is an incremental update, so
+// the signatures already there stay valid (DCS-OR-C2PA-002).
 func (c *Client) EmbedEvidence(ctx context.Context, pdf, evidence []byte) (embedded []byte, err error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
@@ -257,50 +340,93 @@ func (c *Client) EmbedEvidence(ctx context.Context, pdf, evidence []byte) (embed
 	return embedded, nil
 }
 
-// ExtractEvidence posts pdf to POST /evidence/extract and returns the raw
-// signing-evidence attachment bytes embedded by Sign, plus whether it was
-// present.
-func (c *Client) ExtractEvidence(ctx context.Context, pdf []byte) ([]byte, bool, error) {
+// ExtractEvidence posts pdf to POST /evidence/extract and returns EVERY signing
+// evidence attachment the PDF carries, oldest first — one per signing event, so
+// a countersigned contract yields both parties' evidence. A PDF carrying none
+// yields an empty slice.
+func (c *Client) ExtractEvidence(ctx context.Context, pdf []byte) ([]json.RawMessage, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.BaseURL+"/evidence/extract", bytes.NewReader(pdf))
 	if err != nil {
-		return nil, false, fmt.Errorf("pdf-core extract-evidence request: %w", err)
+		return nil, fmt.Errorf("pdf-core extract-evidence request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/pdf")
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return nil, false, fmt.Errorf("pdf-core extract-evidence: %w", err)
+		return nil, fmt.Errorf("pdf-core extract-evidence: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNoContent {
-		return nil, false, nil
+		return nil, nil
 	}
 	if err := checkStatus(resp); err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	evidence, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, false, fmt.Errorf("pdf-core extract-evidence read: %w", err)
+		return nil, fmt.Errorf("pdf-core extract-evidence read: %w", err)
 	}
-	return evidence, true, nil
+	var attachments []json.RawMessage
+	if err := json.Unmarshal(body, &attachments); err != nil {
+		return nil, fmt.Errorf("pdf-core extract-evidence decode: %w", err)
+	}
+	return attachments, nil
 }
 
 // VerifyResult is the structured response from pdf-core POST /verify.
 type VerifyResult struct {
 	// Match is true when the PDF was deterministically produced from its embedded payload.
 	Match bool
-	// C2PASignatureValid is true when the C2PA provenance chain is intact.
+	// C2PASignatureValid is the outcome of pdf-core's COSE claim-signature check:
+	// every manifest's claim signature verified against its own x5chain leaf and
+	// the assertions the signed claim commits to still hash to the recorded
+	// values. C2PASignatureError carries the reason when it did not.
 	C2PASignatureValid bool
+	C2PASignatureError string
 	// VCBytes are the raw contract-lifecycle-vc.json bytes from the PDF attachment,
 	// present only when the PDF contains that attachment.
 	VCBytes []byte
-	// VCProofValid is true when a VC attachment is present and its proof is structurally valid.
-	VCProofValid bool
+	// VCPresent says the PDF carries a lifecycle-credential attachment — all
+	// pdf-core can say about it, since it holds no key material and resolves no
+	// issuer. Whether the credential's proof VERIFIES is decided by the caller,
+	// against the issuer's published assertion key (provenance.CredentialVerifier).
+	VCPresent bool
+	// JSONLDHash, BasePDFHash and StoredBasePDFHash are the SHA-256 digests (hex)
+	// pdf-core reached its Match verdict on: the machine-readable payload embedded
+	// in the PDF, the deterministic re-render produced from it, and the stored
+	// bytes that re-render was compared against. The two PDF digests are equal
+	// exactly when the document reproduces, so on a mismatch they name which side
+	// diverged. Both are taken over pdf-core's COSE-zeroed normalization — the one
+	// the comparison itself uses, since a fresh compile carries a fresh randomized
+	// claim signature.
+	//
+	// pdf-core reports them on a 409 content mismatch too, so they are populated
+	// alongside the returned error; they are empty only when it could not compute
+	// them at all.
+	JSONLDHash        string
+	BasePDFHash       string
+	StoredBasePDFHash string
+	// Signers names, per manifest in chain order, the x5chain (base64 DER, leaf
+	// first) its claim signature was made under.
+	Signers []ManifestSigner
 }
 
+// ManifestSigner is the signing certificate chain of one C2PA manifest.
+type ManifestSigner struct {
+	Manifest string   `json:"manifest"`
+	Subject  string   `json:"subject"`
+	Chain    []string `json:"chain"`
+}
+
+// verifyBodyLimit caps the /verify response read. The body carries a
+// base64-encoded witness PDF alongside the credential bytes, so it is sized for a
+// document rather than for a status line.
+const verifyBodyLimit = 64 << 20
+
 // Verify posts pdf to POST /verify and returns the structured verification result.
-// Returns an error on non-2xx (including 409 content-mismatch).
+// Returns an error on non-2xx (including 409 content-mismatch); on a mismatch the
+// returned result still carries the digests pdf-core refused on.
 func (c *Client) Verify(ctx context.Context, pdf []byte) (VerifyResult, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.BaseURL+"/verify", bytes.NewReader(pdf))
@@ -308,29 +434,55 @@ func (c *Client) Verify(ctx context.Context, pdf []byte) (VerifyResult, error) {
 		return VerifyResult{}, fmt.Errorf("pdf-core verify request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/pdf")
+	// The chain this instance signs under: pdf-core witnesses the result under it
+	// and reports, per manifest, whether it is what signed the artifact.
+	c.setSigningChain(req)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return VerifyResult{}, fmt.Errorf("pdf-core verify: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if err := checkStatus(resp); err != nil {
-		return VerifyResult{}, err
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, verifyBodyLimit))
+	if err != nil {
+		return VerifyResult{}, fmt.Errorf("pdf-core verify read: %w", err)
 	}
+
 	var body struct {
-		Match              bool   `json:"match"`
-		C2PASignatureValid bool   `json:"c2pa_signature_valid"`
-		VCBytes            string `json:"vc_bytes"`
-		VCProofValid       bool   `json:"vc_proof_valid"`
+		Match              bool             `json:"match"`
+		C2PASignatureValid bool             `json:"c2pa_signature_valid"`
+		C2PASignatureError string           `json:"c2pa_signature_error"`
+		VCBytes            string           `json:"vc_bytes"`
+		VCPresent          bool             `json:"vc_present"`
+		JSONLDHash         string           `json:"jsonld_hash"`
+		BasePDFHash        string           `json:"base_pdf_hash"`
+		StoredBasePDFHash  string           `json:"stored_base_pdf_hash"`
+		Signers            []ManifestSigner `json:"signers"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return VerifyResult{}, fmt.Errorf("pdf-core verify decode: %w", err)
-	}
+	// A non-2xx body is pdf-core's Error schema carrying those same digest fields,
+	// so it is decoded before the status is turned into an error. What decodes is
+	// kept, what does not is absent, and the status stays the verdict either way.
+	decodeErr := json.Unmarshal(raw, &body)
+
 	result := VerifyResult{
-		Match:              body.Match,
-		C2PASignatureValid: body.C2PASignatureValid,
-		VCProofValid:       body.VCProofValid,
+		JSONLDHash:        body.JSONLDHash,
+		BasePDFHash:       body.BasePDFHash,
+		StoredBasePDFHash: body.StoredBasePDFHash,
 	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return result, fmt.Errorf("pdf-core %s: status %d: %s",
+			resp.Request.URL.Path, resp.StatusCode, truncate(strings.TrimSpace(string(raw)), 512))
+	}
+	if decodeErr != nil {
+		return VerifyResult{}, fmt.Errorf("pdf-core verify decode: %w", decodeErr)
+	}
+
+	result.Match = body.Match
+	result.C2PASignatureValid = body.C2PASignatureValid
+	result.C2PASignatureError = body.C2PASignatureError
+	result.VCPresent = body.VCPresent
+	result.Signers = body.Signers
 	if body.VCBytes != "" {
 		decoded, err := base64.StdEncoding.DecodeString(body.VCBytes)
 		if err != nil {
@@ -356,6 +508,7 @@ func (c *Client) VerifyContent(ctx context.Context, pdf []byte) (bool, string, e
 		return false, "", fmt.Errorf("pdf-core verify/content request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/pdf")
+	c.setSigningChain(req)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -371,6 +524,68 @@ func (c *Client) VerifyContent(ctx context.Context, pdf []byte) (bool, string, e
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return false, "", fmt.Errorf("pdf-core verify/content: decode: %w", err)
+	}
+	return body.Match, body.Mismatch, nil
+}
+
+// MatchContent posts submitted and reference to POST /verify/content-match and
+// reports whether the submitted PDF's visible page content is still the
+// reference PDF's, resolving the last definition of every object on both sides.
+// Nothing is re-rendered, so the answer does not depend on render determinism:
+// the reference is a document the caller already holds. On a mismatch it returns
+// a diagnostic naming the page that diverged and a snippet of both sides.
+//
+// Signature widgets are left out of the comparison, so a submission that adds a
+// PAdES signature to the reference matches it.
+func (c *Client) MatchContent(ctx context.Context, submitted, reference []byte) (bool, string, error) {
+	return c.matchContent(ctx, submitted, reference, false)
+}
+
+// MatchContentExact is MatchContent with the signature widgets compared too:
+// the submission must show exactly what the reference shows.
+func (c *Client) MatchContentExact(ctx context.Context, submitted, reference []byte) (bool, string, error) {
+	return c.matchContent(ctx, submitted, reference, true)
+}
+
+func (c *Client) matchContent(ctx context.Context, submitted, reference []byte, exact bool) (bool, string, error) {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if err := writeField(mw, "pdf", submitted); err != nil {
+		return false, "", fmt.Errorf("pdf-core verify/content-match: write pdf field: %w", err)
+	}
+	if err := writeField(mw, "reference", reference); err != nil {
+		return false, "", fmt.Errorf("pdf-core verify/content-match: write reference field: %w", err)
+	}
+	if exact {
+		if err := writeField(mw, "exact", []byte("true")); err != nil {
+			return false, "", fmt.Errorf("pdf-core verify/content-match: write exact field: %w", err)
+		}
+	}
+	if err := mw.Close(); err != nil {
+		return false, "", fmt.Errorf("pdf-core verify/content-match: close multipart: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/verify/content-match", &buf)
+	if err != nil {
+		return false, "", fmt.Errorf("pdf-core verify/content-match request: %w", err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	c.setSigningChain(req)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return false, "", fmt.Errorf("pdf-core verify/content-match: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if err := checkStatus(resp); err != nil {
+		return false, "", err
+	}
+	var body struct {
+		Match    bool   `json:"match"`
+		Mismatch string `json:"mismatch"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return false, "", fmt.Errorf("pdf-core verify/content-match: decode: %w", err)
 	}
 	return body.Match, body.Mismatch, nil
 }
@@ -459,6 +674,34 @@ func (c *Client) ExtractPayload(ctx context.Context, pdf []byte) ([]byte, error)
 	return payload, nil
 }
 
+// ManifestReference returns the remote C2PA manifest URL that a PDF references
+// in its XMP metadata, or "" when it references none (DCS-OR-C2PA-008).
+func (c *Client) ManifestReference(ctx context.Context, pdf []byte) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.BaseURL+"/manifest/reference", bytes.NewReader(pdf))
+	if err != nil {
+		return "", fmt.Errorf("pdf-core manifest-reference request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/pdf")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("pdf-core manifest-reference: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return "", nil
+	}
+	if err := checkStatus(resp); err != nil {
+		return "", err
+	}
+	ref, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return "", fmt.Errorf("pdf-core manifest-reference read: %w", err)
+	}
+	return strings.TrimSpace(string(ref)), nil
+}
+
 // checkStatus returns an error for non-2xx responses, including the status code
 // in the message. Hard-fail: callers must not silently swallow pdf-core errors.
 func checkStatus(resp *http.Response) error {
@@ -467,6 +710,14 @@ func checkStatus(resp *http.Response) error {
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 	return fmt.Errorf("pdf-core %s: status %d: %s", resp.Request.URL.Path, resp.StatusCode, strings.TrimSpace(string(body)))
+}
+
+// truncate keeps an error message readable when the body it quotes is not.
+func truncate(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	return s[:limit]
 }
 
 // writeField writes data as a plain multipart form field.

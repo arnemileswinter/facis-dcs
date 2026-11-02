@@ -1,23 +1,26 @@
 package main
 
 import (
+	"bytes"
 	"context"
-	"database/sql"
 	"errors"
 	"flag"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	dcstodcs2 "digital-contracting-service/internal/dcstodcs"
-	dcstodcsdb "digital-contracting-service/internal/dcstodcs/db"
 	pq2 "digital-contracting-service/internal/dcstodcs/db/pg"
+	"digital-contracting-service/internal/processauditandcompliance/configattest"
 
 	didservice "digital-contracting-service/gen/did_service"
 
@@ -26,6 +29,8 @@ import (
 	contractstoragearchive "digital-contracting-service/gen/contract_storage_archive"
 	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
+	geninfo "digital-contracting-service/gen/info"
+	keyinventory "digital-contracting-service/gen/key_inventory"
 	pdfgeneration "digital-contracting-service/gen/pdf_generation"
 	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
 	semantichubgen "digital-contracting-service/gen/semantic_hub"
@@ -34,17 +39,25 @@ import (
 	templaterepository "digital-contracting-service/gen/template_repository"
 	"digital-contracting-service/internal/auth"
 	pg "digital-contracting-service/internal/auth/db/pq"
+	"digital-contracting-service/internal/auth/machineidentity"
+	"digital-contracting-service/internal/auth/oid4vp"
 	oid4vprequest "digital-contracting-service/internal/auth/oid4vp/request"
 	"digital-contracting-service/internal/base"
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
+	basedb "digital-contracting-service/internal/base/db"
 	"digital-contracting-service/internal/base/db/pq"
+	"digital-contracting-service/internal/base/envelope"
 	"digital-contracting-service/internal/base/event"
+	"digital-contracting-service/internal/base/federation"
 	"digital-contracting-service/internal/base/hsm"
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/base/ipfs"
+	"digital-contracting-service/internal/base/safehttp"
 	"digital-contracting-service/internal/base/tsa"
 	"digital-contracting-service/internal/base/validation"
 	contractworkflowengine2 "digital-contracting-service/internal/contractworkflowengine"
+	"digital-contracting-service/internal/contractworkflowengine/changefeed"
 	cwecommand "digital-contracting-service/internal/contractworkflowengine/command"
 	cwerepo "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/contractworkflowengine/deployevent"
@@ -52,6 +65,10 @@ import (
 	pdfevent "digital-contracting-service/internal/pdfgeneration/event"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
+	"digital-contracting-service/internal/pdfgeneration/statuspublication"
+	"digital-contracting-service/internal/processauditandcompliance/auditexecutor"
+	pacrepo "digital-contracting-service/internal/processauditandcompliance/db/pg"
+	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
 	"digital-contracting-service/internal/semantichub"
 	"digital-contracting-service/internal/service"
 	smrepo "digital-contracting-service/internal/signingmanagement/db/pg"
@@ -67,20 +84,95 @@ import (
 	"goa.design/clue/log"
 )
 
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	if err == nil {
-		return true
+// Every outbound HTTPS client of the service negotiates TLS 1.3 or later
+// (DCS-IR-CI-01, DCS-NFR-SEC-01).
+func init() {
+	safehttp.RequireTLS13()
+}
+
+// computeListenURL derives the HTTP listen address from the same flags/env
+// var handleHTTPServer's caller used to compute inline just before binding.
+// Hoisted out so a bootstrap server (see startBootstrapServer) can claim the
+// same address immediately at process start, before the PKCS#11 token is
+// necessarily provisioned.
+func computeListenURL(ctx context.Context, hostF, domainF, httpPortF string, secureF bool) *url.URL {
+	if hostF != "local" {
+		log.Fatal(ctx, fmt.Errorf("invalid host argument: %q (valid hosts: local)", hostF))
 	}
-	if errors.Is(err, os.ErrNotExist) {
-		return false
+	address := "http://0.0.0.0:8991"
+	if os.Getenv("DCS_BACKEND_PORT") != "" {
+		address = fmt.Sprintf("http://0.0.0.0:%s", os.Getenv("DCS_BACKEND_PORT"))
 	}
-	return false
+	u, err := url.Parse(address)
+	if err != nil {
+		log.Fatalf(ctx, err, "invalid URL %#v\n", address)
+	}
+	if secureF {
+		u.Scheme = "https"
+	}
+	if domainF != "" {
+		u.Host = domainF
+	}
+	if httpPortF != "" {
+		h, _, err := net.SplitHostPort(u.Host)
+		if err != nil {
+			log.Fatalf(ctx, err, "invalid URL %#v\n", u.Host)
+		}
+		u.Host = net.JoinHostPort(h, httpPortF)
+	} else if u.Port() == "" {
+		u.Host = net.JoinHostPort(u.Host, "80")
+	}
+	return u
+}
+
+// startBootstrapServer claims the service's listen address immediately and
+// reports 503 on /readyz until initialization is complete. This lets
+// Kubernetes distinguish a running bootstrap process from a ready DCS while
+// the HSM, FC functional gate, and schema synchronization are pending.
+//
+// The chart's supported deployment path intentionally runs Helm without
+// --wait: the HSM provisioner is a post-install hook and supplies material
+// needed before this endpoint can turn ready. deploy.sh waits for the backend
+// rollout only after Helm has executed that hook.
+func startBootstrapServer(ctx context.Context, u *url.URL) *http.Server {
+	srv := &http.Server{
+		Addr:              u.Host,
+		Handler:           bootstrapHTTPHandler(),
+		ReadHeaderTimeout: time.Second * 60,
+	}
+	go func() {
+		log.Printf(ctx, "bootstrap HTTP server listening on %q (initializing)", u.Host)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Errorf(ctx, err, "bootstrap HTTP server error")
+		}
+	}()
+	return srv
+}
+
+// openHSMWithRetry retries hsm.Open until it succeeds, instead of the
+// immediate log.Fatalf every other HSM/config error in main() uses. This is
+// the one call in the chain that's expected to fail transiently at fresh
+// install/upgrade (see startBootstrapServer's comment) — hsm-provision.sh
+// creates the token and all five keys in one run, so once Open succeeds the
+// downstream hsmClient.Signer(label) calls are not expected to need the same
+// treatment.
+func openHSMWithRetry(ctx context.Context) *hsm.HSM {
+	const interval = 5 * time.Second
+	attempt := 0
+	for {
+		attempt++
+		hsmClient, err := hsm.Open(hsm.ConfigFromEnv())
+		if err == nil {
+			return hsmClient
+		}
+		if attempt == 1 || attempt%12 == 0 { // log immediately, then once/minute
+			log.Printf(ctx, "waiting for PKCS#11 token (attempt %d): %v", attempt, err)
+		}
+		time.Sleep(interval)
+	}
 }
 
 func main() {
-	// Define command line flags, add any other flag required to configure the
-	// service.
 	var (
 		hostF     = flag.String("host", "local", "Server host (valid values: local)")
 		domainF   = flag.String("domain", "", "Host domain name (overrides host domain specified in service design)")
@@ -109,7 +201,6 @@ func main() {
 		}
 	}
 
-	// Setup logger. Replace logger with your own log package of choice.
 	format := log.FormatJSON
 	if log.IsTerminal() {
 		format = log.FormatTerminal
@@ -141,8 +232,8 @@ func main() {
 	}
 
 	// DCS_PUBLIC_URL is the base of every absolute IRI a produced document
-	// carries (@context, sh:shapesGraph, dcterms:conformsTo anchors, C2PA
-	// remote manifests) — these must dereference for external consumers.
+	// carries (@context, sh:shapesGraph, C2PA remote manifests) — these must
+	// dereference for external consumers.
 	if strings.TrimSpace(os.Getenv("DCS_PUBLIC_URL")) == "" {
 		log.Fatalf(ctx, errors.New("dcs configuration missing"), "DCS_PUBLIC_URL must be set: produced documents carry absolute, resolvable IRIs based on it")
 	}
@@ -157,15 +248,23 @@ func main() {
 	if err := service.RefreshValidationAnchors(ctx, db); err != nil {
 		log.Fatalf(ctx, err, "Could not anchor validation to the Semantic Hub's active schemas")
 	}
+	if err := service.FollowHubActivations(ctx, os.Getenv("DATABASE_URL"), func(ctx context.Context) error {
+		return service.RefreshValidationAnchors(ctx, db)
+	}); err != nil {
+		log.Fatalf(ctx, err, "Could not follow Semantic Hub activations of other replicas")
+	}
 
 	validation.SetShapeSource(semantichub.HubShapeSource{DB: db})
 
-	// Open the PKCS#11 token that holds every private key (DCS-IR-HI-01). A
-	// wrong module path/token/PIN is fatal: there is no software fallback.
-	hsmClient, err := hsm.Open(hsm.ConfigFromEnv())
-	if err != nil {
-		log.Fatalf(ctx, err, "Could not open PKCS#11 token")
-	}
+	// Open the PKCS#11 token that holds every private key (DCS-IR-HI-01) — no
+	// software fallback once open, but opening itself is retried rather than
+	// immediately fatal: a fresh install/upgrade's hsm-provision Job may not
+	// have run yet (see openHSMWithRetry's doc comment). The bootstrap server
+	// claims the listen address now while /readyz remains unavailable during
+	// retries; handleHTTPServer takes over the same address once ready.
+	listenURL := computeListenURL(ctx, *hostF, *domainF, *httpPortF, *secureF)
+	bootstrapSrv := startBootstrapServer(ctx, listenURL)
+	hsmClient := openHSMWithRetry(ctx)
 	defer func() {
 		if err := hsmClient.Close(); err != nil {
 			log.Errorf(ctx, err, "Could not close PKCS#11 token")
@@ -173,9 +272,6 @@ func main() {
 	}()
 
 	didFilePath := os.Getenv("DCS_DID")
-	if didFilePath == "" || !fileExists(didFilePath) {
-		log.Printf(ctx, "DCS_DID configuration or file is missing")
-	}
 
 	didSigner, err := hsmClient.Signer(hsm.KeyLabelDID())
 	if err != nil {
@@ -215,47 +311,61 @@ func main() {
 		log.Fatalf(ctx, err, "Could not load auth config")
 	}
 
-	// Sign OpenID4VP authorization request objects (JAR) with the HSM key; the
-	// public JWK is embedded in the JWT header and the key label is its kid.
-	jarLabel := hsm.KeyLabelJAR()
-	jarSigner, err := hsmClient.Signer(jarLabel)
-	if err != nil {
-		log.Fatalf(ctx, err, "Could not load HSM JAR signing key")
-	}
-	jarJWK, err := hsmClient.PublicJWK(jarLabel)
-	if err != nil {
-		log.Fatalf(ctx, err, "Could not read HSM JAR public key")
-	}
-	requestSigner, err := oid4vprequest.NewHSMSigner(jarLabel, jarSigner, jarJWK, hsm.SignES256)
+	// Every OpenID4VP request object this deployment issues — login, PID, the
+	// signing ceremony's identity presentation, and the Document-Retrieval
+	// request — is signed with the DCS's own DID/hostname certificate chain
+	// (already verified, just above, to carry a SAN matching its hostname). A
+	// wallet resolves trust from the leaf certificate's SAN named by the
+	// x509_san_dns client identifier; a bare jwk header proves possession of a
+	// key it has no reason to trust and anchors to nothing.
+	requestSigner, err := oid4vprequest.NewX5CSigner(didDocument)
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not build OID4VP request signer")
 	}
+	// The wallet is handed an OpenID4VP client identifier — prefix and value —
+	// not the Hydra OAuth client id: an unprefixed value means the
+	// "pre-registered" prefix, which a wallet outside a pre-agreed federation
+	// refuses before it looks at any credential.
+	oid4vpClientID, err := requestSigner.ClientID()
+	if err != nil {
+		log.Fatalf(ctx, err, "Could not resolve OID4VP client_id")
+	}
+
 	authCfg.RequestSigner = requestSigner
-	systemClients, err := loadSystemClients()
+	authCfg.OID4VPClientID = oid4vpClientID
+	// Machine callers are resolved from the registry at request time, so an
+	// identity can be added, disabled or rotated without a redeploy (ADR-27).
+	// DCS_SYSTEM_CLIENTS remains a declarative seed for the callers a
+	// deployment must have before anyone logs in to create them.
+	machineIdentities := machineidentity.NewPostgresRepo(db)
+	seeded, err := loadSystemClients()
 	if err != nil {
 		log.Fatalf(ctx, err, "Invalid system client configuration")
+	}
+	if err := seedMachineIdentities(ctx, machineIdentities, seeded); err != nil {
+		log.Fatalf(ctx, err, "Could not seed the configured system clients")
 	}
 	hydraJWTValidator, err := middleware.NewHydraJWTValidator(ctx, middleware.HydraJWTConfig{
 		PublicIssuerURL:   authCfg.Hydra.PublicIssuerURL(),
 		InternalIssuerURL: authCfg.Hydra.InternalIssuerURL(),
 		ClientID:          authCfg.Hydra.ClientID(),
-		SystemClients:     systemClients,
+		SystemClients:     machineIdentities,
 	})
 	if err != nil {
 		log.Fatalf(ctx, err, "Failed to initialize Hydra JWT validator")
 	}
 
-	// Initialize IPFS client
-	ipfsTenantBaseURL := os.Getenv("IPFS_TENANT_BASE_URL")
+	// Initialize IPFS client. Artifacts go to the Kubo RPC API directly (ADR-36).
 	mfsBaseURL := os.Getenv("IPFS_MFS_BASE_URL")
-	if ipfsTenantBaseURL == "" || mfsBaseURL == "" {
-		log.Fatalf(ctx, nil, "IPFS configuration missing: IPFS_TENANT_BASE_URL and IPFS_MFS_BASE_URL environment variables must be specified")
+	if mfsBaseURL == "" {
+		log.Fatalf(ctx, nil, "IPFS configuration missing: the IPFS_MFS_BASE_URL environment variable must be specified")
 	}
-	ipfsAPIClient := ipfs.NewClient(ipfsTenantBaseURL, mfsBaseURL)
+	ipfsAPIClient := ipfs.NewClient(mfsBaseURL).WithBearerToken(os.Getenv("IPFS_API_TOKEN"))
 
 	aAttemptRepo := &pg.PostgresAccessAttemptRepo{}
-	lockRepo := &pg.PostgresIPLockoutRepo{}
+	lockRepo := &pg.PostgresLockoutRepo{}
 	jwtAuth := auth.NewJWTAuthenticator(hydraJWTValidator, db, aAttemptRepo, lockRepo)
+	jwtAuth.Limiter = middleware.NewRateLimiter(db, conf.APIRateLimitPerMinute())
 
 	ctRepo := tplrepo.PostgresContractTemplateRepo{}
 	ctRTRepo := tplrepo.PostgresReviewTaskRepo{}
@@ -266,9 +376,12 @@ func main() {
 	cweATRepo := cwerepo.PostgresApprovalTaskRepo{}
 	cweNTRepo := cwerepo.PostgresNegotiationTaskRepo{}
 	cweNRepo := cwerepo.PostgresNegotiationRepo{}
+	cweNORepo := cwerepo.PostgresNegotiationOutboundRepo{}
 	cweCTRepo := cwerepo.PostgresContractTemplateRepo{}
 	cweCronJob := contractworkflowengine2.CronJob{DB: db, CRepo: &cweRepo}
 	cweCronJob.Start(ctx, db)
+
+	pacRiskRepo := pacrepo.PostgresRiskFindingRepo{}
 
 	aRepo := pq.PostgresAuditTrailRepository{}
 
@@ -302,11 +415,59 @@ func main() {
 	if err != nil {
 		log.Fatalf(ctx, err, "could not read DID")
 	}
+	authCfg.ParticipantDID = did
+
+	// Encrypting artifact store (DCS-NFR-SEC-14): every IPFS artifact is
+	// encrypted per scope; CEKs are wrapped to the instance's keyAgreement key.
+	// The dcs-ecdh key is a required dependency: a startup wrap/unwrap self-test
+	// proves the served did.json keyAgreement key and the HSM key agree.
+	ecdhLabel := hsm.KeyLabelECDH()
+	keyAgreementMethod, err := didDocument.OwnKeyAgreementMethod(ecdhLabel)
+	if err != nil {
+		log.Fatalf(ctx, err, "did.json carries no usable keyAgreement method for %s", ecdhLabel)
+	}
+	keyAgreementPub, err := keyAgreementMethod.ECPublicKey()
+	if err != nil {
+		log.Fatalf(ctx, err, "did.json keyAgreement method %s carries no usable P-256 key", keyAgreementMethod.ID)
+	}
+	hsmAgreement := envelope.HSMKeyAgreement(ecdhLabel)
+	if testCEK, err := envelope.NewCEK(); err != nil {
+		log.Fatalf(ctx, err, "could not draw CEK for the key-agreement self-test")
+	} else if wrapped, err := envelope.Wrap(testCEK, keyAgreementMethod.ID, keyAgreementPub); err != nil {
+		log.Fatalf(ctx, err, "could not wrap the self-test CEK to the %s key", ecdhLabel)
+	} else if unwrapped, err := envelope.Unwrap(wrapped, hsmAgreement); err != nil || !bytes.Equal(unwrapped, testCEK) {
+		log.Fatalf(ctx, err, "HSM key %s cannot unwrap what did.json's keyAgreement key wraps — key mismatch or missing derive capability", ecdhLabel)
+	}
+	artifactStore := artifactstore.New(ipfsAPIClient, &artifactstore.PostgresCEKRepo{DB: db}, hsmAgreement, did, keyAgreementMethod.ID, keyAgreementPub)
+
+	// Startup config integrity verification (DCS-NFR-SEC-04): hash the
+	// security-critical mounted config files, enforce any operator pins, and
+	// record the attestation in the audit outbox. A pin mismatch or an
+	// unreadable configured file aborts startup.
+	if err := configattest.Attest(ctx, db, did, map[string]string{
+		"did-document":      os.Getenv("DCS_DID"),
+		"oid4vp-trust-data": os.Getenv("OID4VP_TRUST_DATA_PATH"),
+		// One entry per CA trust list (ADR-35). Attesting both under a single
+		// key would hash whichever one happened to be set and leave the other
+		// unpinned — and the PoA list is the file that decides federation
+		// membership outright.
+		"x5c-trust-anchors-poa": os.Getenv("OID4VP_X5C_TRUST_ANCHORS_POA_PATH"),
+		"x5c-trust-anchors-pid": os.Getenv("OID4VP_X5C_TRUST_ANCHORS_PID_PATH"),
+		// The authorization policy outranks the trust document: a rule granting
+		// everything overrides every entry in it. Attesting the document while
+		// leaving the policy unpinned would put the pinned file under the
+		// unpinned one. Empty unless a deployment supplies its own — the built-in
+		// policy is compiled into the binary and covered by the image digest.
+		oid4vp.TrustPolicyAttestationKey: oid4vp.TrustPolicyPath(),
+	}, os.Getenv("DCS_CONFIG_SHA256_PINS")); err != nil {
+		log.Fatalf(ctx, err, "Config integrity verification failed")
+	}
 
 	outboxProcessor := event.OutboxProcessor{
 		DB:           db,
 		CEPPubClient: cepPubClient,
 		IPFSClient:   ipfsAPIClient,
+		Artifacts:    artifactStore,
 		ARepo:        &aRepo,
 		TSAClient:    tsaClient,
 	}
@@ -315,11 +476,11 @@ func main() {
 		log.Fatalf(ctx, err, "failed to start outbox processor")
 	}
 
-	cepSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL)
+	cepSubClient, err := event.NewDurableSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".dcstodcs")
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not connect to events bus")
 	}
-	defer func(client *event.CloudEventSubClient) {
+	defer func(client *event.DurableSubClient) {
 		err := client.Close()
 		if err != nil {
 			log.Errorf(ctx, err, "Could not close cloud event bus client")
@@ -327,53 +488,144 @@ func main() {
 	}(cepSubClient)
 
 	syncRepo := pq2.PostgresSyncRepository{}
-	if err := seedTrustedPeersFromEnv(ctx, db, &syncRepo); err != nil {
-		log.Fatalf(ctx, err, "failed to seed trusted peers from DCS_TRUSTED_PEERS")
-	}
+	// Federation trust gate (ADR-19): agreement credential verification + the
+	// local policy endpoint, consulted on both the outbound (shipContractPDF,
+	// here) and inbound (PostPdf, service.NewDcsToDcs below) paths.
+	trustGate := dcstodcs2.TrustGate{PDPURL: os.Getenv("DCS_TRUST_PDP_URL")}
+	// Mutual Power-of-Attorney binding (ADR-31, ADR-35): each party embeds the
+	// credential behind its own signature into the PDF before signing, and this
+	// gate verifies every attachment a counterparty's shipped PDF carries.
+	counterpartyPoAGate := dcstodcs2.CounterpartyPoAGate{Trust: authCfg.Trust}
 	dcsToDcsSynchronizer := dcstodcs2.DCSToDCSSynchronizer{
-		DB:          db,
-		CRepo:       &cweRepo,
-		SRepo:       &syncRepo,
-		IPFSClient:  ipfsAPIClient,
-		DIDDocument: *didDocument,
+		DB:                db,
+		CRepo:             &cweRepo,
+		SRepo:             &syncRepo,
+		NRepo:             &cweNRepo,
+		NORepo:            &cweNORepo,
+		Artifacts:         artifactStore,
+		DIDDocument:       *didDocument,
+		TrustGate:         trustGate,
+		SettlementSender:  dcstodcs2.HTTPSettlementSender{},
+		NegotiationSender: dcstodcs2.HTTPNegotiationSender{},
 	}
 	dcsToDcsSynchronizer.StartSynchronizerJob(ctx, cepSubClient)
 
-	if os.Getenv("DCS_DEBUG_EVENTING") == "true" {
-		event.StartEventLogger(ctx, cepSubClient)
+	// Contract erasure (DCS-NFR-COMP-03, DCS-NFR-SEC-13): local CEK shredding
+	// with KEY_SHREDDED audit events plus the peer erase handshake, retried
+	// from contract_erasures on the sync-fail interval.
+	cekRepo := &artifactstore.PostgresCEKRepo{DB: db}
+	eraseRepo := &pq2.PostgresEraseRepository{DB: db}
+	shredder := &dcstodcs2.AuditedShredder{DB: db, Keys: cekRepo, Artifacts: artifactStore}
+	contractEraser := &dcstodcs2.ContractEraser{
+		DB:          db,
+		DIDDocument: *didDocument,
+		Shredder:    shredder,
+		Parties:     &dcstodcs2.DBContractParties{DB: db, CRepo: &cweRepo, SRepo: &syncRepo},
+		ERepo:       eraseRepo,
+		Sender:      dcstodcs2.HTTPPeerEraseSender{},
 	}
+	contractEraser.StartEraseRetryJob(ctx, db, conf.SyncFailCronJobTimeOut())
+
+	// Termination propagation (DCS-NFR-BR-06): notices queued by the terminate
+	// command go to every counterparty instance and are retried until confirmed.
+	terminationNotifier := &dcstodcs2.TerminationNotifier{DB: db, DIDDocument: *didDocument, Sender: dcstodcs2.HTTPPeerTerminationSender{}}
+	terminationNotifier.Start(ctx, 5*time.Second)
+
+	if os.Getenv("DCS_DEBUG_EVENTING") == "true" {
+		// No queue group: every replica prints every event.
+		logSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL)
+		if err != nil {
+			log.Fatalf(ctx, err, "Could not create event logger NATS subscriber")
+		}
+		defer func() { _ = logSubClient.Close() }()
+		event.StartEventLogger(ctx, logSubClient)
+	}
+
+	// Live dashboard updates (DCS-FR-CWE-24): no queue group, so every replica
+	// receives every event for the streams it serves.
+	contractChanges := changefeed.New()
+	changeSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL)
+	if err != nil {
+		log.Fatalf(ctx, err, "Could not create contract change NATS subscriber")
+	}
+	defer func() { _ = changeSubClient.Close() }()
+	go func() {
+		if err := contractChanges.Listen(changeSubClient); err != nil {
+			log.Errorf(ctx, err, "contract change subscriber stopped")
+		}
+	}()
 
 	auditTrailReader := base.AuditTrailReader{
 		IPFSClient: ipfsAPIClient,
+		Artifacts:  artifactStore,
 		ARepo:      &aRepo,
 	}
 
 	archiveNotaryURL := strings.TrimSpace(os.Getenv("ORCE_ARCHIVE_NOTARY_URL"))
+	archiveNotaryToken := os.Getenv("ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN")
+	// Reported here rather than at the first signature: see
+	// cwecommand.ValidateArchiveNotaryConfig.
+	if err := cwecommand.ValidateArchiveNotaryConfig(archiveNotaryURL, archiveNotaryToken); err != nil {
+		log.Fatalf(ctx, err, "archive notary configuration error")
+	}
 	var archiveNotaryClient cwecommand.ArchiveNotary
 	if archiveNotaryURL != "" {
-		archiveNotaryClient = cwecommand.NewHTTPArchiveNotaryClient(archiveNotaryURL, os.Getenv("ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN"))
+		archiveNotaryClient = cwecommand.NewHTTPArchiveNotaryClient(archiveNotaryURL, archiveNotaryToken)
 	}
 
-	// Contract deployment (UC-05-01): the Contract Target
-	// System client is optional — without CONTRACT_TARGET_URL set, deploy
-	// dispatches are still recorded (correlation ID, content hash, archive
-	// evidence) but no outbound call is made; the target's own callback
-	// (POST /contract/deployment/callback) is the authoritative signal.
+	// Contract deployment (UC-05-01): a contract designates a registered target
+	// system (ADR-25) and the client dispatches to that entry's endpoint. The
+	// target's own callback (POST /contract/deployment/callback) remains the
+	// authoritative signal of a successful deployment; a failed outbound call is
+	// recorded on the deployment row so the compliance monitor can alert on it.
 	cweDeploymentRepo := &cwerepo.PostgresDeploymentRepo{}
-	var contractTargetClient cwecommand.ContractTargetClient
-	if targetURL := cwecommand.ContractTargetURL(); targetURL != "" {
-		contractTargetClient = cwecommand.NewHTTPContractTargetClient(targetURL)
+	cweTargetRepo := cwerepo.PostgresContractTargetRepo{}
+
+	// Target systems declared in deployment configuration (ADR-25). A fresh
+	// install has an empty registry, so without this nothing can be deployed
+	// until somebody opens the admin UI — including in a test cluster that is
+	// recreated every run. Entries already present are left untouched, so an
+	// administrator who repoints one is not overruled by the next restart.
+	if seedPath := strings.TrimSpace(os.Getenv("CONTRACT_TARGETS_FILE")); seedPath != "" {
+		raw, err := os.ReadFile(seedPath) // #nosec G304 G703 -- path comes from operator configuration (environment), not from a request
+		if err != nil {
+			log.Fatalf(ctx, err, "could not read CONTRACT_TARGETS_FILE %s", seedPath)
+		}
+		entries, err := cwecommand.ParseSeedTargets(raw)
+		if err != nil {
+			log.Fatalf(ctx, err, "invalid contract target configuration in %s", seedPath)
+		}
+		seeded, err := cwecommand.SeedContractTargets(ctx, db, &cweTargetRepo, entries)
+		if err != nil {
+			log.Fatalf(ctx, err, "could not register the configured contract targets")
+		}
+		log.Printf(ctx, "contract target registry: %d of %d configured targets registered", seeded, len(entries))
 	}
+	// One client for every registered target: the endpoint travels with each
+	// dispatch now that a contract names its own destination (ADR-25).
+	contractTargetClient := cwecommand.NewHTTPContractTargetClient()
 
 	// Initialize the Federated Catalogue client.
 	fcURL := os.Getenv("FEDERATED_CATALOGUE_API_URL")
 	fcClientID := os.Getenv("FEDERATED_CATALOGUE_CLIENT_ID")
 	fcClientSecret := os.Getenv("FEDERATED_CATALOGUE_CLIENT_SECRET")
+	fcRealmURL := strings.TrimSpace(os.Getenv("FC_KEYCLOAK_REALM_URL"))
 	var templateCatalogueClient *fcclient.FederatedCatalogueClient
-	if fcURL != "" && fcClientID != "" && fcClientSecret != "" {
-		fcRealmURL := strings.TrimSpace(os.Getenv("FC_KEYCLOAK_REALM_URL"))
-		if fcRealmURL == "" {
-			log.Fatalf(ctx, nil, "Federated Catalogue requires FC_KEYCLOAK_REALM_URL (Keycloak for FC only, not Hydra)")
+	if fcURL != "" || fcClientID != "" || fcClientSecret != "" || fcRealmURL != "" {
+		var missing []string
+		for name, value := range map[string]string{
+			"FEDERATED_CATALOGUE_API_URL":       fcURL,
+			"FEDERATED_CATALOGUE_CLIENT_ID":     fcClientID,
+			"FEDERATED_CATALOGUE_CLIENT_SECRET": fcClientSecret,
+			"FC_KEYCLOAK_REALM_URL":             fcRealmURL,
+		} {
+			if strings.TrimSpace(value) == "" {
+				missing = append(missing, name)
+			}
+		}
+		if len(missing) > 0 {
+			slices.Sort(missing)
+			log.Fatalf(ctx, nil, "incomplete Federated Catalogue configuration; missing %s", strings.Join(missing, ", "))
 		}
 		templateCatalogueClient, err = fcclient.NewFederatedCatalogueClient(fcclient.Config{
 			APIURL:           fcURL,
@@ -384,34 +636,50 @@ func main() {
 		if err != nil {
 			log.Fatalf(ctx, err, "failed to initialize Federated Catalogue client")
 		}
-		if err := fcschemas.SyncWithRetry(ctx, templateCatalogueClient); err != nil {
+		requireFCHealth := strings.EqualFold(strings.TrimSpace(os.Getenv("FEDERATED_CATALOGUE_REQUIRE_NATIVE_HEALTH")), "true")
+		if err := templateCatalogueClient.CheckReadiness(ctx, requireFCHealth); err != nil {
+			log.Fatalf(ctx, err, "federated catalogue readiness gate failed")
+		}
+		// Replicas that start together sync one after the other, so they do
+		// not create the same schema in the catalogue twice.
+		if err := basedb.RunLocked(ctx, db, "fc-schema-sync", func() error {
+			return fcschemas.Sync(ctx, templateCatalogueClient)
+		}); err != nil {
 			log.Fatalf(ctx, err, "failed to sync federated catalogue schemas")
 		}
+		// A terminated, expired or revoked contract is withdrawn from the
+		// catalogue (DCS-FR-CWE-23).
+		(&cwecommand.CatalogueWithdrawer{DB: db, FCClient: templateCatalogueClient}).Start(ctx, time.Minute)
 	}
 
 	// Initialize the webhook platform (ORCE integration).
-	webhookStore := webhookplatform.NewSubscriptionStore()
-	webhookDispatcher := webhookplatform.NewDispatcher(webhookStore)
+	webhookSubs := webhookplatform.PostgresSubscriptions{
+		DB:      db,
+		Secrets: webhookplatform.SecretBox{Agreement: hsmAgreement, MethodID: keyAgreementMethod.ID, Pub: keyAgreementPub},
+	}
+	webhookStore := webhookplatform.PostgresDeliveries{DB: db}
+	webhookDispatcher := webhookplatform.NewDispatcher(webhookSubs, webhookStore, service.ContractEventAudience(db, did), service.ContractEventOwner(db))
 	webhookPlatform := webhookplatform.New(
+		webhookSubs,
 		webhookStore,
 		webhookDispatcher,
-		func(ctx context.Context, token string) (string, error) {
+		func(ctx context.Context, token string) (webhookplatform.Caller, error) {
 			info, err := hydraJWTValidator.ValidateToken(ctx, token)
 			if err != nil {
-				return "", err
+				return webhookplatform.Caller{}, err
 			}
-			return info.ParticipantDID, nil
+			return webhookplatform.Caller{HolderDID: info.HolderDID, ParticipantDID: info.ParticipantDID, Roles: info.Roles}, nil
 		},
 		nil,
 	)
 
 	// Start the NATS→Webhook bridge: automatically fans out to all registered
 	// webhook subscribers whenever a DCS lifecycle event fires on the event bus.
-	webhookSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL)
+	webhookSubClient, err := event.NewDurableSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".webhook")
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not create webhook NATS subscriber")
 	}
-	defer func(webhookSubClient *event.CloudEventSubClient) {
+	defer func(webhookSubClient *event.DurableSubClient) {
 		err := webhookSubClient.Close()
 		if err != nil {
 			log.Errorf(ctx, err, "failed to close webhook subscriber")
@@ -422,10 +690,39 @@ func main() {
 			log.Fatalf(ctx, err, "Could not start webhook NATS bridge")
 		}
 	}()
+	// A delivery the subscriber did not accept, or that a stopped replica did
+	// not send, is sent again by one replica at a time (DCS-IR-SI-02).
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := basedb.RunExclusive(ctx, db, "webhook-retry", func() error {
+					webhookDispatcher.RetryDue(ctx)
+					return nil
+				}); err != nil {
+					log.Errorf(ctx, err, "webhook delivery retry")
+				}
+			}
+		}
+	}()
 
 	// Sign contract-lifecycle VCs (DCS-OR-C2PA-004) with the HSM VC key,
 	// producing an ecdsa-rdfc-2019 Data Integrity proof.
-	issuerDID := os.Getenv("ISSUER_DID")
+	//
+	// This identity is stamped into every credential this deployment issues AND
+	// named as the `iss` of the status list that governs them — a verifier binds
+	// the two by comparing them, so they are one value on purpose. Empty, the
+	// deployment would issue credentials no one can attribute and serve a list
+	// that identifies nobody, which surfaces as an unreadable revocation state
+	// on every verification rather than as the missing setting it is.
+	issuerDID := strings.TrimSpace(os.Getenv("ISSUER_DID"))
+	if issuerDID == "" {
+		log.Fatalf(ctx, nil, "ISSUER_DID is required: it is the issuer of this deployment's credentials and of the status list serving them (chart value signing.issuerDID)")
+	}
 	vcKeyLabel := hsm.KeyLabelVC()
 	vcHSMSigner, err := hsmClient.Signer(vcKeyLabel)
 	if err != nil {
@@ -441,18 +738,67 @@ func main() {
 		log.Fatalf(ctx, err, "Could not load HSM C2PA signing key")
 	}
 
-	// Initialize OCM-W Status List Service client (DCS-OR-C2PA-005).
-	statusListServiceURL := os.Getenv("STATUSLIST_SERVICE_URL")
-	if statusListServiceURL == "" {
-		log.Fatalf(ctx, nil, "STATUSLIST_SERVICE_URL is required (DCS-OR-C2PA-005)")
+	// The status list for the credentials this deployment issues — the contract
+	// lifecycle credential inside every generated PDF and the signing summary
+	// that travels beside a contract (DCS-OR-C2PA-005, ADR-34). This deployment
+	// mints them, so it publishes their revocation status: allocation and bit in
+	// its own database, served and signed here with the same key and certificate
+	// chain a verifier already has to trust to accept the credential itself.
+	statusListIssuerURL, err := provenance.StatusListIssuerURL(os.Getenv("DCS_PUBLIC_URL"))
+	if err != nil {
+		log.Fatalf(ctx, err, "status list configuration error")
 	}
-	if err := probeHTTPUntilReady(3*time.Minute, func() error {
-		return probeHTTPAny(statusListServiceURL+"/health", statusListServiceURL+"/v1/metrics/health")
-	}); err != nil {
-		log.Fatalf(ctx, err, "status list service not reachable at %s", statusListServiceURL)
+	// The list new revocation entries are allocated in. It only moves when list 1
+	// fills up, and then only after the operator has registered the successor in
+	// status_list_cursors — allocation hard-fails on an unregistered list rather
+	// than handing out an entry nothing serves.
+	statusListID := provenance.DefaultListID
+	if raw := strings.TrimSpace(os.Getenv("STATUSLIST_LIST_ID")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			log.Fatalf(ctx, err, "STATUSLIST_LIST_ID must be a positive list id, got %q", raw)
+		}
+		statusListID = parsed
 	}
-	statusListTenantID := os.Getenv("STATUSLIST_TENANT_ID") // defaults to "default" when empty
-	statusListPublisher := provenance.NewOCMWStatusListPublisher(statusListServiceURL, issuerDID, statusListTenantID)
+	statusListURI := func(listID int) string {
+		return provenance.StatusListURI(statusListIssuerURL, listID)
+	}
+	statusListRevocations := &provenance.PostgresStatusListRevocations{DB: db}
+	statusListPublisher := provenance.NewDCSStatusListPublisher(
+		statusListURI,
+		provenance.NewPostgresStatusListAllocator(db, statusListID),
+		statusListRevocations)
+	go (&statuspublication.Worker{DB: db, Publisher: statusListPublisher}).Run(ctx)
+
+	// The served token. Its chain is the C2PA one (same PKCS#11 key), and the
+	// leaf has to name statusListIssuerURL or a verifier — ours included —
+	// refuses the list.
+	issuerX5Chain, err := provenance.LoadX5Chain(os.Getenv(issuerX5ChainPathEnv))
+	if err != nil {
+		log.Fatalf(ctx, err, "%s must point at this deployment's certificate chain: the status list it serves carries it", issuerX5ChainPathEnv)
+	}
+	// The same chain in its PEM form, for pdf-core. pdf-core keeps no signing
+	// material: it prepares the COSE Sig_structures, this process signs them with
+	// the dcs-c2pa key, and the certificate naming that key travels with each
+	// request rather than being configured into a renderer several instances share.
+	issuerX5ChainPEM, err := os.ReadFile(os.Getenv(issuerX5ChainPathEnv)) // #nosec G703 -- path comes from operator configuration (environment), not from a request
+	if err != nil {
+		log.Fatalf(ctx, err, "read %s: pdf-core signs this instance's manifests under this chain", issuerX5ChainPathEnv)
+	}
+	statusListSigner := &provenance.StatusListSigner{
+		// The identity that ISSUED the credentials this list governs, which is
+		// the one NewLocalVCIssuer stamps into them (see StatusListSigner.Issuer):
+		// a verifier binds list to credential by comparing the two.
+		// statusListIssuerURL stays what it is for — building the list's public
+		// URI, the `sub` and the credentialStatus a credential points at.
+		Issuer:      issuerDID,
+		ListURI:     statusListURI,
+		ListID:      statusListID,
+		Chain:       issuerX5Chain,
+		Signer:      c2paSigner,
+		Revocations: statusListRevocations,
+		Size:        provenance.ListSize,
+	}
 
 	// Initialize pdf-core client (PDF rendering + C2PA provenance microservice).
 	pdfCoreURL := os.Getenv("PDF_CORE_URL")
@@ -464,16 +810,31 @@ func main() {
 	}); err != nil {
 		log.Fatalf(ctx, err, "pdf-core not reachable at %s", pdfCoreURL)
 	}
-	pdfCoreClient := pdfcore.New(pdfCoreURL, func(sigStructure []byte) ([]byte, error) {
+	pdfCoreClient := pdfcore.NewWithAuthority(pdfCoreURL, func(sigStructure []byte) ([]byte, error) {
 		return hsm.SignES256(c2paSigner, sigStructure)
-	})
+	}, issuerDID).WithSigningChain(issuerX5ChainPEM)
 
 	smCRepo := smrepo.PostgresContractRepo{
-		IPFSClient: ipfsAPIClient,
-		PDFCore:    pdfCoreClient,
+		Artifacts: artifactStore,
+		PDFCore:   pdfCoreClient,
 	}
 
-	didService, err := service.NewDIDService(*didDocument)
+	// This instance's federation agreement credential (ADR-19): issuer = this
+	// instance's own DID, termsOfUse names the embedded federation rules document
+	// by its public policy URL and hash. Minted on first fetch and re-minted
+	// before its bounded validUntil lapses, so a long-running process never
+	// publishes an expired one.
+	rulesPolicyURL := federation.RulesPolicyURL(os.Getenv("DCS_PUBLIC_URL"))
+	agreementCredential := &federation.CredentialIssuer{
+		Signer:    vcSigner,
+		IssuerDID: issuerDID,
+		RulesURL:  rulesPolicyURL,
+	}
+	if _, err := agreementCredential.Current(ctx); err != nil {
+		log.Fatalf(ctx, err, "failed to build federation agreement credential")
+	}
+
+	didService, err := service.NewDIDService(*didDocument, agreementCredential, federation.Rules())
 	if err != nil {
 		log.Fatalf(ctx, err, "failed to create did service")
 	}
@@ -492,25 +853,80 @@ func main() {
 		didSrv                          didservice.Service
 		c2paSvc                         c2paservice.Service
 		semanticHubSvc                  semantichubgen.Service
+		keyInventorySvc                 keyinventory.Service
+		infoSvc                         geninfo.Service
+		workflowGateCoordinator         *workflowgate.Coordinator
 	)
 	{
+		auditExecutorTimeout := 10 * time.Second
+		if configured := strings.TrimSpace(os.Getenv("PAC_AUDIT_EXECUTOR_TIMEOUT")); configured != "" {
+			parsed, parseErr := time.ParseDuration(configured)
+			if parseErr != nil || parsed <= 0 {
+				log.Fatalf(ctx, parseErr, "invalid PAC_AUDIT_EXECUTOR_TIMEOUT %q", configured)
+			}
+			auditExecutorTimeout = parsed
+		}
+		auditExecutorClient, clientErr := auditexecutor.NewHTTPClient(
+			os.Getenv("PAC_AUDIT_EXECUTOR_URL"),
+			os.Getenv("PAC_AUDIT_EXECUTOR_BEARER_TOKEN"),
+			auditExecutorTimeout,
+		)
+		if clientErr != nil {
+			log.Fatalf(ctx, clientErr, "audit executor configuration is invalid")
+		}
+		workflowGateTimeout := 10 * time.Second
+		if configured := strings.TrimSpace(os.Getenv("PAC_WORKFLOW_GATE_EXECUTOR_TIMEOUT")); configured != "" {
+			parsed, parseErr := time.ParseDuration(configured)
+			if parseErr != nil || parsed <= 0 {
+				log.Fatalf(ctx, parseErr, "invalid PAC_WORKFLOW_GATE_EXECUTOR_TIMEOUT %q", configured)
+			}
+			workflowGateTimeout = parsed
+		}
+		workflowGateClient, clientErr := workflowgate.NewHTTPClient(
+			os.Getenv("PAC_WORKFLOW_GATE_EXECUTOR_URL"),
+			os.Getenv("PAC_WORKFLOW_GATE_EXECUTOR_BEARER_TOKEN"),
+			workflowGateTimeout,
+		)
+		if clientErr != nil {
+			log.Fatalf(ctx, clientErr, "workflow-gate executor configuration is invalid")
+		}
+		workflowGateCoordinator = &workflowgate.Coordinator{DB: db, Client: workflowGateClient}
+
 		presentationRepo := pg.NewPostgresPresentationAttemptRepo(db)
-		authSvc, err = service.NewAuth(db, presentationRepo, authCfg)
+		authSvc, err = service.NewAuth(db, presentationRepo, jwtAuth, authCfg)
 		if err != nil {
 			log.Fatalf(ctx, err, "auth service init failed")
 		}
 
-		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader)
-		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, ipfsAPIClient, archiveNotaryClient, tsaClient, cweDeploymentRepo, contractTargetClient)
-		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, ipfsAPIClient, pdfCoreClient)
-		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, ipfsAPIClient, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did)
-		c2paSvc = service.NewC2PAService(db, ipfsAPIClient, &cweRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher))
-		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(db, jwtAuth, auditTrailReader, &ctRepo, &cweRepo, &cweATRepo)
-		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, ipfsAPIClient, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), requestSigner, authCfg.Hydra.ClientID(), authCfg.PublicAPIBase)
+		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader, ipfsAPIClient, contractEraser, cekRepo, eraseRepo, archiveNotaryClient, tsaClient)
+		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweNORepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient,
+			workflowGateCoordinator, machineIdentities, authCfg.Hydra, authCfg.Hydra.PublicIssuerURL(), contractChanges)
+		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, artifactStore, pdfCoreClient, trustGate, counterpartyPoAGate, shredder, archiveNotaryClient, tsaClient)
+		// The credentials this instance issued verify against its own published
+		// document without a round trip; a peer's lifecycle or signing-summary
+		// credential — carried inside a verbatim-stored inbound PDF — resolves to
+		// the peer's did:web.
+		credentialVerifier := &provenance.CredentialVerifier{Own: didDocument}
+		// The revocation state of those same credentials, read from the status
+		// list each one names — ours through the endpoint below, a peer's through
+		// theirs — and only once that list's own signature verified against the
+		// configured anchors (ADR-34). Shares the verifier the OID4VP login path
+		// uses, so an issuer trusted for a presented credential and an issuer
+		// trusted for a provenance credential cannot become two different sets.
+		credentialStatusVerifier := provenance.NewCredentialStatusVerifier(oid4vp.StatusListVerifier())
+		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, artifactStore, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher).WithTimestamper(tsaClient), did, credentialVerifier, credentialStatusVerifier,
+			// The anchors a peer's chain is verified against, which include the
+			// root of this deployment's own C2PA chain (auth_config.go).
+			authCfg.Trust.For(oid4vp.PurposePeer).X5CTrustRoots())
+		c2paSvc = service.NewC2PAService(db, artifactStore, &cweRepo, pdfCoreClient)
+		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(db, jwtAuth, auditTrailReader, &ctRepo, &cweRepo, &cweATRepo, &pacRiskRepo, auditExecutorClient, workflowGateCoordinator)
+		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, artifactStore, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher).WithTimestamper(tsaClient), workflowGateCoordinator, requestSigner, oid4vpClientID, authCfg.PublicAPIBase, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust, credentialVerifier, credentialStatusVerifier, statusListPublisher, *didDocument, &syncRepo)
 		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(db, jwtAuth, templateCatalogueClient)
-		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo, templateCatalogueClient, auditTrailReader, vcSigner, issuerDID)
+		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo, templateCatalogueClient, auditTrailReader, vcSigner, issuerDID, credentialVerifier)
 		didSrv = didService
 		semanticHubSvc = service.NewSemanticHub(db, jwtAuth)
+		keyInventorySvc = service.NewKeyInventory(db, jwtAuth)
+		infoSvc = service.NewInfo()
 	}
 
 	// Channel used by background workers and signal handler to notify main to exit.
@@ -519,25 +935,25 @@ func main() {
 	// Start the PDF lifecycle C2PA subscriber (appends C2PA assertions on state changes).
 	// Only start when a real signing URL is configured; without one, the subscriber
 	// would attempt signing on every CWE event and log spurious HTTP errors.
-	pdfSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL)
+	pdfSubClient, err := event.NewDurableSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".pdfgeneration")
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not create PDF generation NATS subscriber")
 	}
-	defer func(pdfSubClient *event.CloudEventSubClient) {
+	defer func(pdfSubClient *event.DurableSubClient) {
 		err := pdfSubClient.Close()
 		if err != nil {
 			log.Errorf(ctx, err, "Could not close PDF subscriber")
 		}
 	}(pdfSubClient)
 	pdfSub := &pdfevent.Subscriber{
-		DB:         db,
-		IPFSClient: ipfsAPIClient,
-		CRepo:      &cweRepo,
-		TRepo:      &ctRepo,
-		PDFCore:    pdfCoreClient,
-		IssuerDID:  issuerDID,
-		LocalPeer:  did,
-		VCIssuer:   provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher),
+		DB:        db,
+		Artifacts: artifactStore,
+		CRepo:     &cweRepo,
+		TRepo:     &ctRepo,
+		PDFCore:   pdfCoreClient,
+		IssuerDID: issuerDID,
+		LocalPeer: did,
+		VCIssuer:  provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher).WithTimestamper(tsaClient),
 	}
 	go func() {
 		if err := pdfSub.Start(pdfSubClient); err != nil {
@@ -548,23 +964,28 @@ func main() {
 	// Start the auto-deploy subscriber (DCS-FR-CWE-06): once the signing
 	// workflow completes (APPLIED_SIGNATURE), it calls the same
 	// cwecommand.Deployer the manual POST /contract/deploy endpoint uses.
-	deploySubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL)
+	deploySubClient, err := event.NewDurableSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".deploy")
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not create contract-deployment NATS subscriber")
 	}
-	defer func(deploySubClient *event.CloudEventSubClient) {
+	defer func(deploySubClient *event.DurableSubClient) {
 		err := deploySubClient.Close()
 		if err != nil {
 			log.Errorf(ctx, err, "Could not close contract-deployment subscriber")
 		}
 	}(deploySubClient)
 	deploySub := &deployevent.Subscriber{
+		Gate: workflowGateCoordinator,
 		Deployer: &cwecommand.Deployer{
 			DB:             db,
 			CRepo:          &cweRepo,
 			DeploymentRepo: cweDeploymentRepo,
+			TargetRepo:     &cweTargetRepo,
 			Target:         contractTargetClient,
+			PeerSigs:       &syncRepo,
+			Artifacts:      artifactStore,
 		},
+		LocalPeer: did,
 	}
 	go func() {
 		if err := deploySub.Start(deploySubClient); err != nil {
@@ -572,8 +993,6 @@ func main() {
 		}
 	}()
 
-	// Wrap the service in endpoints that can be invoked from other service
-	// potentially running in different processes.
 	var (
 		authEndpoints                         *genauth.Endpoints
 		contractStorageArchiveEndpoints       *contractstoragearchive.Endpoints
@@ -587,21 +1006,27 @@ func main() {
 		didEntpoints                          *didservice.Endpoints
 		c2paEndpoints                         *c2paservice.Endpoints
 		semanticHubEndpoints                  *semantichubgen.Endpoints
+		keyInventoryEndpoints                 *keyinventory.Endpoints
+		infoEndpoints                         *geninfo.Endpoints
 	)
 	{
 		authEndpoints = genauth.NewEndpoints(authSvc)
 		authEndpoints.Use(debug.LogPayloads())
 		authEndpoints.Use(log.Endpoint)
 		contractStorageArchiveEndpoints = contractstoragearchive.NewEndpoints(contractStorageArchiveSvc)
+		contractStorageArchiveEndpoints.Use(auth.AccessMetadataMiddleware)
 		contractStorageArchiveEndpoints.Use(debug.LogPayloads())
 		contractStorageArchiveEndpoints.Use(log.Endpoint)
 		contractWorkflowEngineEndpoints = contractworkflowengine.NewEndpoints(contractWorkflowEngineSvc)
+		contractWorkflowEngineEndpoints.Use(auth.AccessMetadataMiddleware)
 		contractWorkflowEngineEndpoints.Use(debug.LogPayloads())
 		contractWorkflowEngineEndpoints.Use(log.Endpoint)
 		dcsToDcsEndpoints = dcstodcs.NewEndpoints(dcsToDcsSvc)
+		dcsToDcsEndpoints.Use(auth.AccessMetadataMiddleware)
 		dcsToDcsEndpoints.Use(debug.LogPayloads())
 		dcsToDcsEndpoints.Use(log.Endpoint)
 		pdfGenerationEndpoints = pdfgeneration.NewEndpoints(pdfGenerationSvc)
+		pdfGenerationEndpoints.Use(auth.AccessMetadataMiddleware)
 		pdfGenerationEndpoints.Use(debug.LogPayloads())
 		pdfGenerationEndpoints.Use(log.Endpoint)
 		processAuditAndComplianceEndpoints = processauditandcompliance.NewEndpoints(processAuditAndComplianceSvc)
@@ -609,12 +1034,15 @@ func main() {
 		processAuditAndComplianceEndpoints.Use(debug.LogPayloads())
 		processAuditAndComplianceEndpoints.Use(log.Endpoint)
 		signatureManagementEndpoints = signaturemanagement.NewEndpoints(signatureManagementSvc)
+		signatureManagementEndpoints.Use(auth.AccessMetadataMiddleware)
 		signatureManagementEndpoints.Use(debug.LogPayloads())
 		signatureManagementEndpoints.Use(log.Endpoint)
 		templateCatalogueIntegrationEndpoints = templatecatalogueintegration.NewEndpoints(templateCatalogueIntegrationSvc)
+		templateCatalogueIntegrationEndpoints.Use(auth.AccessMetadataMiddleware)
 		templateCatalogueIntegrationEndpoints.Use(debug.LogPayloads())
 		templateCatalogueIntegrationEndpoints.Use(log.Endpoint)
 		templateRepositoryEndpoints = templaterepository.NewEndpoints(templateRepositorySvc)
+		templateRepositoryEndpoints.Use(auth.AccessMetadataMiddleware)
 		templateRepositoryEndpoints.Use(debug.LogPayloads())
 		templateRepositoryEndpoints.Use(log.Endpoint)
 		didEntpoints = didservice.NewEndpoints(didSrv)
@@ -624,12 +1052,19 @@ func main() {
 		c2paEndpoints.Use(debug.LogPayloads())
 		c2paEndpoints.Use(log.Endpoint)
 		semanticHubEndpoints = semantichubgen.NewEndpoints(semanticHubSvc)
+		semanticHubEndpoints.Use(auth.AccessMetadataMiddleware)
 		semanticHubEndpoints.Use(debug.LogPayloads())
 		semanticHubEndpoints.Use(log.Endpoint)
+		keyInventoryEndpoints = keyinventory.NewEndpoints(keyInventorySvc)
+		keyInventoryEndpoints.Use(auth.AccessMetadataMiddleware)
+		keyInventoryEndpoints.Use(debug.LogPayloads())
+		keyInventoryEndpoints.Use(log.Endpoint)
+		infoEndpoints = geninfo.NewEndpoints(infoSvc)
+		infoEndpoints.Use(debug.LogPayloads())
+		infoEndpoints.Use(log.Endpoint)
 	}
 
-	// Setup interrupt handler. This optional step configures the process so
-	// that SIGINT and SIGTERM signals cause the service to stop gracefully.
+	// SIGINT/SIGTERM stop the service gracefully.
 	go func() {
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
@@ -639,41 +1074,14 @@ func main() {
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(ctx)
 
-	address := "http://0.0.0.0:8991"
-	if os.Getenv("DCS_BACKEND_PORT") != "" {
-		address = fmt.Sprintf("http://0.0.0.0:%s", os.Getenv("DCS_BACKEND_PORT"))
+	// Hand off from the bootstrap server (up since before hsm.Open) to the
+	// real one on the same address — safe to do serially since Shutdown
+	// blocks until the listener's actually released.
+	if err := bootstrapSrv.Shutdown(ctx); err != nil {
+		log.Errorf(ctx, err, "failed to shut down bootstrap HTTP server")
 	}
-
-	// Start the servers and send errors (if any) to the error channel.
-	switch *hostF {
-	case "local":
-		{
-			addr := address
-			u, err := url.Parse(addr)
-			if err != nil {
-				log.Fatalf(ctx, err, "invalid URL %#v\n", addr)
-			}
-			if *secureF {
-				u.Scheme = "https"
-			}
-			if *domainF != "" {
-				u.Host = *domainF
-			}
-			if *httpPortF != "" {
-				h, _, err := net.SplitHostPort(u.Host)
-				if err != nil {
-					log.Fatalf(ctx, err, "invalid URL %#v\n", u.Host)
-				}
-				u.Host = net.JoinHostPort(h, *httpPortF)
-			} else if u.Port() == "" {
-				u.Host = net.JoinHostPort(u.Host, "80")
-			}
-			handleHTTPServer(ctx, u, authEndpoints, contractStorageArchiveEndpoints, contractWorkflowEngineEndpoints, dcsToDcsEndpoints, pdfGenerationEndpoints, processAuditAndComplianceEndpoints, signatureManagementEndpoints, templateCatalogueIntegrationEndpoints, templateRepositoryEndpoints, didEntpoints, c2paEndpoints, semanticHubEndpoints, webhookPlatform, &wg, errc, *dbgF)
-		}
-
-	default:
-		log.Fatal(ctx, fmt.Errorf("invalid host argument: %q (valid hosts: local)", *hostF))
-	}
+	serveMetrics(ctx, &wg)
+	handleHTTPServer(ctx, listenURL, authEndpoints, contractStorageArchiveEndpoints, contractWorkflowEngineEndpoints, dcsToDcsEndpoints, pdfGenerationEndpoints, processAuditAndComplianceEndpoints, signatureManagementEndpoints, templateCatalogueIntegrationEndpoints, templateRepositoryEndpoints, didEntpoints, c2paEndpoints, semanticHubEndpoints, keyInventoryEndpoints, infoEndpoints, webhookPlatform, statusListSigner, db, &wg, errc, *dbgF)
 
 	// Wait for signal.
 	log.Printf(ctx, "exiting (%v)", <-errc)
@@ -683,49 +1091,4 @@ func main() {
 
 	wg.Wait()
 	log.Printf(ctx, "exited")
-}
-
-// seedTrustedPeersFromEnv upserts every comma-separated peer DID listed in
-// DCS_TRUSTED_PEERS into the trusted_peers allowlist at startup (NFR-BR-08:
-// exchanges only between verified parties). Idempotent: re-running with the
-// same env var value is a no-op thanks to UpsertTrustedPeer's
-// ON CONFLICT (peer_did) DO NOTHING. A no-op (nothing logged/inserted) when
-// the env var is unset or empty.
-func seedTrustedPeersFromEnv(ctx context.Context, database *sqlx.DB, sRepo dcstodcsdb.SyncRepository) error {
-	raw := os.Getenv("DCS_TRUSTED_PEERS")
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-
-	var seeded []string
-	tx, err := database.BeginTxx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("could not start transaction: %w", err)
-	}
-	defer func() {
-		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-			log.Errorf(ctx, err, "could not rollback trusted-peer seeding transaction")
-		}
-	}()
-
-	for _, part := range strings.Split(raw, ",") {
-		peerDID := strings.TrimSpace(part)
-		if peerDID == "" {
-			continue
-		}
-		if err := sRepo.UpsertTrustedPeer(ctx, tx, peerDID); err != nil {
-			return fmt.Errorf("could not seed trusted peer %q: %w", peerDID, err)
-		}
-		seeded = append(seeded, peerDID)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("could not commit trusted-peer seeding transaction: %w", err)
-	}
-
-	if len(seeded) > 0 {
-		log.Printf(ctx, "seeded %d trusted peer(s) from DCS_TRUSTED_PEERS: %v", len(seeded), seeded)
-	}
-
-	return nil
 }

@@ -3,17 +3,28 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"log"
-
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 )
+
+// Readiness fixture from the Apache-2.0 upstream Federated Catalogue
+// fc-service-server test suite at revision c243a65955a16ff8bbc3a24deacfa8fa9a2192ca:
+// src/test/resources/mock-data/default-participant.json. Keeping the upstream
+// known-good credential as an embedded source avoids inventing a second DCS
+// domain payload solely for lifecycle probing.
+//
+//go:embed fixtures/fc-readiness-participant.json
+var readinessVerificationPayload []byte
 
 var (
 	ErrFederatedCatalogueNotConfigured      = errors.New("federated catalogue is not configured")
@@ -63,10 +74,9 @@ type QueryResults struct {
 	Items      []map[string]interface{} `json:"items"`
 }
 
-// QueryRequest carries an OpenCypher query sent to FC POST /query/search.
+// QueryRequest carries a SPARQL query sent to FC POST /query/search.
 type QueryRequest struct {
-	Statement  string
-	Parameters map[string]string
+	Statement string
 }
 
 type fcErrorBody struct {
@@ -91,10 +101,88 @@ type FederatedCatalogueClient struct {
 
 const (
 	AssetsEndpointPath       = "/assets"
+	HealthEndpointPath       = "/actuator/health"
 	SchemaEndpointPath       = "/schemas"
 	VerificationEndpointPath = "/verification"
 	QuerySearchEndpointPath  = "/query/search"
 )
+
+// CheckReadiness performs exactly one functional verification request before
+// DCS may use the catalogue. For a co-deployed FC, requireNativeHealth adds the
+// native actuator check first. Remote catalogues skip that deployment-specific
+// check because operators commonly do not expose actuator endpoints.
+func (c *FederatedCatalogueClient) CheckReadiness(ctx context.Context, requireNativeHealth bool) error {
+	if requireNativeHealth {
+		healthURL, err := url.Parse(c.baseURL + HealthEndpointPath)
+		if err != nil {
+			return fmt.Errorf("invalid federated catalogue health url: %w", err)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL.String(), nil)
+		if err != nil {
+			return fmt.Errorf("create federated catalogue health request: %w", err)
+		}
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("federated catalogue health check failed: %w", err)
+		}
+		healthBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		closeErr := resp.Body.Close()
+		if readErr != nil {
+			return fmt.Errorf("read federated catalogue health response: %w", readErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close federated catalogue health response: %w", closeErr)
+		}
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+			return fmt.Errorf("federated catalogue health check failed with status %d: %s",
+				resp.StatusCode, strings.TrimSpace(string(healthBody)))
+		}
+		var health struct {
+			Status string `json:"status"`
+		}
+		if err := json.Unmarshal(healthBody, &health); err != nil {
+			return fmt.Errorf("decode federated catalogue health response: %w", err)
+		}
+		if !strings.EqualFold(strings.TrimSpace(health.Status), "UP") {
+			return fmt.Errorf("federated catalogue health is %q, expected UP", health.Status)
+		}
+	}
+
+	query := url.Values{}
+	query.Set("verifySchema", "true")
+	query.Set("verifySemantics", "true")
+	query.Set("verifySignatures", "false")
+	query.Set("verifyVCSignature", "false")
+	query.Set("verifyVPSignature", "false")
+	verification, err := c.Post(ctx, VerificationEndpointPath, query, readinessVerificationPayload)
+	if err != nil {
+		return fmt.Errorf("federated catalogue functional verification failed: %w", err)
+	}
+	if verification.StatusCode < http.StatusOK || verification.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("federated catalogue functional verification failed with status %d: %s",
+			verification.StatusCode, strings.TrimSpace(string(verification.Body)))
+	}
+	var result struct {
+		VerificationTimestamp string         `json:"verificationTimestamp"`
+		LifecycleStatus       string         `json:"lifecycleStatus"`
+		Issuer                string         `json:"issuer"`
+		IssuedDateTime        string         `json:"issuedDateTime"`
+		BaseClass             string         `json:"baseClass"`
+		Claims                map[string]any `json:"claims"`
+	}
+	if err := json.Unmarshal(verification.Body, &result); err != nil {
+		return fmt.Errorf("decode federated catalogue functional verification result: %w", err)
+	}
+	if result.Issuer != "did:example:issuer" ||
+		result.IssuedDateTime != "2010-01-01T19:23:24Z" ||
+		strings.TrimSpace(result.VerificationTimestamp) == "" ||
+		strings.TrimSpace(result.LifecycleStatus) == "" ||
+		strings.TrimSpace(result.BaseClass) == "" ||
+		len(result.Claims) == 0 {
+		return fmt.Errorf("federated catalogue functional verification returned incomplete semantic result")
+	}
+	return nil
+}
 
 func NewFederatedCatalogueClient(cfg Config) (*FederatedCatalogueClient, error) {
 	apiURL := normalizeBaseURL(cfg.APIURL)
@@ -172,7 +260,9 @@ func (c *FederatedCatalogueClient) GetAssets(ctx context.Context, req GetAssetsR
 	return &out, nil
 }
 
-// Query executes an OpenCypher graph query via FC POST /query/search.
+// Query executes a SPARQL graph query via FC POST /query/search. FC's
+// deployed graph store is Fuseki (SPARQL-only) — see
+// deployment/helm/charts/federated-catalogue.
 func (c *FederatedCatalogueClient) Query(ctx context.Context, req QueryRequest) (*QueryResults, error) {
 	statement := strings.TrimSpace(req.Statement)
 	if statement == "" {
@@ -182,13 +272,9 @@ func (c *FederatedCatalogueClient) Query(ctx context.Context, req QueryRequest) 
 	body := map[string]any{
 		"statement": statement,
 		"annotations": map[string]any{
-			"queryLanguage":  "OPENCYPHER",
+			"queryLanguage":  "SPARQL",
 			"withTotalCount": true,
 		},
-	}
-
-	if len(req.Parameters) > 0 {
-		body["parameters"] = req.Parameters
 	}
 
 	raw, err := json.Marshal(body)
@@ -226,6 +312,55 @@ func (c *FederatedCatalogueClient) PutRaw(ctx context.Context, path string, quer
 // Get sends a GET request to Federated Catalogue.
 func (c *FederatedCatalogueClient) Get(ctx context.Context, path string, query url.Values) (*Response, error) {
 	return c.doRequest(ctx, http.MethodGet, path, query, JSONContentType, JSONContentType, nil)
+}
+
+// PublishAsset posts a JSON-LD asset and returns its asset hash. FC names an
+// asset by the SHA-256 of its content, so an asset that already exists
+// (conflict_error) counts as published under that hash.
+func (c *FederatedCatalogueClient) PublishAsset(ctx context.Context, payload map[string]any) (string, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal asset payload: %w", err)
+	}
+	resp, err := c.PostRaw(ctx, AssetsEndpointPath, nil, JSONLDContentType, body)
+	if err != nil {
+		return "", fmt.Errorf("publish asset: %w", err)
+	}
+	sum := sha256.Sum256(body)
+	assetHash := hex.EncodeToString(sum[:])
+	switch {
+	case resp.StatusCode == http.StatusCreated:
+		var created struct {
+			AssetHash string `json:"assetHash"`
+		}
+		if json.Unmarshal(resp.Body, &created) == nil && created.AssetHash != "" {
+			assetHash = created.AssetHash
+		}
+		return assetHash, nil
+	case resp.StatusCode == http.StatusConflict && c.ExtractErrorCode(resp.Body) == "conflict_error":
+		return assetHash, nil
+	}
+	if message := c.ExtractErrorMessage(resp.Body); message != "" {
+		return "", fmt.Errorf("publish asset failed: %s", message)
+	}
+	return "", fmt.Errorf("publish asset failed with status %d", resp.StatusCode)
+}
+
+// RevokeAsset revokes an asset, which removes its claims from the catalogue
+// graph. An asset that is already revoked or unknown counts as revoked.
+func (c *FederatedCatalogueClient) RevokeAsset(ctx context.Context, assetHash string) error {
+	resp, err := c.Post(ctx, AssetsEndpointPath+"/"+url.PathEscape(assetHash)+"/revoke", nil, nil)
+	if err != nil {
+		return fmt.Errorf("revoke asset %s: %w", assetHash, err)
+	}
+	switch {
+	case resp.StatusCode >= 200 && resp.StatusCode < 300, resp.StatusCode == http.StatusNotFound, resp.StatusCode == http.StatusConflict:
+		return nil
+	}
+	if message := c.ExtractErrorMessage(resp.Body); message != "" {
+		return fmt.Errorf("revoke asset %s failed: %s", assetHash, message)
+	}
+	return fmt.Errorf("revoke asset %s failed with status %d", assetHash, resp.StatusCode)
 }
 
 // Delete sends a DELETE request to Federated Catalogue.

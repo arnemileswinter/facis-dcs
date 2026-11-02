@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { TemplateType, type TemplateTypeValue } from '@template-repository/models/contract-template'
 import { useAuthStore } from '@/stores/auth-store'
+import type { UserRole } from '@/types/user-role'
 import type {
   BlockMovementPreview,
   ClausePlaceholderHighlight,
@@ -9,6 +10,9 @@ import type {
   TemplateEditorUiState,
 } from '@template-repository/models/template-editor-ui-store'
 
+// The roles design/template_repository.go audit() accepts (DCS-IR-TR-07: Template Manager).
+export const templateAuditRoles: UserRole[] = ['AUDITOR', 'COMPLIANCE_OFFICER', 'TEMPLATE_MANAGER']
+
 const storeId = 'templateEditorUi'
 const defaultState: Readonly<TemplateEditorUiState> = {
   activeTab: 'details',
@@ -16,6 +20,7 @@ const defaultState: Readonly<TemplateEditorUiState> = {
     { id: 'details', label: 'Details' },
     { id: 'clauses', label: 'Clauses' },
     { id: 'builder', label: 'Builder' },
+    { id: 'data', label: 'Data' },
     { id: 'meta', label: 'Meta Data' },
     { id: 'audit', label: 'Audit History' },
   ],
@@ -74,8 +79,9 @@ export const useTemplateEditorUiStore = defineStore(storeId, {
       this.isPreviewDialogOpen = !this.isPreviewDialogOpen
     },
     availableTabs(templateType: TemplateTypeValue) {
-      const isManager = useAuthStore().user?.roles?.includes('TEMPLATE_MANAGER') ?? false
-      const tabs = this.tabs.filter((tab) => tab.id !== 'audit' || isManager)
+      const isAuditingAuthorized =
+        templateAuditRoles.some((role) => useAuthStore().user?.roles?.includes(role)) ?? false
+      const tabs = this.tabs.filter((tab) => tab.id !== 'audit' || isAuditingAuthorized)
       if (templateType === TemplateType.component) return tabs
       return tabs.filter((tab) => tab.id !== 'clauses')
     },

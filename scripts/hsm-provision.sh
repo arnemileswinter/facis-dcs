@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# Idempotently provision a SoftHSM2 token with the five DCS ECDSA P-256 keys.
+# Idempotently provision a SoftHSM2 token with the four DCS ECDSA P-256 keys.
 # One token dir per DCS instance keeps instance A (port 8991) and instance B
 # (port 8992) key material separate, mirroring how .env.dev1/.env.dev2 already
 # separate per-instance secrets.
+#
+# No contract-signing key: the DCS holds no key that produces a contract
+# signature (ADR-12/ADR-20) — the signatory's wallet does. dcs-did/dcs-vc/
+# dcs-oid4vp-jar/dcs-c2pa are all the DCS attesting as itself (DID document,
+# lifecycle VCs, OID4VP request objects, C2PA claims), never as a signatory.
 #
 # Usage: hsm-provision.sh <token-dir> <token-label> <pin> <so-pin> [module-path]
 set -euo pipefail
@@ -13,7 +18,7 @@ PIN="$3"
 SO_PIN="$4"
 MODULE="${5:-/usr/lib/softhsm/libsofthsm2.so}"
 
-KEY_LABELS=(dcs-did dcs-vc dcs-oid4vp-jar dcs-contract-pades dcs-c2pa)
+KEY_LABELS=(dcs-did dcs-vc dcs-oid4vp-jar dcs-c2pa dcs-ecdh)
 
 # Install SoftHSM2 + OpenSC (pkcs11-tool) if missing.
 if ! command -v softhsm2-util >/dev/null 2>&1 || ! command -v pkcs11-tool >/dev/null 2>&1; then
@@ -48,8 +53,13 @@ for LABEL in "${KEY_LABELS[@]}"; do
   fi
   ID="$(printf '%s' "$LABEL" | md5sum | cut -c1-8)"
   echo "Generating EC P-256 key '$LABEL'..."
+  # dcs-ecdh is the key-agreement key (CEK wrapping): needs CKA_DERIVE usage.
+  USAGE=()
+  if [ "$LABEL" = "dcs-ecdh" ]; then
+    USAGE=(--usage-derive)
+  fi
   pkcs11-tool --module "$MODULE" --token-label "$TOKEN_LABEL" --login --pin "$PIN" \
-    --keypairgen --key-type EC:prime256v1 --label "$LABEL" --id "$ID"
+    --keypairgen --key-type EC:prime256v1 --label "$LABEL" --id "$ID" ${USAGE[@]+"${USAGE[@]}"}
 done
 
 echo "SoftHSM token '$TOKEN_LABEL' ready ($TOKEN_DIR)."

@@ -1,4 +1,4 @@
-export type AuditFindingCategory = 'violation' | 'inconsistency' | 'compliance_check'
+export type AuditFindingCategory = 'violation' | 'inconsistency' | 'compliance_check' | 'not_evaluated'
 
 export interface AuditFinding {
   id: number | string
@@ -16,6 +16,30 @@ export interface AuditFinding {
 
 export type AuditResponse = AuditFinding[]
 
+export interface PACAuditExecutorFinding {
+  rule_id: string
+  // NOT_EVALUATED is a verdict nobody reached, not a passing one (ADR-33).
+  result: 'PASSED' | 'FAILED' | 'REVIEW' | 'NOT_EVALUATED'
+  reason: string
+  severity?: string
+  evidence_refs?: string[]
+}
+
+export interface PACAuditExecutorResponse {
+  contract_version: string
+  audit_id: string
+  correlation_id: string
+  scope: string
+  resource?: { did: string }
+  executor: {
+    id: string
+    version: string
+  }
+  executed_at: string
+  findings: PACAuditExecutorFinding[]
+  receipt?: unknown
+}
+
 export interface AuditReportSummary {
   totalEvents: number
   totalChecks: number
@@ -23,6 +47,7 @@ export interface AuditReportSummary {
   failed: number
   warnings: number
   needsReview: number
+  notEvaluated: number
 }
 
 export interface AuditReportResource {
@@ -88,3 +113,38 @@ export interface AuditReportDownload {
 }
 
 export type AuditReportResponse = AuditReport | AuditReportDownload
+
+export interface AccessAttempt {
+  id: number
+  attempted_at: string
+  attempt_by?: string
+  roles: string[]
+  service: string
+  method: string
+  scope?: string
+  did?: string
+  justification: string
+  outcome: 'SUCCESS' | 'DENIED' | 'FAILED'
+}
+
+export interface AccessAttemptsResponse {
+  attempts: AccessAttempt[]
+  next_cursor?: string
+}
+
+/** A Merkle inclusion proof of one audit entry in a timestamped checkpoint (ADR-16). */
+export interface CheckpointProof {
+  entry_cid: string
+  leaf_hash: string
+  leaf_index: number
+  siblings: string[]
+  head: {
+    seq: number
+    root: string
+    prev_root?: string
+    leaf_count: number
+    created_at: string
+    tsa_timestamp?: string
+    timestamped_at?: string
+  }
+}

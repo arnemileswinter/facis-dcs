@@ -1,12 +1,12 @@
-import type { Contract, ContractDeploymentKpi, ExpirationPolicy } from '../contract/contract'
+import type { Contract, ContractChangeRequest, ContractDeploymentKpi, ExpirationPolicy } from '../contract/contract'
 import type { ContractApprovalTask } from '../contract/contract-approval-task'
+import type { ContractData } from '../contract/contract-data'
 import type { ContractEvent } from '../contract/contract-event'
 import type { ContractNegotiation } from '../contract/contract-negotiation'
 import type { ContractNegotiationTask } from '../contract/contract-negotiation-task'
 import type { ContractResponsible } from '../contract/contract-responsible'
 import type { ContractReviewTask } from '../contract/contract-review-task'
-import type { ContractData } from '../contract-data'
-import type { ContractTemplate } from '../contract-template'
+import type { ContractTemplate } from '../contract-template/contract-template'
 import type { ComponentType } from '@/types/component-type'
 import type { ContractEventType } from '@/types/contract-event-type'
 import type { ContractState } from '@/types/contract-state'
@@ -37,6 +37,12 @@ export interface ContractRetrieveByIdResponse {
   did: string
   contract_version: number
   state: ContractState
+  /**
+   * Peer-facing lifecycle inferred by the backend (ADR-13): one of
+   * ExtrinsicLifecycle, or a lowercased off-ramp state. Only 'executed' claims
+   * every declared signature is collected.
+   */
+  extrinsic_lifecycle?: string
   name?: string
   description?: string
   created_by: string
@@ -50,10 +56,14 @@ export interface ContractRetrieveByIdResponse {
   /** The data of that contract */
   contract_data: ContractData
   negotiations: ContractNegotiation[]
-  /** KPI values reported via deployment callback (DCS-FR-CWE-31, DCS-FR-CWE-09) */
+  /** True when outbound Proposals/Decisions still await peer ACK. */
+  pending_negotiation_sync?: boolean
+  /** True when own + matching peer settlements are held (Approve/Sign gate). */
+  settlement_ready?: boolean
+  /** When settlement_ready is false, short reason for a UI warning. */
+  settlement_ready_detail?: string
+  /** KPI reports received via deployment callback, each with the target system's verdict (DCS-FR-CWE-31, DCS-FR-CWE-09, ADR-33) */
   kpis?: ContractDeploymentKpi[]
-  /** Metric names whose latest reported value violates its contractual SLA threshold */
-  kpi_violations?: string[]
 }
 
 export interface ContractDeployResponse {
@@ -90,12 +100,23 @@ interface ContractSearchResponseItem {
 
 export type ContractSearchResponse = ContractSearchResponseItem[]
 
+export interface ContractOfferAcceptResponse {
+  did: string
+}
+
 export interface ContractNegotiationResponse {
   did: string
 }
 
 export interface ContractNegotiationRespondResponse {
   id: string
+}
+
+export interface ContractNegotiationDraftResponse {
+  did: string
+  /** The staged change request; absent when no draft is stored. */
+  change_request?: ContractChangeRequest
+  updated_at?: string
 }
 
 export interface ContractApproveResponse {
@@ -106,8 +127,15 @@ export interface ContractRejectResponse {
   did: string
 }
 
-export interface ContractStoreResponse {
+export interface ContractWithdrawResponse {
   did: string
+}
+
+export interface ContractRenewResponse {
+  /** The newly minted renewal contract. */
+  did: string
+  renews_did: string
+  renews_contract_version: number
 }
 
 export interface ContractTerminateResponse {
@@ -126,7 +154,29 @@ export interface ContractAuditResponseItem {
 
 export type ContractAuditResponse = ContractAuditResponseItem[]
 
+/** One lifecycle transition from GET /contract/lifecycle/{did}, without the event body. */
+export interface ContractLifecycleEvent {
+  event_type: string
+  actor?: string
+  occurred_at: string
+  previous_state?: string
+  new_state?: string
+}
+
+/** One reviewer decision from GET /contract/review-findings/{did}. */
+export interface ContractReviewFinding {
+  submitted_by: string
+  holder_did?: string
+  occurred_at: string
+  contract_version: number
+  decision?: 'APPROVAL' | 'REJECT'
+  comments: string[]
+  annotations: { block_id: string; comment: string }[]
+}
+
 export interface ContractHistoryItem {
+  /** Identifier of the history entry; several entries can share one contract_version. */
+  id: string
   did: string
   contract_version: number
   state: ContractState
@@ -141,6 +191,80 @@ export interface ContractHistoryItem {
   exp_notice_period?: number
   responsible?: unknown
   contract_data?: ContractData
+  /** Actor of the save that replaced this version. Absent on versions recorded before the actor was stored. */
+  modified_by?: string
+  modified_at?: string
 }
 
 export type ContractHistoryResponse = ContractHistoryItem[]
+
+/** A configured Contract Target System deployments may be dispatched to
+ *  (ADR-25). Disabled entries stay referenceable so a contract naming one keeps
+ *  a readable destination, but dispatch to them is refused. */
+export interface ContractTarget {
+  id: string
+  name: string
+  url: string
+  description?: string
+  enabled: boolean
+  created_at?: string
+  updated_at?: string
+  /** The OAuth2 client this target authenticates its callbacks as (ADR-27).
+   *  Absent until a credential has been issued. */
+  oauth_client_id?: string
+  secret_issued_at?: string
+}
+
+/** A freshly issued machine credential. The secret is returned by this response
+ *  and by no other: Hydra keeps only a hash, so it cannot be read back and must
+ *  be rotated if lost (ADR-27). */
+export interface MachineCredential {
+  client_id: string
+  client_secret: string
+  token_url?: string
+  issued_at?: string
+}
+
+/** A registered non-human caller: an SRS Table 5 System User reaching DCS over
+ *  its API (ADR-27). */
+export interface MachineIdentity {
+  id: string
+  name: string
+  oauth_client_id: string
+  participant_did: string
+  roles: string[]
+  description?: string
+  enabled: boolean
+  secret_issued_at?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface MachineIdentityCreateResponse {
+  identity: MachineIdentity
+  credential: MachineCredential
+}
+
+/** The verification of a contract PDF (DCS-OR-C2PA-006, -008): the four named
+ *  checks and the lifecycle state the banner shows. */
+export interface ContractPdfVerifyResult {
+  match: boolean
+  jsonld_hash: string
+  base_pdf_hash: string
+  stored_base_pdf_hash: string
+  c2pa_manifest_found: boolean
+  c2pa_signature_status: string
+  c2pa_signer_status: string
+  c2pa_signer_detail?: string
+  vc_proof_status: string
+  status_list_uri?: string
+  lifecycle_status?: string
+  status_list_status?: string
+  status_list_check: string
+  status_list_error?: string
+  pdf_signature_status: string
+  pdf_signature_source?: string
+  pdf_signature_detail?: string
+  discrepancy?: string
+  c2pa_manifest_source?: string
+}

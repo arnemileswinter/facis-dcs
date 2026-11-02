@@ -112,7 +112,6 @@ type ContractSignature struct {
 	CertRevokedAt  *time.Time `db:"cert_revoked_at"`
 	IpfsCID        *string    `db:"ipfs_cid"`
 	SignatureBytes []byte     `db:"signature_bytes"`
-	KeyVersion     int        `db:"key_version"`
 	CeremonyID     *string    `db:"ceremony_id"`
 	PDFHash        *string    `db:"pdf_hash"`
 	ContentHash    *string    `db:"content_hash"`
@@ -131,7 +130,6 @@ type ContractSignatureEnvelope struct {
 	SignedAt       *string `db:"signed_at"`
 	RevokedAt      *string `db:"revoked_at"`
 	IpfsCID        *string `db:"ipfs_cid"`
-	KeyVersion     int     `db:"key_version"`
 }
 
 type ContractSigningTask struct {
@@ -155,13 +153,22 @@ type SignatureRecord struct {
 	// JAdESSignature is the ETSI TS 119 182-1 compact JWS over the JSON-LD
 	// contract representation (DCS-FR-SM-02/-11).
 	JAdESSignature *string `db:"jades_signature"`
+	// CeremonyID is the signing ceremony that produced this signature — the
+	// join key back to the ceremony's recorded signer certificate subject for
+	// the cross-ceremony consistency check (ADR-20).
+	CeremonyID *string `db:"ceremony_id"`
+	// IpfsCID and PDFHash name the signed PDF this signature produced.
+	IpfsCID *string `db:"ipfs_cid"`
+	PDFHash *string `db:"pdf_hash"`
 }
 
 type ContractRepo interface {
 	ReadDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*Contract, error)
 	ReadProcessDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*ContractProcessData, error)
 	ReadAllMetaData(ctx context.Context, tx *sqlx.Tx, pagination datatype.Pagination) ([]ContractMetadata, error)
-	UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error
+	// UpdateState moves the contract from state from to state to (see
+	// contractworkflowengine/db/pg.UpdateContractState).
+	UpdateState(ctx context.Context, tx *sqlx.Tx, did, from, to string) error
 	UpdateContractData(ctx context.Context, tx *sqlx.Tx, did string, contractData datatype.JSON) error
 
 	CreateSignature(ctx context.Context, tx *sqlx.Tx, signature ContractSignature) error
@@ -173,7 +180,6 @@ type ContractRepo interface {
 	// modification by standards-compliant PAdES validators).
 	SetSignedPDF(ctx context.Context, tx *sqlx.Tx, did, ipfsCID, rendererVersion, c2paState, payloadHash string) error
 	RevokeSignature(ctx context.Context, tx *sqlx.Tx, did string, signerDID string) error
-	ActiveKeyVersion(ctx context.Context, tx *sqlx.Tx, label string) (int, error)
 	ReadLatestEnvelopeByContractDID(ctx context.Context, tx *sqlx.Tx, did string) (*ContractSignatureEnvelope, error)
 	ReadAllSigningTasks(ctx context.Context, tx *sqlx.Tx) ([]ContractSigningTask, error)
 	CountSignatureForContractDID(ctx context.Context, tx *sqlx.Tx, did string) (int, error)
@@ -181,4 +187,17 @@ type ContractRepo interface {
 	CollectValidationFindings(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error)
 	LoadSignatures(ctx context.Context, tx *sqlx.Tx, did string) ([]SignatureRecord, error)
 	CollectComplianceFindings(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error)
+	// ReadPeerSignatureEvidence returns the peer signatures recorded when the
+	// contract's signed PDF arrived from a peer (contract_sync_signatures
+	// poa_evidence), or nil when none were recorded.
+	ReadPeerSignatureEvidence(ctx context.Context, tx *sqlx.Tx, did string) (json.RawMessage, error)
+	// ReadPeerSigners returns the peers whose verified cross-instance
+	// signature this instance holds for the contract, with its receipt time.
+	ReadPeerSigners(ctx context.Context, tx *sqlx.Tx, did string) ([]PeerSigner, error)
+}
+
+// PeerSigner is a peer whose cross-instance signature this instance holds.
+type PeerSigner struct {
+	PeerDID    string    `db:"from_peer_did"`
+	ReceivedAt time.Time `db:"received_at"`
 }

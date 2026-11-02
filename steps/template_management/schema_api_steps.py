@@ -1,5 +1,6 @@
 from behave import when
 from steps.support.api_client import post_json, template_create_url
+from steps.support.services.template_service import TemplateService
 
 @when('I create a schema "{schema_name}"')
 def step_when_create_schema(context, schema_name):
@@ -9,12 +10,11 @@ def step_when_create_schema(context, schema_name):
 
         # FIX: required by API at root level
         "template_type": "contract",
-
+        "party_type": TemplateService.MULTI_PARTY_TYPE,
         "schema_data": {
             "type": "object",
             "properties": {
                 "did": {"type": "string"},
-                "document_number": {"type": "string"},
                 "version": {"type": "integer", "minimum": 0},
                 "schema_version": {"type": "integer", "minimum": 1},
                 "name": {"type": "string"},
@@ -47,7 +47,6 @@ def step_when_create_schema(context, schema_name):
                 }
             },
             "required": [
-                "document_number",
                 "version",
                 "schema_version",
                 "name",

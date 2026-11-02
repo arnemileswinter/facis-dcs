@@ -42,10 +42,18 @@ def step_when_publish_signing_request(context, name):
     ceremony_id = (getattr(context, "ceremony_ids", {}) or {}).get(name)
     assert ceremony_id, f"No completed ceremony recorded for contract {name!r}"
     signer_h = AuthService.get_headers_for_roles(["Contract Signer"])
+    # credential_type is deliberately omitted: the backend defaults it to the
+    # CONTRACT's own declared level requirement for this field (SM-01), which
+    # is what the JAR should ask the wallet for. Hardcoding "AES" here used to
+    # make a QES-required field's publish call fail its own fail-fast check
+    # before the wallet ever got a chance to (mis)behave — the level-mismatch
+    # rejection belongs at submit, once the wallet's actual signature is known
+    # (see "with an ordinary AES signature" steps in dcs_signing_acceptance_
+    # hardening_steps.py, which sign AES regardless of what was requested).
     resp = post_json(
         context,
         signature_request_publish_url(context, ceremony_id),
-        {"ceremony_id": ceremony_id, "credential_type": "AES"},
+        {"ceremony_id": ceremony_id},
         headers=signer_h,
     )
     context.requests_response = resp
@@ -97,8 +105,29 @@ def step_then_request_object_is_jar(context, name=None):
     assert claims.get("nonce"), f"no nonce in request object: {claims}"
     assert claims.get("signatureQualifier"), f"no signatureQualifier in request object: {claims}"
     assert claims.get("response_type") == "sign_response", f"request object must be a sign_response: {claims}"
-    assert claims.get("client_id_scheme") == "x509_san_dns", (
-        f"request object must use client_id_scheme x509_san_dns: {claims}"
+    # SRS line 727 requires OpenID4VP as profiled by the ARF, which profiles
+    # OpenID4VP 1.0 / HAIP: the client identifier carries its scheme as a PREFIX.
+    # The pre-1.0 draft encoding this used to assert — a bare client_id plus a
+    # separate client_id_scheme claim, taken from the EUDI walletdriven-signer
+    # reference — is what an ARF-compliant wallet may reject, and it also made one
+    # ceremony name its verifier two ways across its two request objects.
+    client_id = str(claims.get("client_id") or "")
+    assert client_id.startswith("x509_san_dns:"), (
+        f"request object must name the verifier by a prefixed client identifier: {claims}"
+    )
+    assert "client_id_scheme" not in claims, (
+        f"client_id_scheme is the superseded draft encoding and must not accompany "
+        f"a prefixed client_id: {claims}"
+    )
+    assert claims.get("iss") == client_id, (
+        f"request object iss must equal its client_id: {claims}"
+    )
+    # Both request objects of one ceremony are reached through one request_uri, so
+    # the deep link's client_id and the JAR's must be the same verifier.
+    published_client_id = published[contract_name].get("client_id")
+    assert published_client_id == client_id, (
+        f"publish response client_id {published_client_id!r} does not match the "
+        f"request object's {client_id!r}"
     )
 
 

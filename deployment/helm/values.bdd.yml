@@ -23,6 +23,10 @@ traefik:
       port: 18080
       exposedPort: 18080
       hostPort: 18080
+  # One line per request with the status of the backend and the size sent to
+  # the client: a failure dump then shows which hop cut a response.
+  accessLog:
+    enabled: true
 
 image:
   pullPolicy: Never
@@ -35,31 +39,57 @@ pdfCore:
     pullPolicy: Never
 
 extraEnv:
-  - name: JWT_ALG_NONE_SUPPORTED
+  # This stack trusts the issuer fixture committed to the repo. It has to
+  # declare that, so no deployment inherits it by omission.
+  - name: DCS_ALLOW_DEV_TRUST
     value: "true"
+  # Access token signatures are checked. The expired-credential scenarios sign
+  # their tokens with the development key steps/support/keys/
+  # access-token-dev.key.pem; this is its public half (UC-IF-20).
+  - name: DCS_DEV_ACCESS_TOKEN_KEY
+    value: |
+      -----BEGIN PUBLIC KEY-----
+      MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE3STLc7Ky2vgK+BpZR5qRzK5Lldg8
+      MOm5sT6tCbop7Anb5Umo6nTNXdNfvkzccGlxKsckiufjhjYuZz6MFlql5g==
+      -----END PUBLIC KEY-----
   - name: AUTH_INSECURE_COOKIES
     value: "true"
-  # Reciprocal trust for the @two-instance peer-trust scenarios
-  # (features/17_peer_trust): instance B's DID (see values.bdd2.yml's own
-  # DCS_TRUSTED_PEERS for the other half of this pair). Seeded at startup by
-  # backend/cmd/dcs/main.go's seedTrustedPeersFromEnv.
-  - name: DCS_TRUSTED_PEERS
-    value: "did:web:dcs-b.localhost%3A18080"
+  # Federation trust gate (ADR-19): the local policy endpoint every inbound
+  # and outbound interaction is consulted against, fail-closed. Points at the
+  # bootstrap 200-OK Node-RED flow (deployment/helm/charts/orce/flows/
+  # trust-pdp-flow.json), shared with instance B (values.bdd2.yml has no own
+  # orce release).
+  - name: DCS_TRUST_PDP_URL
+    value: "https://dcs-orce:8443/trust-pdp"
+  # did:web is https, and the resolver makes that exception only for loopback on
+  # its own. The synthetic peers the ADR-19 scenarios use are in-cluster Services
+  # on plain http under names that are not loopback, so they are named here
+  # rather than reinstating a silent http fallback that would also apply on the
+  # internet. See identity.DIDWebSchemes.
+  - name: DCS_DIDWEB_INSECURE_HOSTS
+    value: "dcs-orce:1880,dcs-orce-mismatch:1880,dcs-orce-trusted:1880"
   # DB-backed sync-fail retry cadence (conf.SyncFailCronJobTimeOut). The prod
   # default is minutes; BDD/e2e run it fast so a peer PDF ship that fires before
   # the async regenerator stored the CID (or that transiently failed) is
   # re-attempted and delivered well within the scenarios' replication wait.
   - name: DCS_SYNC_FAIL_RETRY_INTERVAL
     value: "10s"
+  # Background regeneration retry cadence (conf.PDFRegenerationRetryTimeOut).
+  # The prod default is minutes; BDD/e2e run it fast so a PDF whose regeneration
+  # failed transiently (pdf-core or IPFS) is re-rendered and stored — and the
+  # deferred peer ship then has something to send — within the scenarios' waits.
+  - name: DCS_PDF_REGENERATION_RETRY_INTERVAL
+    value: "10s"
   # Real deployment dispatch to the shipped ORCE contract-target-flow
   # (UC-05-01): the flow verifies the payload hash, acks synchronously, and
   # then POSTs the authoritative acknowledgement + a measured KPI back to
   # /contract/deployment/callback (see orce.extraEnv below for its half of
   # the wiring). Only instance A dispatches — signing commands forward to the
-  # contract's Origin peer, so deployments always originate here; instance B
-  # deliberately keeps CONTRACT_TARGET_URL unset.
-  - name: CONTRACT_TARGET_URL
-    value: "http://dcs-orce:1880/contract-target/deploy"
+  # contract's Origin peer, so deployments always originate here.
+  #
+  # The endpoint is no longer an env var: a contract designates a target from the
+  # registry (ADR-25). It is seeded under contractTargets below, so the suite
+  # finds it already registered rather than having to create it.
 
 # DID identity (fatal on startup when missing). The <fullname>-identity
 # Secret (identitySecretName helper) is published by the hsm-provision
@@ -70,7 +100,22 @@ identity:
 
 oid4vp:
   trust:
-    xfscAllowUnsignedFallback: true
+    enabled: true
+    dataPath: /app/config/oid4vp/trust.dev.json
+    # Baked-in bundle of the roots this stack verifies chains to: the dev PID
+    # issuer's own certificate (signing_acceptance_hardening.feature's "trusted
+    # dev issuer" scenarios) and the root the dev ORCE credential issuer is
+    # handed rather than generating one, which is what the signed status list a
+    # login credential names chains to.
+    # The dev/BDD stack points both lists at the same bundle: it holds the ORCE
+    # dev root its login and peer credentials chain to AND the dev CA the
+    # synthetic PID x5c issuer signs under. A real deployment separates them —
+    # that is the point of the split (ADR-35) — but here one file is what the
+    # fixtures actually mint under, and pretending otherwise would mean two
+    # copies of the same certificates.
+    x5cAnchors:
+      poa: /app/config/oid4vp/x5c-trust-anchors.dev.pem
+      pid: /app/config/oid4vp/x5c-trust-anchors.dev.pem
 
 postgresql:
   enabled: true
@@ -78,37 +123,12 @@ postgresql:
     username: dcs
     password: dcs
     database: dcs
-  additionalDatabases: ["fc", "hydra", "statuslist"]
+  additionalDatabases: ["fc", "hydra"]
   persistence:
     enabled: false
-
-keycloak:
-  enabled: true
-  service:
-    type: ClusterIP
-    port: 8080
-  auth:
-    adminUser: admin
-    adminPassword: admin
-  realm:
-    import: true
-  extraEnv:
-    - name: KC_HOSTNAME
-      value: "dcs-keycloak"
-    - name: KC_HOSTNAME_PORT
-      value: "8080"
-    - name: KC_HOSTNAME_STRICT_HTTPS
-      value: "false"
-    - name: KC_HTTP_ENABLED
-      value: "true"
 
 nats:
   enabled: true
-
-neo4j:
-  enabled: true
-  persistence:
-    enabled: false
 
 ingress:
   enabled: true
@@ -125,6 +145,15 @@ ingress:
         # Full path (not /.well-known): hydra.route.paths already claims the
         # /.well-known prefix for OIDC discovery, and the longer path wins.
         - path: /.well-known/did.json
+          pathType: Prefix
+        # Federation trust gate (ADR-19): the agreement credential and the
+        # rules document it names both resolve via the same did:web-hostname
+        # logic as did.json (identity.FetchDIDDocumentFromHostname's sibling
+        # in dcstodcs/trustgate.go) — routed at the origin root for the same
+        # reason as did.json above.
+        - path: /.well-known/dcs-agreement-credential.json
+          pathType: Prefix
+        - path: /.well-known/dcs-federation-rules.md
           pathType: Prefix
         # Webhook platform (DCS-FR-TR-22 template-update notifications):
         # backend/cmd/dcs/http.go mounts it at /orce/ on the service root,
@@ -144,13 +173,20 @@ ingress:
           pathType: Prefix
         - path: /.well-known/did.json
           pathType: Prefix
+        - path: /.well-known/dcs-agreement-credential.json
+          pathType: Prefix
+        - path: /.well-known/dcs-federation-rules.md
+          pathType: Prefix
         - path: /orce
           pathType: Prefix
 
 hydra:
   enabled: true
   config:
-    dsn: "postgres://dcs:dcs@dcs-postgresql:5432/hydra?sslmode=disable"
+    # The "hydra" database of this release's PostgreSQL, password from its
+    # Secret, verified against the internal CA (global.internalTLS).
+    coDeployedPostgresql:
+      enabled: true
     dev: true
     selfIssuerURL: "http://localhost:18080"
     loginURL: "http://localhost:18080/digital-contracting-service/ui/"
@@ -192,6 +228,18 @@ hydra:
       response_types: []
       scope: ""
       token_endpoint_auth_method: client_secret_post
+    - client_id: dcs-orce-reviewer
+      client_secret: dcs-orce-reviewer-secret
+      grant_types: ["client_credentials"]
+      response_types: []
+      scope: ""
+      token_endpoint_auth_method: client_secret_post
+    - client_id: dcs-orce-approver
+      client_secret: dcs-orce-approver-secret
+      grant_types: ["client_credentials"]
+      response_types: []
+      scope: ""
+      token_endpoint_auth_method: client_secret_post
     # Deliberately present and deliberately unable to sign: see the
     # systemClients entry below and ADR-17.
     - client_id: dcs-orce-signer
@@ -200,21 +248,65 @@ hydra:
       response_types: []
       scope: ""
       token_endpoint_auth_method: client_secret_post
+    # The contract-target flow, authenticating its deployment callback as the
+    # registry entry it is (ADR-27).
+    - client_id: dcs-orce-target
+      client_secret: dcs-orce-target-secret
+      grant_types: ["client_credentials"]
+      response_types: []
+      scope: ""
+      token_endpoint_auth_method: client_secret_post
 
+# The FC must run in the BDD kind scenario too (features/02, template_archive
+# and others exercise it against a real fc-service). Deployed via
+# our own local charts/federated-catalogue + charts/keycloak + charts/fuseki +
+# charts/fc-postgres (see Chart.yaml), scaled down for a fast/ephemeral KIND
+# cluster. No portal here — nothing in BDD exercises its demo UI, and one
+# less crash-prone eager-OIDC-discovery Deployment to wait on.
+# --- DCS backend's own outbound config for calling Federated Catalogue ---
+# (independent of where FC actually runs — here it's fcservice below).
 federatedCatalogue:
   enabled: true
-  apiURL: "http://dcs-federated-catalogue:8081"
+  apiURL: "http://fc-service:8081"
   oauth:
-    clientID: "dcs-fc-client"
-    clientSecret: "dcs-fc-client-secret"
-  keycloak:
-    hostname: "dcs-keycloak:8080"
-    issuerScheme: "http"
-  verificationVpSignature: false
-  verificationVcSignature: false
+    clientID: "federated-catalogue"
+    clientSecret: "**********"
 
 fcKeycloak:
-  realmURL: "http://dcs-keycloak:8080/realms/gaia-x"
+  realmURL: "http://fc-keycloak-http:8080/auth/realms/federated-catalogue-realm"
+
+fcservice:
+  enabled: true
+  realmProvision:
+    enabled: true
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+  portal:
+    enabled: false
+
+fcKeycloakApp:
+  # Empty, not "fc-keycloak-http" — a non-empty hostname makes
+  # charts/federated-catalogue's deployment.yaml build the issuer URL as
+  # https://<hostname>/auth (issuerScheme defaults to "https"), but nothing
+  # terminates TLS in front of Keycloak inside a plain kind cluster, so
+  # Keycloak's own actually-issued token iss claim (inferred from the real
+  # unproxied http request, KC_HOSTNAME_STRICT=false) wouldn't match — the
+  # exact issuer-mismatch 401 bug this whole rewrite exists to fix, just
+  # reintroduced for BDD. Empty falls back to the internal Service URL on
+  # both sides consistently (see deployment.yaml's $keycloakIssuerUrl).
+  hostname: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
 
 # SoftHSM2 software token holding every private key (DCS-IR-HI-01), provisioned
 # in-cluster with all five ECDSA P-256 keys and the C2PA x5chain. hsm.Open is
@@ -227,57 +319,30 @@ pkcs11:
     enabled: true
     soPin: "12345678"
 
-# XFSC Status List Service: required (fatal on startup if STATUSLIST_SERVICE_URL unreachable).
-statuslistService:
-  enabled: true
-  tenantID: c2pa
-  ingress:
-    enabled: true
-    className: traefik
-    stripPrefix: /statuslist
-    hosts:
-      - host: localhost
-        paths:
-          - path: /statuslist
-            pathType: Prefix
-  database:
-    enabled: true
-    host: "dcs-postgresql"
-    port: "5432"
-    name: "statuslist"
-    user: "dcs"
-    password: "dcs"
-    sslMode: "disable"
-  nats:
-    url: "nats://dcs-nats:4222"
-  bddListInit:
-    enabled: true
-    tenantIDs:
-      - credential
-      - c2pa
-
 statusListLocalhostProxy:
   enabled: true
   upstream: "http://traefik.kube-system.svc.cluster.local:18080"
   ingressHost: localhost
 
-# IPFS: required — IPFS_TENANT_BASE_URL and IPFS_MFS_BASE_URL are fatal on startup.
+# IPFS: required — IPFS_MFS_BASE_URL is fatal on startup.
 ipfs:
   enabled: true
+  # Pinned for the disposable stack: the rollback trap the chart warns about
+  # (an older kubo refusing a newer repo) cannot bite here, because every run
+  # initialises a fresh volume.
+  image:
+    tag: "v0.35.0"
+  # Disposable-stack node tuning (charts/ipfs/values.yaml): nothing to provide
+  # to, and no durability to keep past the run.
+  config:
+    routingType: none
+    noSync: true
   # The audit/evidence chains store content-addressed blobs whose CIDs live
   # in the (persistent) database — the two stores must share a lifetime, or
   # every IPFS pod restart dangles the recorded evidence.
   persistence:
     enabled: true
 
-ipfsDocumentManager:
-  enabled: true
-  ipfs:
-    host: "dcs-ipfs"
-    apiGatewayURL: "http://dcs-ipfs:8080/ipfs"
-    rpcApiPort: 5001
-  config:
-    serverMode: "debug"
 
 # ORCE (Timestamp Authority): required — TSA_URL is fatal on startup.
 # Persistence is backed by the static, release-scoped kind volume provisioned
@@ -306,6 +371,14 @@ systemClients:
   - client_id: dcs-orce-manager
     participant_did: "did:web:dcs-a.localhost%3A18080"
     roles: ["Sys. Contract Manager"]
+  # Reviews contracts and forwards them to approval (UC-12-02).
+  - client_id: dcs-orce-reviewer
+    participant_did: "did:web:dcs-a.localhost%3A18080"
+    roles: ["Sys. Contract Reviewer"]
+  # Approves reviewed contracts (UC-12-03).
+  - client_id: dcs-orce-approver
+    participant_did: "did:web:dcs-a.localhost%3A18080"
+    roles: ["Sys. Contract Approver"]
   # SRS Table 5 defines System Contract Signer as "API-based digital signing
   # for autonomous or IoT systems". eIDAS Art. 3(9) makes a signatory a NATURAL
   # PERSON, and an advanced signature requires their sole control (Art. 26) —
@@ -316,54 +389,121 @@ systemClients:
   - client_id: dcs-orce-signer
     participant_did: "did:web:dcs-a.localhost%3A18080"
     roles: ["Sys. Contract Signer"]
+  # Authorises the deployment callback and nothing else, and only for the
+  # deployments dispatched to this target (ADR-27).
+  - client_id: dcs-orce-target
+    participant_did: "did:web:dcs-a.localhost%3A18080"
+    roles: ["Contract Target System"]
+
+# The BDD webhook receiver runs in the behave process and serves plain http
+# (steps/support/services/webhook_receiver_service.py). The Makefile sets the
+# address the cluster reaches it at.
+webhooks:
+  insecureHosts: "host.docker.internal:18444"
 
 orce:
   enabled: true
+  checkpointSink:
+    enabled: true
+    url: "https://host.docker.internal:18443/checkpoints"
+    timeoutSeconds: 2
+    internalTimeoutSeconds: 30
+    allowInsecureTLS: true
+    bearerToken: "bdd-checkpoint-sink-token"
+  # The ADR-19 mismatched-federation-rules (AC5) and trusted-peer (AC7/AC8/AC9)
+  # scenarios resolve their did:web identities against the same ORCE pod; off by
+  # default in the chart because they are test fixtures.
+  syntheticPeer:
+    enabled: true
   persistence:
     enabled: true
+  # The volume is a hostPath (ensure_orce_persistence.sh), owned by root.
+  volumePermissions:
+    enabled: true
   # The contract-target-flow's callback legs (deployment ack + measured KPI,
-  # flows/contract-target-flow.json) post to this instance's backend with the
-  # shared deployment-callback secret (command/callback.go's
-  # DeploymentCallbackSecret; the value below is its BDD default, stated
-  # explicitly so the pairing is visible in one place).
+  # flows/contract-target-flow.json) post to this instance's backend as their
+  # own registered OAuth2 client (ADR-27): the callback proves WHICH target is
+  # reporting, so a target can acknowledge its own deployments and no others.
   extraEnv:
+    - name: ORCE_AUDIT_EXECUTOR_TEST_CONTROLS_ENABLED
+      value: "true"
     # DCS_URL must carry the API base path (DCS_API_PATH mounts every app
     # endpoint under /digital-contracting-service/api) — the flow's callback
-    # legs append /contract/deployment/callback to it.
+    # legs append /contract/deployment/callback to it. The https port is the
+    # TLS proxy of the backend pod (global.internalTLS).
     - name: DCS_URL
-      value: "http://dcs-digital-contracting-service:8991/digital-contracting-service/api"
-    - name: DEPLOYMENT_CALLBACK_SECRET
-      value: "bdd-deployment-callback-secret"
+      value: "https://dcs-digital-contracting-service:8443/digital-contracting-service/api"
+    # The credential the contract-target flow authenticates its callback with.
+    # It matches the contractTargets entry's oauth_client_id below, which is
+    # what binds the caller to the registry row the deployment went to.
+    - name: DCS_TARGET_CLIENT_ID
+      value: "dcs-orce-target"
+    - name: DCS_TARGET_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: dcs-hydra-clients
+          key: dcs-orce-target
     # Machine identities for the system-user flows (ADR-16/ADR-17): a plain
     # OAuth2 client credentials grant against this deployment's Hydra, one
     # client per capability. No wallet, no alg:none, no shared credential.
+    # The client secrets come from the Secret of hydra.clients
+    # (<release>-hydra-clients, key client_id).
+    # Port 8444 is the TLS proxy of the Hydra public API (global.internalTLS).
     - name: HYDRA_TOKEN_URL
-      value: "http://dcs-hydra:4444/oauth2/token"
+      value: "https://dcs-hydra:8444/oauth2/token"
     - name: ORCE_NOTARY_CLIENT_ID
       value: "dcs-orce-notary"
     - name: ORCE_NOTARY_CLIENT_SECRET
-      value: "dcs-orce-notary-secret"
+      valueFrom:
+        secretKeyRef:
+          name: dcs-hydra-clients
+          key: dcs-orce-notary
     - name: ORCE_CREATOR_CLIENT_ID
       value: "dcs-orce-creator"
     - name: ORCE_CREATOR_CLIENT_SECRET
-      value: "dcs-orce-creator-secret"
+      valueFrom:
+        secretKeyRef:
+          name: dcs-hydra-clients
+          key: dcs-orce-creator
     - name: ORCE_MANAGER_CLIENT_ID
       value: "dcs-orce-manager"
     - name: ORCE_MANAGER_CLIENT_SECRET
-      value: "dcs-orce-manager-secret"
+      valueFrom:
+        secretKeyRef:
+          name: dcs-hydra-clients
+          key: dcs-orce-manager
     - name: ORCE_SIGNER_CLIENT_ID
       value: "dcs-orce-signer"
     - name: ORCE_SIGNER_CLIENT_SECRET
-      value: "dcs-orce-signer-secret"
+      valueFrom:
+        secretKeyRef:
+          name: dcs-hydra-clients
+          key: dcs-orce-signer
   ingress:
     enabled: true
     hosts:
       - host: "localhost"
         path: /contract-target
+      # No /orce rule here. The DCS mounts its webhook platform at /orce/ on
+      # the service root (backend/cmd/dcs/http.go, DCS-FR-TR-22) and claims the
+      # prefix on this same host, so a second rule for it is a coin toss that
+      # the webhook platform loses. The audit-executor control and run seams
+      # are reached over the ORCE port-forward instead
+      # (BDD_ORCE_AUDIT_CONTROL_URL / BDD_ORCE_AUDIT_EXECUTOR_URL in
+      # tests/bdd/scripts/run_bdd_helm.sh), which is why this rule was only
+      # ever an unused fallback.
+
+auditExecutor:
+  url: "https://dcs-orce:8443/customer-audit/run"
+  timeout: "2s"
+
+workflowGateExecutor:
+  url: "https://dcs-orce:8443/workflow-gate/run"
+  timeout: "2s"
 
 signing:
   # Wired as TSA_URL env var; fatal on startup if empty.
-  tsaURL: "http://dcs-orce:1880/tsa/"
+  tsaURL: "https://dcs-orce:8443/tsa/"
   # In-cluster dev TSA (orce chart localTSA): verify tokens against the
   # provisioned dev TSA cert instead of the embedded production cert.
   tsaTrustCertSecret: "dcs-orce-tsa-material"
@@ -414,3 +554,35 @@ kubeStateMetrics:
 # signing BDD scenarios can complete.
 dss:
   enabled: true
+
+# Seeded into the target registry at startup (ADR-25) so a freshly created kind
+# cluster can deploy without anyone opening the admin UI. The BDD and e2e suites
+# look this up by name; the e2e also registers one of its own through the UI, to
+# prove an operator can.
+contractTargets:
+  - name: "BDD Contract Target"
+    url: "http://dcs-orce:1880/contract-target/deploy"
+    description: "The shipped ORCE contract-target flow used by the test suites."
+    # Provisioned by this same configuration rather than issued through the
+    # admin UI, because the suite has no operator to click through it. A real
+    # deployment issues the credential once and rotates it (ADR-27).
+    oauth_client_id: "dcs-orce-target"
+
+# In-cluster service credential for the background PDF regenerator, which runs on
+# NATS events with no user JWT. Never a shared or committed value in a real
+# deployment: the chart refuses to render without one.
+
+# The backend, ORCE and DSS admit only the Traefik ingress, the pods of this
+# release and the other BDD release (DCS-NFR-SEC-14). Instance B (release dcs2) shares this release's ORCE and DSS.
+networkPolicy:
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: traefik
+  peersFrom:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/instance: dcs2

@@ -1,5 +1,5 @@
 import http from '@/api/http'
-import type { ContractTemplate } from '@/models/contract-template'
+import type { ContractTemplate } from '@/models/contract-template/contract-template'
 import type {
   ContractTemplateApproveRequest,
   ContractTemplateArchiveRequest,
@@ -23,6 +23,9 @@ import type {
   ContractTemplateAuditResponse,
   ContractTemplateCopyResponse,
   ContractTemplateCreateResponse,
+  ContractTemplateHistoryResponse,
+  ContractTemplatePdfVerifyResponse,
+  ContractTemplateProvenanceResponse,
   ContractTemplatePublishResponse,
   ContractTemplateRegisterResponse,
   ContractTemplateRejectResponse,
@@ -121,6 +124,12 @@ export const contractTemplateService: ContractTemplateService = {
       })
   },
 
+  async retrieveHistory(did: string) {
+    return http
+      .get<ContractTemplateHistoryResponse>(`/template/history/${encodeURIComponent(did)}`)
+      .then((res) => res.data)
+  },
+
   async approve(request: ContractTemplateApproveRequest) {
     return http.post<ContractTemplateApproveResponse>('/template/approve', request).then((res) => res.data)
   },
@@ -142,13 +151,7 @@ export const contractTemplateService: ContractTemplateService = {
   },
 
   async audit(request: ContractTemplateAuditRequest) {
-    return http
-      .get<ContractTemplateAuditResponse>('/template/audit', { params: request })
-      .then((res) => res.data)
-      .catch((err: unknown) => {
-        console.error('Audit Error:', err)
-        return []
-      })
+    return http.get<ContractTemplateAuditResponse>('/template/audit', { params: request }).then((res) => res.data)
   },
 
   async publish(request: ContractTemplatePublishRequest) {
@@ -161,9 +164,21 @@ export const contractTemplateService: ContractTemplateService = {
       .then((res) => res.data)
   },
 
-  async verifyPdf(
-    did: string,
-  ): Promise<{ match: boolean; jsonld_hash: string; base_pdf_hash: string; stored_base_pdf_hash: string }> {
-    return http.get(`/pdf/verify/template/${encodeURIComponent(did)}`).then((res) => res.data)
+  async verifyPdf(did: string) {
+    return http
+      .get<ContractTemplatePdfVerifyResponse>(`/pdf/verify/template/${encodeURIComponent(did)}`)
+      .then((res) => res.data)
+  },
+
+  async provenance(did: string) {
+    return http
+      .get<ContractTemplateProvenanceResponse>(`/template/provenance/${encodeURIComponent(did)}`)
+      .then((res) => res.data)
+  },
+
+  async exportBundle(did: string): Promise<Blob> {
+    return http
+      .get<Blob>(`/template/export/${encodeURIComponent(did)}`, { responseType: 'blob' })
+      .then((res) => res.data)
   },
 }

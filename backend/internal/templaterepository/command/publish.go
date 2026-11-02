@@ -3,13 +3,12 @@ package command
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
-	"net/http"
 	"time"
 
+	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
@@ -27,6 +26,12 @@ type PublishCmd struct {
 	UpdatedAt   time.Time
 	PublishedBy string
 	HolderDID   string
+	// InstanceDID is this DCS deployment's own did:web (signing.issuerDID) —
+	// the FC-facing publisher identity. A federated catalogue's Participant
+	// concept is an organization/deployment, not the individual employee who
+	// clicked publish, so this — not HolderDID — is what's asserted as the
+	// asset's issuer to FC.
+	InstanceDID string
 	UserRoles   userrole.UserRoles
 }
 
@@ -63,11 +68,14 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 	}
 
 	if cmd.UpdatedAt.Unix() < processData.ContentUpdatedAt.Unix() {
-		return errors.New("contract template was updated elsewhere, please reload")
+		return fmt.Errorf("contract template %w, please reload", base.ErrUpdatedElsewhere)
 	}
 
 	if processData.State != contracttemplatestate.Registered.String() {
-		return errors.New("contract template must be in registered state to publish")
+		return fmt.Errorf("%w: contract template must be in registered state to publish", ErrInvalidTemplateState)
+	}
+	if fullTemplate.ComplianceStatus != Compliant {
+		return fmt.Errorf("%w: compliance status %s", ErrTemplateNotCompliant, fullTemplate.ComplianceStatus)
 	}
 
 	if h.FCClient == nil {
@@ -75,7 +83,8 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 	}
 
 	// Exclude remote calls from the transaction to avoid a long-running transaction.
-	if err := h.publishTemplateResourceToFC(ctx, cmd, processData, fullTemplate); err != nil {
+	assetHash, err := h.publishTemplateResourceToFC(ctx, cmd, processData, fullTemplate)
+	if err != nil {
 		return err
 	}
 
@@ -100,22 +109,24 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 		return nil
 	}
 	if processData.State != contracttemplatestate.Registered.String() {
-		return errors.New("contract template must be in registered state to publish")
+		return fmt.Errorf("%w: contract template must be in registered state to publish", ErrInvalidTemplateState)
 	}
 
-	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, contracttemplatestate.Published.String())
+	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contracttemplatestate.Published.String())
 	if err != nil {
 		return fmt.Errorf("could not update state: %w", err)
 	}
+	if err := h.CTRepo.UpdateCatalogueAssetHash(ctx, tx, cmd.DID, assetHash); err != nil {
+		return fmt.Errorf("could not record catalogue asset: %w", err)
+	}
 
 	evt := templateevents.PublishEvent{
-		DID:            cmd.DID,
-		DocumentNumber: processData.DocumentNumber,
-		Version:        processData.Version,
-		PublishedBy:    cmd.PublishedBy,
-		HolderDID:      cmd.HolderDID,
-		OccurredAt:     time.Now().UTC(),
-		UserRoles:      cmd.UserRoles,
+		DID:         cmd.DID,
+		Version:     processData.Version,
+		PublishedBy: cmd.PublishedBy,
+		HolderDID:   cmd.HolderDID,
+		OccurredAt:  time.Now().UTC(),
+		UserRoles:   cmd.UserRoles,
 	}
 	err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
 	if err != nil {
@@ -125,72 +136,49 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 	return tx.Commit()
 }
 
-func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd PublishCmd, processData *db.ContractTemplateProcessData, fullTemplate *db.ContractTemplate) error {
-	if cmd.HolderDID == "" {
-		return fmt.Errorf("holder did is empty")
-	}
-
-	name := ""
-	description := ""
-	if fullTemplate.Name != nil {
-		name = *fullTemplate.Name
-	}
-	if fullTemplate.Description != nil {
-		description = *fullTemplate.Description
+func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd PublishCmd, processData *db.ContractTemplateProcessData, fullTemplate *db.ContractTemplate) (string, error) {
+	if cmd.InstanceDID == "" {
+		return "", fmt.Errorf("instance did is empty")
 	}
 
 	templateDataString, err := fcasset.TemplateDataString(fullTemplate.TemplateData)
 	if err != nil {
-		return fmt.Errorf("serialize template data for Federated Catalogue: %w", err)
+		return "", fmt.Errorf("serialize template data for Federated Catalogue: %w", err)
 	}
 
 	payload, err := fcasset.BuildPayload(fcasset.BuildInput{
-		Issuer:    cmd.HolderDID,
-		ValidFrom: fullTemplate.UpdatedAt,
-		Subject: fcasset.CatalogueSubjectFromRepository(
-			cmd.DID,
-			processData.Version,
-			processData.State,
-			name,
-			description,
-			fullTemplate.TemplateType,
-		),
+		Issuer:             cmd.InstanceDID,
+		SubjectIRI:         base.ResourceIRI("template", cmd.DID),
+		ValidFrom:          fullTemplate.UpdatedAt,
+		Subject:            CatalogueSubject(processData, fullTemplate),
 		TemplateDataString: templateDataString,
 	})
 
 	if err != nil {
-		return fmt.Errorf("build template asset payload failed: %w", err)
+		return "", fmt.Errorf("build template asset payload failed: %w", err)
 	}
 
-	body, err := json.Marshal(payload)
+	assetHash, err := h.FCClient.PublishAsset(ctx, payload)
 	if err != nil {
-		return fmt.Errorf("marshal template asset payload failed: %w", err)
+		return "", fmt.Errorf("publish template resource failed: %w", err)
 	}
+	return assetHash, nil
+}
 
-	resp, err := h.FCClient.PostRaw(ctx, fcclient.AssetsEndpointPath, nil, fcclient.JSONLDContentType, body)
-	if err != nil {
-		return fmt.Errorf("publish template resource failed: %w", err)
-	}
-
-	if resp.StatusCode == http.StatusCreated {
-		return nil
-	}
-
-	// FC duplicate self-descriptions return conflict_error
-	if resp.StatusCode == http.StatusConflict {
-		code := h.FCClient.ExtractErrorCode(resp.Body)
-		message := h.FCClient.ExtractErrorMessage(resp.Body)
-		// The template SD already exists in the FC
-		if code == "conflict_error" {
-			return nil
-		}
-		if message != "" {
-			return fmt.Errorf("publish template resource failed: %s", message)
-		}
-		return fmt.Errorf("publish template resource failed with status %d", resp.StatusCode)
-	}
-	if message := h.FCClient.ExtractErrorMessage(resp.Body); message != "" {
-		return fmt.Errorf("publish template resource failed: %s", message)
-	}
-	return fmt.Errorf("publish template resource failed with status %d", resp.StatusCode)
+// CatalogueSubject is the catalogue metadata of a template, with the
+// searchable metadata an importing instance takes over (DCS-FR-TR-01).
+func CatalogueSubject(processData *db.ContractTemplateProcessData, template *db.ContractTemplate) fcasset.CatalogueSubject {
+	subject := fcasset.CatalogueSubjectFromRepository(
+		template.DID,
+		processData.Version,
+		processData.State,
+		base.DerefString(template.Name),
+		base.DerefString(template.Description),
+		template.TemplateType,
+		template.PartyType,
+	)
+	subject.Jurisdiction = base.DerefString(template.Jurisdiction)
+	subject.Industry = base.DerefString(template.Industry)
+	subject.TemplateLevel = template.TemplateLevel
+	return subject
 }

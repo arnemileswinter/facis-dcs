@@ -2,41 +2,54 @@ package service
 
 import (
 	"context"
+	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 
+	"digital-contracting-service/internal/base/contractreadpolicy"
+
 	pdfgen "digital-contracting-service/gen/pdf_generation"
 	"digital-contracting-service/internal/auth"
-	"digital-contracting-service/internal/base/ipfs"
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/bundleexport"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	pdfquery "digital-contracting-service/internal/pdfgeneration/query"
+	"digital-contracting-service/internal/signingmanagement/dss"
 	tpldb "digital-contracting-service/internal/templaterepository/db"
 
 	"github.com/jmoiron/sqlx"
 )
 
 type pdfGenerationSrvc struct {
-	DB         *sqlx.DB
-	IPFSClient *ipfs.APIClient
-	CRepo      cwedb.ContractRepo
-	TRepo      tpldb.ContractTemplateRepo
-	SignRepo   bundleexport.SignatureLoader
-	PDFCore    *pdfcore.Client
-	IssuerDID  string
-	VCIssuer   provenance.VCIssuer
-	LocalPeer  string
+	DB        *sqlx.DB
+	Artifacts *artifactstore.Store
+	CRepo     cwedb.ContractRepo
+	TRepo     tpldb.ContractTemplateRepo
+	SignRepo  bundleexport.SignatureLoader
+	PDFCore   *pdfcore.Client
+	IssuerDID string
+	VCIssuer  provenance.VCIssuer
+	LocalPeer string
+	// Credentials verifies a credential read out of a stored PDF against the key
+	// its issuer publishes for assertions.
+	Credentials *provenance.CredentialVerifier
+	// CredentialStatus resolves that credential's revocation entry against the
+	// signed status list it names.
+	CredentialStatus *provenance.CredentialStatusVerifier
+	// SignerRoots anchor the C2PA manifest signers at verify (DCS-OR-C2PA-007).
+	SignerRoots *x509.CertPool
 	auth.JWTAuthenticator
 }
 
 func NewPDFGeneration(
 	db *sqlx.DB,
 	jwtAuth auth.JWTAuthenticator,
-	ipfsClient *ipfs.APIClient,
+	artifacts *artifactstore.Store,
 	cRepo cwedb.ContractRepo,
 	tRepo tpldb.ContractTemplateRepo,
 	signRepo bundleexport.SignatureLoader,
@@ -44,6 +57,9 @@ func NewPDFGeneration(
 	issuerDID string,
 	vcIssuer provenance.VCIssuer,
 	localPeer string,
+	credentials *provenance.CredentialVerifier,
+	credentialStatus *provenance.CredentialStatusVerifier,
+	signerRoots *x509.CertPool,
 ) pdfgen.Service {
 	if vcIssuer == nil {
 		panic("VCIssuer is required for DCS-OR-C2PA-004 compliance")
@@ -51,9 +67,20 @@ func NewPDFGeneration(
 	if pdfCore == nil {
 		panic("PDFCore client is required")
 	}
+	// Without it every embedded-credential verdict would be indeterminate, which
+	// is a verify endpoint that reports nothing.
+	if credentials == nil {
+		panic("CredentialVerifier is required to verify embedded credentials")
+	}
+	// Without it a verified credential's revocation entry could not be resolved
+	// at all, and the verify endpoint would report a contract as intact without
+	// ever asking whether it is still in force.
+	if credentialStatus == nil {
+		panic("CredentialStatusVerifier is required to resolve embedded credentials' revocation state")
+	}
 	return &pdfGenerationSrvc{
 		DB:               db,
-		IPFSClient:       ipfsClient,
+		Artifacts:        artifacts,
 		CRepo:            cRepo,
 		TRepo:            tRepo,
 		SignRepo:         signRepo,
@@ -61,21 +88,24 @@ func NewPDFGeneration(
 		IssuerDID:        issuerDID,
 		VCIssuer:         vcIssuer,
 		LocalPeer:        localPeer,
+		Credentials:      credentials,
+		CredentialStatus: credentialStatus,
+		SignerRoots:      signerRoots,
 		JWTAuthenticator: jwtAuth,
 	}
 }
 
 func (s *pdfGenerationSrvc) newBundler() *bundleexport.Bundler {
 	return &bundleexport.Bundler{
-		DB:         s.DB,
-		CRepo:      s.CRepo,
-		TRepo:      s.TRepo,
-		SignRepo:   s.SignRepo,
-		IPFSClient: s.IPFSClient,
-		PDFCore:    s.PDFCore,
-		VCIssuer:   s.VCIssuer,
-		IssuerDID:  s.IssuerDID,
-		LocalPeer:  s.LocalPeer,
+		DB:        s.DB,
+		CRepo:     s.CRepo,
+		TRepo:     s.TRepo,
+		SignRepo:  s.SignRepo,
+		Artifacts: s.Artifacts,
+		PDFCore:   s.PDFCore,
+		VCIssuer:  s.VCIssuer,
+		IssuerDID: s.IssuerDID,
+		LocalPeer: s.LocalPeer,
 	}
 }
 
@@ -83,12 +113,19 @@ func (s *pdfGenerationSrvc) newBundler() *bundleexport.Bundler {
 const bundleZipContentType = "application/zip"
 
 func (s *pdfGenerationSrvc) ExportContractBundle(ctx context.Context, p *pdfgen.ExportContractBundlePayload) (*pdfgen.ExportContractBundleResult, io.ReadCloser, error) {
+	if err := authorizeContractRead(ctx, s.DB, s.LocalPeer, p.Did); err != nil {
+		return nil, nil, err
+	}
+
 	body, err := s.newBundler().ExportContract(ctx, p.Did, bundleexport.ExportContext{
 		ExportedBy: middleware.GetParticipantID(ctx),
 		HolderDID:  middleware.GetHolderDID(ctx),
 		UserRoles:  middleware.GetUserRoles(ctx),
 	})
 	if err != nil {
+		if errors.Is(err, contractreadpolicy.ErrDenied) {
+			return nil, nil, pdfgen.MakeForbidden(err)
+		}
 		if refused, ok := bundleexport.AsRefused(err); ok {
 			return nil, nil, &pdfgen.BundleExportRefusedError{
 				Name:     "refused",
@@ -125,17 +162,21 @@ func (s *pdfGenerationSrvc) ExportTemplateBundle(ctx context.Context, p *pdfgen.
 }
 
 func (s *pdfGenerationSrvc) ExportContractPdf(ctx context.Context, p *pdfgen.ExportContractPdfPayload) (io.ReadCloser, error) {
+	if err := authorizeContractRead(ctx, s.DB, s.LocalPeer, p.Did); err != nil {
+		return nil, err
+	}
+
 	handler := pdfquery.ExportContractPdfHandler{
-		DB:         s.DB,
-		CRepo:      s.CRepo,
-		IPFSClient: s.IPFSClient,
-		PDFCore:    s.PDFCore,
-		VCIssuer:   s.VCIssuer,
-		IssuerDID:  s.IssuerDID,
+		DB:        s.DB,
+		CRepo:     s.CRepo,
+		Artifacts: s.Artifacts,
+		PDFCore:   s.PDFCore,
+		VCIssuer:  s.VCIssuer,
+		IssuerDID: s.IssuerDID,
 	}
 	result, err := handler.Handle(ctx, pdfquery.ExportContractPdfQry{DID: p.Did})
 	if err != nil {
-		if isNotFoundErr(err) {
+		if artifactstore.IsShredded(err) || isNotFoundErr(err) {
 			return nil, pdfgen.MakeNotFound(err)
 		}
 		return nil, pdfgen.MakeInternalError(fmt.Errorf("export contract PDF %s: %w", p.Did, err))
@@ -145,16 +186,16 @@ func (s *pdfGenerationSrvc) ExportContractPdf(ctx context.Context, p *pdfgen.Exp
 
 func (s *pdfGenerationSrvc) ExportTemplatePdf(ctx context.Context, p *pdfgen.ExportTemplatePdfPayload) (io.ReadCloser, error) {
 	handler := pdfquery.ExportTemplatePdfHandler{
-		DB:         s.DB,
-		TRepo:      s.TRepo,
-		IPFSClient: s.IPFSClient,
-		PDFCore:    s.PDFCore,
-		VCIssuer:   s.VCIssuer,
-		IssuerDID:  s.IssuerDID,
+		DB:        s.DB,
+		TRepo:     s.TRepo,
+		Artifacts: s.Artifacts,
+		PDFCore:   s.PDFCore,
+		VCIssuer:  s.VCIssuer,
+		IssuerDID: s.IssuerDID,
 	}
 	result, err := handler.Handle(ctx, pdfquery.ExportTemplatePdfQry{DID: p.Did})
 	if err != nil {
-		if isNotFoundErr(err) {
+		if artifactstore.IsShredded(err) || isNotFoundErr(err) {
 			return nil, pdfgen.MakeNotFound(err)
 		}
 		return nil, pdfgen.MakeInternalError(fmt.Errorf("export template PDF %s: %w", p.Did, err))
@@ -163,17 +204,23 @@ func (s *pdfGenerationSrvc) ExportTemplatePdf(ctx context.Context, p *pdfgen.Exp
 }
 
 func (s *pdfGenerationSrvc) VerifyContractPdf(ctx context.Context, p *pdfgen.VerifyContractPdfPayload) (*pdfgen.PDFVerifyResult, error) {
+	if err := authorizeContractRead(ctx, s.DB, s.LocalPeer, p.Did); err != nil {
+		return nil, err
+	}
+
 	handler := pdfquery.VerifyContractPdfHandler{
-		DB:         s.DB,
-		CRepo:      s.CRepo,
-		IPFSClient: s.IPFSClient,
-		PDFCore:    s.PDFCore,
-		VCIssuer:   s.VCIssuer,
-		IssuerDID:  s.IssuerDID,
+		DB:               s.DB,
+		CRepo:            s.CRepo,
+		Artifacts:        s.Artifacts,
+		PDFCore:          s.PDFCore,
+		Credentials:      s.Credentials,
+		CredentialStatus: s.CredentialStatus,
+		Signatures:       pdfSignatureValidator(),
+		SignerRoots:      s.SignerRoots,
 	}
 	result, err := handler.Handle(ctx, pdfquery.VerifyContractPdfQry{DID: p.Did})
 	if err != nil {
-		if isNotFoundErr(err) {
+		if artifactstore.IsShredded(err) || isNotFoundErr(err) {
 			return nil, pdfgen.MakeNotFound(err)
 		}
 		return nil, pdfgen.MakeInternalError(fmt.Errorf("verify contract PDF %s: %w", p.Did, err))
@@ -181,18 +228,56 @@ func (s *pdfGenerationSrvc) VerifyContractPdf(ctx context.Context, p *pdfgen.Ver
 	return result, nil
 }
 
+func (s *pdfGenerationSrvc) VerifyContractPdfCopy(ctx context.Context, p *pdfgen.VerifyContractPdfCopyPayload) (*pdfgen.PDFVerifyResult, error) {
+	if err := authorizeContractRead(ctx, s.DB, s.LocalPeer, p.Did); err != nil {
+		return nil, err
+	}
+
+	handler := pdfquery.VerifyContractPdfCopyHandler{
+		Stored: &pdfquery.VerifyContractPdfHandler{
+			DB:               s.DB,
+			CRepo:            s.CRepo,
+			Artifacts:        s.Artifacts,
+			PDFCore:          s.PDFCore,
+			Credentials:      s.Credentials,
+			CredentialStatus: s.CredentialStatus,
+			Signatures:       pdfSignatureValidator(),
+			SignerRoots:      s.SignerRoots,
+		},
+		Export: &pdfquery.ExportContractPdfHandler{
+			DB:        s.DB,
+			CRepo:     s.CRepo,
+			Artifacts: s.Artifacts,
+			PDFCore:   s.PDFCore,
+			VCIssuer:  s.VCIssuer,
+			IssuerDID: s.IssuerDID,
+		},
+	}
+	result, err := handler.Handle(ctx, pdfquery.VerifyContractPdfCopyQry{DID: p.Did, PDF: p.Pdf})
+	if err != nil {
+		if artifactstore.IsShredded(err) || isNotFoundErr(err) {
+			return nil, pdfgen.MakeNotFound(err)
+		}
+		return nil, pdfgen.MakeInternalError(fmt.Errorf("verify copy of contract PDF %s: %w", p.Did, err))
+	}
+	return result, nil
+}
+
 func (s *pdfGenerationSrvc) VerifyTemplatePdf(ctx context.Context, p *pdfgen.VerifyTemplatePdfPayload) (*pdfgen.PDFVerifyResult, error) {
 	handler := pdfquery.VerifyTemplatePdfHandler{
-		DB:         s.DB,
-		TRepo:      s.TRepo,
-		IPFSClient: s.IPFSClient,
-		PDFCore:    s.PDFCore,
-		VCIssuer:   s.VCIssuer,
-		IssuerDID:  s.IssuerDID,
+		DB:               s.DB,
+		TRepo:            s.TRepo,
+		Artifacts:        s.Artifacts,
+		PDFCore:          s.PDFCore,
+		VCIssuer:         s.VCIssuer,
+		IssuerDID:        s.IssuerDID,
+		Credentials:      s.Credentials,
+		CredentialStatus: s.CredentialStatus,
+		SignerRoots:      s.SignerRoots,
 	}
 	result, err := handler.Handle(ctx, pdfquery.VerifyTemplatePdfQry{DID: p.Did})
 	if err != nil {
-		if isNotFoundErr(err) {
+		if artifactstore.IsShredded(err) || isNotFoundErr(err) {
 			return nil, pdfgen.MakeNotFound(err)
 		}
 		return nil, pdfgen.MakeInternalError(fmt.Errorf("verify template PDF %s: %w", p.Did, err))
@@ -206,4 +291,14 @@ func isNotFoundErr(err error) bool {
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "not found") || strings.Contains(msg, "no rows")
+}
+
+// pdfSignatureValidator returns the EU DSS client the verifier validates PAdES
+// signatures with, the one /signature/validate uses, or nil when DSS_URL is
+// not set.
+func pdfSignatureValidator() pdfquery.PDFSignatureValidator {
+	if url := dss.URL(); url != "" {
+		return dss.New(url)
+	}
+	return nil
 }

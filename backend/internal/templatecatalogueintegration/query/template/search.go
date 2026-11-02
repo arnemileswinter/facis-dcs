@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,16 +20,17 @@ import (
 )
 
 type SearchQry struct {
-	DID            string
-	DocumentNumber string
-	Version        int
-	Name           string
-	Description    string
-	Offset         int
-	Limit          int
-	RetrievedBy    string
-	HolderDID      string
-	UserRoles      userrole.UserRoles
+	PartyType    string
+	TemplateType string
+	DID          string
+	Version      int
+	Name         string
+	Description  string
+	Offset       int
+	Limit        int
+	RetrievedBy  string
+	HolderDID    string
+	UserRoles    userrole.UserRoles
 }
 
 type SearchHandler struct {
@@ -39,27 +39,15 @@ type SearchHandler struct {
 }
 
 const searchTemplatesCountStatementTemplate = `
-MATCH (ct)
-WHERE ct.templateUuid IS NOT NULL
-  AND head(ct.claimsGraphUri) IS NOT NULL
-%s
-RETURN count(ct) AS total
+SELECT (COUNT(DISTINCT ?template_uuid) AS ?total) WHERE {
+%s%s}
 `
 
 const searchTemplatesStatementTemplate = `
-MATCH (ct)
-WHERE ct.templateUuid IS NOT NULL
-  AND head(ct.claimsGraphUri) IS NOT NULL
-%s
-RETURN {
-  did: head(ct.claimsGraphUri),
-  name: ct.name,
-  description: ct.description,
-  version: ct.version,
-  state: ct.state,
-  template_uuid: ct.templateUuid
-} AS n
-SKIP %d
+SELECT (?template_uuid AS ?did) ?name ?description ?version ?state ?template_uuid ?template_type ?party_type WHERE {
+%s%s}
+ORDER BY ?s
+OFFSET %d
 LIMIT %d
 `
 
@@ -71,29 +59,26 @@ func (h *SearchHandler) Handle(ctx context.Context, qry SearchQry) (*templatecat
 		return nil, fmt.Errorf("offset must be >= 0")
 	}
 
-	whereClause, params := buildSearchWhereClause(qry)
-	where := formatSearchWhereSection(whereClause)
+	filters := buildSearchFilters(qry)
 
-	countStatement := fmt.Sprintf(searchTemplatesCountStatementTemplate, where)
+	countStatement := fmt.Sprintf(searchTemplatesCountStatementTemplate, coreFieldTriples(), filters)
 	countResp, err := h.FCClient.Query(ctx, client.QueryRequest{
-		Statement:  countStatement,
-		Parameters: params,
+		Statement: countStatement,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	totalCount := countResp.TotalCount
+	totalCount := countFromResults(countResp.Items, "total")
 
 	limit := qry.Limit
 	if limit < 1 {
 		limit = totalCount
 	}
 
-	statement := fmt.Sprintf(searchTemplatesStatementTemplate, where, qry.Offset, limit)
+	statement := fmt.Sprintf(searchTemplatesStatementTemplate, coreFieldTriples(), filters, qry.Offset, limit)
 	dataResp, err := h.FCClient.Query(ctx, client.QueryRequest{
-		Statement:  statement,
-		Parameters: params,
+		Statement: statement,
 	})
 	if err != nil {
 		return nil, err
@@ -141,33 +126,31 @@ func (h *SearchHandler) Handle(ctx context.Context, qry SearchQry) (*templatecat
 	}, nil
 }
 
-func formatSearchWhereSection(whereClause string) string {
-	if whereClause == "" {
-		return ""
-	}
-	return "AND " + whereClause
-}
-
-func buildSearchWhereClause(qry SearchQry) (string, map[string]string) {
-	conditions := make([]string, 0, 4)
-	params := make(map[string]string)
+// buildSearchFilters renders SPARQL FILTER clauses for the search query's
+// optional conditions. Values are inlined (escaped) rather than bound as
+// query parameters — FC's SPARQL backend does not support parameterized
+// queries the way the old Neo4j/Cypher backend did (see sparql.go).
+func buildSearchFilters(qry SearchQry) string {
+	var b strings.Builder
 
 	if value := strings.TrimSpace(qry.DID); value != "" {
-		conditions = append(conditions, "toLower(head(ct.claimsGraphUri)) CONTAINS toLower($did)")
-		params["did"] = value
+		fmt.Fprintf(&b, "  FILTER(CONTAINS(LCASE(?template_uuid), LCASE(\"%s\")))\n", sparqlEscapeString(value))
 	}
 	if qry.Version > 0 {
-		conditions = append(conditions, "ct.version = toString($version)")
-		params["version"] = strconv.Itoa(qry.Version)
+		fmt.Fprintf(&b, "  FILTER(?version = \"%d\")\n", qry.Version)
 	}
 	if value := strings.TrimSpace(qry.Name); value != "" {
-		conditions = append(conditions, "toLower(coalesce(ct.name, '')) CONTAINS toLower($name)")
-		params["name"] = value
+		fmt.Fprintf(&b, "  FILTER(CONTAINS(LCASE(?name), LCASE(\"%s\")))\n", sparqlEscapeString(value))
 	}
 	if value := strings.TrimSpace(qry.Description); value != "" {
-		conditions = append(conditions, "toLower(coalesce(ct.description, '')) CONTAINS toLower($description)")
-		params["description"] = value
+		fmt.Fprintf(&b, "  FILTER(CONTAINS(LCASE(?description), LCASE(\"%s\")))\n", sparqlEscapeString(value))
 	}
 
-	return strings.Join(conditions, " AND "), params
+	if qry.PartyType != "" {
+		fmt.Fprintf(&b, "  FILTER(?party_type = \"%s\")\n", sparqlEscapeString(qry.PartyType))
+	}
+	if qry.TemplateType != "" {
+		fmt.Fprintf(&b, "  FILTER(?template_type = \"%s\")\n", sparqlEscapeString(qry.TemplateType))
+	}
+	return b.String()
 }

@@ -3,7 +3,20 @@ replicaCount: 1
 image:
   repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack/status-list-service
   tag: "main"
+  # Optional "sha256:<hex>": pulls <repository>:<tag>@<digest>.
+  digest: ""
   pullPolicy: IfNotPresent
+
+# The user of this image is not published, so the chart does not force a
+# non-root UID; set runAsNonRoot and runAsUser here once it is known
+# (DCS-NFR-SEC-05).
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
 
 imagePullSecrets: []
 
@@ -28,6 +41,12 @@ resources:
   limits:
     cpu: 300m
     memory: 512Mi
+
+# Sizes the BDD list-init hook Job, a separate pod from the service. Falls back
+# to `resources` when unset; set it on namespaces with a limits.cpu quota, where
+# an unsized hook inherits the LimitRange default and is refused once the
+# release's own containers consume the quota.
+jobResources: {}
 
 # PostgreSQL connection — required; the service uses auto-migrate on startup.
 database:

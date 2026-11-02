@@ -1,4 +1,5 @@
-import { ONTOLOGY_DOMAIN_FIELDS } from '@template-repository/utils/ontology-domain-fields'
+import { compactOdrlIdentifier } from '@template-repository/utils/odrl-vocabulary'
+import { ONTOLOGY_DOMAIN_FIELDS, ONTOLOGY_VALUE_CONSTRAINTS } from '@template-repository/utils/ontology-domain-fields'
 import type { SemanticValueConstraint } from '@template-repository/models/contract-template'
 
 export function resolveAllowedValues(constraint?: SemanticValueConstraint): readonly string[] {
@@ -35,6 +36,22 @@ export function resolveValueConstraintOptions(
       )
     })?.valueConstraint?.valueOptions ?? []
   )
+}
+
+export function resolveConstraintForLeftOperand(leftOperand: string): SemanticValueConstraint | undefined {
+  const fieldConstraint = ONTOLOGY_DOMAIN_FIELDS.find((field) => field.ontologyId === leftOperand)?.valueConstraint
+  if (fieldConstraint) return fieldConstraint
+  const normalizedLeftOperand = compactOdrlIdentifier(leftOperand)
+  const constraints = ONTOLOGY_VALUE_CONSTRAINTS.filter((constraint) =>
+    constraint.odrlLeftOperands?.some((operand) => compactOdrlIdentifier(operand) === normalizedLeftOperand),
+  )
+  if (!constraints.length) return undefined
+  return {
+    ...constraints[0],
+    allowedValues: constraints.flatMap((constraint) => constraint.allowedValues ?? []),
+    valueOptions: constraints.flatMap((constraint) => constraint.valueOptions ?? []),
+    odrlLeftOperands: constraints.flatMap((constraint) => constraint.odrlLeftOperands ?? []),
+  }
 }
 
 function normalizeAllowedValuesRef(value?: string) {

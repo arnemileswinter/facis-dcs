@@ -15,7 +15,6 @@ CREATE TABLE IF NOT EXISTS contract_templates
     state           contract_template_state NOT NULL,
     template_type   contract_template_type  NOT NULL,
 
-    document_number VARCHAR(255),
 
     version         INT NOT NULL DEFAULT 1,
 
@@ -68,7 +67,6 @@ CREATE TABLE IF NOT EXISTS contract_templates_history
     state           contract_template_state NOT NULL,
     template_type   contract_template_type  NOT NULL,
 
-    document_number VARCHAR(255),
     version         INT NOT NULL,
 
     base_template VARCHAR(255),

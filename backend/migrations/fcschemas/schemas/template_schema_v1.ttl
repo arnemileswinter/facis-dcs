@@ -48,11 +48,6 @@ dcs-template:did a rdf:Property ;
   rdfs:domain dcs-template:ContractTemplate ;
   rdfs:range xsd:string .
 
-dcs-template:documentNumber a rdf:Property ;
-  rdfs:label "Document Number" ;
-  rdfs:comment "Identifier shared/ by all versions of the same contract template." ;
-  rdfs:domain dcs-template:ContractTemplate ;
-  rdfs:range xsd:string .
 
 dcs-template:version a rdf:Property ;
   rdfs:label "Version" ;
@@ -122,12 +117,6 @@ dcs-template:ContractTemplateShape
     sh:maxCount 1 ;
   ] ;
 
-  sh:property [
-    sh:path dcs-template:documentNumber ;
-    sh:datatype xsd:string ;
-    sh:minCount 1 ;
-    sh:maxCount 1 ;
-  ] ;
 
   sh:property [
     sh:path dcs-template:version ;
@@ -228,8 +217,6 @@ dcs-template-data:templateId a rdf:Property ;
 dcs-template-data:version a rdf:Property ;
   rdfs:label "Version" .
 
-dcs-template-data:document_number a rdf:Property ;
-  rdfs:label "Document number" .
 
 dcs-template-data:name a rdf:Property ;
   rdfs:label "Name" .
@@ -485,12 +472,6 @@ dcs-template:ApprovedTemplateBlockShape
       [ sh:datatype xsd:double ]
       [ sh:datatype xsd:decimal ]
     ) ;
-  ] ;
-  sh:property [
-    sh:path dcs-template-data:document_number ;
-    sh:datatype xsd:string ;
-    sh:minCount 1 ;
-    sh:maxCount 1 ;
   ] .
 
 dcs-template:MergedApprovedTemplateBlockShape
@@ -532,12 +513,6 @@ dcs-template:MergedApprovedTemplateBlockShape
       [ sh:datatype xsd:double ]
       [ sh:datatype xsd:decimal ]
     ) ;
-  ] ;
-  sh:property [
-    sh:path dcs-template-data:document_number ;
-    sh:datatype xsd:string ;
-    sh:minCount 1 ;
-    sh:maxCount 1 ;
   ] .
 
 ### 5.2. SemanticConditions Shape
@@ -644,12 +619,6 @@ dcs-template:SubTemplateSnapshotShape
     sh:maxCount 1 ;
   ] ;
   sh:property [
-    sh:path dcs-template-data:document_number ;
-    sh:datatype xsd:string ;
-    sh:minCount 0 ;
-    sh:maxCount 1 ;
-  ] ;
-  sh:property [
     sh:path dcs-template-data:version ;
     sh:minCount 0 ;
     sh:maxCount 1 ;
@@ -677,4 +646,17 @@ dcs-template:SubTemplateSnapshotShape
     sh:minCount 0 ;
     sh:maxCount 1 ;
     sh:node dcs-template:TemplateDataShape ;
+  ] .
+# Published catalogue namespace; separate from the template document vocabulary.
+<https://w3id.org/facis/dcs/1#partyType> a rdf:Property ;
+  rdfs:domain <https://w3id.org/facis/dcs/1#ContractTemplate> ;
+  rdfs:range xsd:string .
+
+<https://w3id.org/facis/dcs/1#PartyTypeShape> a sh:NodeShape ;
+  sh:targetClass <https://w3id.org/facis/dcs/1#ContractTemplate> ;
+  sh:property [
+    sh:path <https://w3id.org/facis/dcs/1#partyType> ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ; sh:maxCount 1 ;
+    sh:in ( "SINGLE_PARTY" "MULTI_PARTY" )
   ] .

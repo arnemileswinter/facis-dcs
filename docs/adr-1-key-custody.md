@@ -1,5 +1,14 @@
 # ADR-1: PKCS#11/HSM as the single key-custody mechanism
 
+> **Superseded in part by [ADR-12](adr-12-wallet-driven-signing.md)
+> (2026-07-18).** "PAdES contract signatures" is **withdrawn** from this
+> ADR's list of DCS key-custody touchpoints below: the contract AES key
+> lives in the signatory's wallet/QTSP, not in DCS's HSM — a DCS-held key
+> cannot satisfy eIDAS sole control. The remaining four touchpoints (C2PA
+> claim/lifecycle-assertion signatures, the PID-binding signing-summary VC,
+> OID4VP JAR signing) are unchanged and still resolve to the one PKCS#11
+> interface described below.
+
 ## Context
 
 DCS signs several distinct kinds of artifact with **its own** identity: C2PA

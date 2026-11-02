@@ -13,13 +13,15 @@ import (
 type NegotiationActionFlag string
 
 const (
-	Accepting NegotiationActionFlag = "ACCEPTING"
-	Rejecting NegotiationActionFlag = "REJECTING"
+	Accepting   NegotiationActionFlag = "ACCEPTING"
+	Rejecting   NegotiationActionFlag = "REJECTING"
+	Withdrawing NegotiationActionFlag = "WITHDRAWING"
 )
 
 var validFlag = map[NegotiationActionFlag]bool{
-	Accepting: true,
-	Rejecting: true,
+	Accepting:   true,
+	Rejecting:   true,
+	Withdrawing: true,
 }
 
 func NewNegotiationActionFlag(s string) (NegotiationActionFlag, error) {
@@ -30,7 +32,7 @@ func NewNegotiationActionFlag(s string) (NegotiationActionFlag, error) {
 	return flag, nil
 }
 
-// IsValid checks if the NegotiationActionFlag is a valid role
+// IsValid reports whether the value is one of the declared NegotiationActionFlag values.
 func (f NegotiationActionFlag) IsValid() bool {
 	upper := NegotiationActionFlag(strings.ToUpper(string(f)))
 	return validFlag[upper]

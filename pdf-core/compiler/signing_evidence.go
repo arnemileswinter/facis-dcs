@@ -3,21 +3,47 @@ package compiler
 import (
 	"bytes"
 	"fmt"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
 
-// signingEvidenceFileName is the attachment filename under which the SD-JWT VC
-// PID presentation + ContractSigningSummaryCredential are embedded before a
-// PAdES signature is applied (embed-first-sign-second, DCS-FR-SM-08).
+// signingEvidenceFileName is the attachment filename of the FIRST signing
+// evidence embedded into a document — the SD-JWT VC PID presentation +
+// ContractSigningSummaryCredential a party attaches before its PAdES signature
+// is applied (embed-first-sign-second, DCS-FR-SM-08).
+//
+// Every signing party in a DCS-to-DCS federation attaches its own evidence, so
+// a document accumulates one attachment per signer. They are named by 1-based
+// ordinal — signing-evidence.json, signing-evidence-2.json, … — because an
+// /EmbeddedFiles name tree holds exactly one entry per name: re-using one name
+// would leave every earlier attachment unreachable by name.
 const signingEvidenceFileName = "signing-evidence.json"
 
 var signingEvidenceMarker = []byte("\n% dcs-pdf-core signing evidence\n")
+
+// signingEvidenceSpecRE matches the /F entry of a signing-evidence filespec,
+// capturing the filename and its ordinal suffix (absent on the first one).
+var signingEvidenceSpecRE = regexp.MustCompile(`/F \(signing-evidence(?:-(\d+))?\.json\)`)
+
+// signingEvidenceName returns the attachment filename for a 1-based ordinal.
+func signingEvidenceName(ordinal int) string {
+	if ordinal <= 1 {
+		return signingEvidenceFileName
+	}
+	return fmt.Sprintf("signing-evidence-%d.json", ordinal)
+}
 
 // EmbedSigningEvidence appends a PDF incremental update that attaches evidence
 // as an embedded file. The original bytes are preserved as a prefix so a
 // subsequently applied PAdES signature's ByteRange covers the evidence. When
 // evidence is empty the PDF is returned unchanged.
+//
+// The call is repeatable: each call attaches one more evidence file, under the
+// next ordinal name, over whatever revisions the document has accumulated in
+// the meantime — the counterparty's evidence goes into a PDF that already
+// carries the first party's signature, validation data and C2PA manifests.
 func EmbedSigningEvidence(pdfBytes, evidence []byte) ([]byte, error) {
 	if len(evidence) == 0 {
 		return pdfBytes, nil
@@ -36,15 +62,22 @@ func EmbedSigningEvidence(pdfBytes, evidence []byte) ([]byte, error) {
 	baseLen := len(pdfBytes)
 	fileObjID := maxObjID + 1
 	specObjID := maxObjID + 2
+	fileName := signingEvidenceName(len(signingEvidenceSpecs(pdfBytes)) + 1)
 
 	// The attachment carries /AFRelationship, so ISO 19005-3 clause 6.8 also
 	// requires it to be a LISTED associated file: without membership of the
 	// document catalog's /AF array veraPDF rejects the PDF ("file specification
 	// dictionary for an embedded file is not associated with the PDF document").
 	// Supersede the catalog in this same incremental update, exactly as the
-	// lifecycle-VC attachment does.
-	const catalogObjID = 1
-	patchedCatalog, err := catalogWithEvidenceAssociated(pdfBytes, catalogObjID, specObjID)
+	// lifecycle-VC attachment does. The catalog is the one the trailer names,
+	// not object 1: a signer may publish a fresh catalog object, and patching a
+	// definition no reader resolves would list the attachment nowhere and drop
+	// whatever that catalog carries (the /AcroForm holding the signed field).
+	catalogObjID, ok := currentRootObjID(pdfBytes)
+	if !ok {
+		return nil, fmt.Errorf("embed evidence: no /Root in the PDF trailer")
+	}
+	patchedCatalog, err := catalogWithAssociatedFile(pdfBytes, catalogObjID, specObjID, fileName)
 	if err != nil {
 		return nil, fmt.Errorf("embed evidence: associate attachment with the document: %w", err)
 	}
@@ -53,102 +86,101 @@ func EmbedSigningEvidence(pdfBytes, evidence []byte) ([]byte, error) {
 	buf.Write(signingEvidenceMarker)
 
 	fileOffset := baseLen + buf.Len()
-	buf.WriteString(fmt.Sprintf("%d 0 obj\n", fileObjID))
+	fmt.Fprintf(&buf, "%d 0 obj\n", fileObjID)
 	buf.Write(streamObject(evidence, fmt.Sprintf(
 		"<< /Type /EmbeddedFile /Subtype /application#2Fjson /Length %d >>", len(evidence))))
 	buf.WriteString("\nendobj\n")
 
 	specOffset := baseLen + buf.Len()
-	buf.WriteString(fmt.Sprintf(
+	fmt.Fprintf(&buf,
 		"%d 0 obj\n<< /Type /Filespec /F (%s) /UF (%s) /AFRelationship /Supplement /EF << /F %d 0 R >> >>\nendobj\n",
-		specObjID, signingEvidenceFileName, signingEvidenceFileName, fileObjID))
+		specObjID, fileName, fileName, fileObjID)
 
 	catalogOffset := baseLen + buf.Len()
-	buf.WriteString(fmt.Sprintf("%d 0 obj\n", catalogObjID))
+	fmt.Fprintf(&buf, "%d 0 obj\n", catalogObjID)
 	buf.Write(patchedCatalog)
 	buf.WriteString("\nendobj\n")
 
 	xrefStart := baseLen + buf.Len()
 	buf.WriteString("xref\n")
-	// The superseded catalog is object 1, a separate subsection from the two
-	// appended objects.
-	buf.WriteString(fmt.Sprintf("%d 1\n", catalogObjID))
-	buf.WriteString(fmt.Sprintf("%010d 00000 n \n", catalogOffset))
-	buf.WriteString(fmt.Sprintf("%d 2\n", fileObjID))
-	buf.WriteString(fmt.Sprintf("%010d 00000 n \n", fileOffset))
-	buf.WriteString(fmt.Sprintf("%010d 00000 n \n", specOffset))
+	// The superseded catalog is a separate subsection from the two appended
+	// objects, which always follow it: their ids start past the current maximum.
+	fmt.Fprintf(&buf, "%d 1\n", catalogObjID)
+	fmt.Fprintf(&buf, "%010d 00000 n \n", catalogOffset)
+	fmt.Fprintf(&buf, "%d 2\n", fileObjID)
+	fmt.Fprintf(&buf, "%010d 00000 n \n", fileOffset)
+	fmt.Fprintf(&buf, "%010d 00000 n \n", specOffset)
 
 	idEntry := ""
 	if fileID != "" {
 		idEntry = " /ID " + fileID
 	}
-	buf.WriteString(fmt.Sprintf(
+	fmt.Fprintf(&buf,
 		"trailer\n<< /Size %d /Root %d 0 R /Prev %d%s >>\nstartxref\n%d\n%%%%EOF\n",
-		specObjID+1, catalogObjID, prevStartXref, idEntry, xrefStart))
+		specObjID+1, catalogObjID, prevStartXref, idEntry, xrefStart)
 
 	return append(append([]byte(nil), pdfBytes...), buf.Bytes()...), nil
 }
 
-// ExtractSigningEvidence returns the raw evidence attachment bytes embedded by
-// EmbedSigningEvidence. Returns (evidence, true, nil) when present, (nil, false,
-// nil) when absent, and (nil, false, err) on a malformed reference.
-func ExtractSigningEvidence(pdfBytes []byte) ([]byte, bool, error) {
-	specMarker := []byte(fmt.Sprintf("/F (%s)", signingEvidenceFileName))
-	specPos := bytes.LastIndex(pdfBytes, specMarker)
-	if specPos < 0 {
-		return nil, false, nil
-	}
-	efPos := bytes.Index(pdfBytes[specPos:], []byte("/EF << /F "))
-	if efPos < 0 {
-		return nil, false, fmt.Errorf("%s filespec missing /EF reference", signingEvidenceFileName)
-	}
-	efPos += specPos + len("/EF << /F ")
-	refEnd := bytes.Index(pdfBytes[efPos:], []byte(" 0 R"))
-	if refEnd < 0 {
-		return nil, false, fmt.Errorf("%s object reference malformed", signingEvidenceFileName)
-	}
-	objID, err := strconv.Atoi(strings.TrimSpace(string(pdfBytes[efPos : efPos+refEnd])))
-	if err != nil {
-		return nil, false, fmt.Errorf("%s object id invalid: %w", signingEvidenceFileName, err)
-	}
-	objPos := bytes.LastIndex(pdfBytes, []byte(fmt.Sprintf("%d 0 obj", objID)))
-	if objPos < 0 {
-		return nil, false, fmt.Errorf("%s object %d not found", signingEvidenceFileName, objID)
-	}
-	streamStart := bytes.Index(pdfBytes[objPos:], []byte("stream\n"))
-	if streamStart < 0 {
-		return nil, false, fmt.Errorf("%s stream start not found", signingEvidenceFileName)
-	}
-	streamStart += objPos + len("stream\n")
-	streamEnd := bytes.Index(pdfBytes[streamStart:], []byte("\nendstream"))
-	if streamEnd < 0 {
-		return nil, false, fmt.Errorf("%s stream end not found", signingEvidenceFileName)
-	}
-	return append([]byte(nil), pdfBytes[streamStart:streamStart+streamEnd]...), true, nil
+// evidenceSpec locates one signing-evidence filespec: its ordinal and the
+// offset of its /F entry.
+type evidenceSpec struct {
+	ordinal int
+	offset  int
 }
 
-// catalogWithEvidenceAssociated returns the document catalog's dictionary with
-// the signing-evidence filespec added to the /AF array and the /EmbeddedFiles
-// name tree, so the attachment is a properly listed associated file
-// (ISO 19005-3 clause 6.8). Mirrors catalogWithVCAssociated for the evidence
-// attachment.
-func catalogWithEvidenceAssociated(pdf []byte, objID, specObjID int) ([]byte, error) {
-	off := findLastObjectHeaderOffset(pdf, objID)
-	if off < 0 {
-		return nil, fmt.Errorf("catalog object %d not found", objID)
+// signingEvidenceSpecs returns the current filespec of every signing-evidence
+// attachment in the document, ordered by ordinal — the order they were
+// embedded, oldest first. A name defined more than once resolves to its last
+// definition, as a reader resolves a superseded object.
+func signingEvidenceSpecs(pdf []byte) []evidenceSpec {
+	byOrdinal := map[int]int{}
+	for _, m := range signingEvidenceSpecRE.FindAllSubmatchIndex(pdf, -1) {
+		ordinal := 1
+		if m[2] >= 0 {
+			n, err := strconv.Atoi(string(pdf[m[2]:m[3]]))
+			if err != nil {
+				continue
+			}
+			ordinal = n
+		}
+		byOrdinal[ordinal] = m[0]
 	}
-	start := off + len(fmt.Sprintf("%d 0 obj\n", objID))
-	end := bytes.Index(pdf[start:], []byte("\nendobj"))
-	if end < 0 {
-		return nil, fmt.Errorf("catalog object %d end not found", objID)
+	specs := make([]evidenceSpec, 0, len(byOrdinal))
+	for ordinal, offset := range byOrdinal {
+		specs = append(specs, evidenceSpec{ordinal: ordinal, offset: offset})
 	}
-	dict := append([]byte(nil), pdf[start:start+end]...)
-	ref := []byte(fmt.Sprintf("%d 0 R", specObjID))
-	if af := catalogAFRE.FindSubmatchIndex(dict); af != nil && !bytes.Contains(dict[af[2]:af[3]], ref) {
-		dict = catalogAFRE.ReplaceAll(dict, []byte("/AF [${1} "+string(ref)+"]"))
+	sort.Slice(specs, func(i, j int) bool { return specs[i].ordinal < specs[j].ordinal })
+	return specs
+}
+
+// ExtractSigningEvidence returns the raw bytes of every evidence attachment
+// EmbedSigningEvidence put into the document, oldest first — one per signing
+// party. Returns an empty slice when the document carries none, and an error on
+// a malformed reference.
+func ExtractSigningEvidence(pdfBytes []byte) ([][]byte, error) {
+	specs := signingEvidenceSpecs(pdfBytes)
+	attachments := make([][]byte, 0, len(specs))
+	for _, spec := range specs {
+		fileName := signingEvidenceName(spec.ordinal)
+		efPos := bytes.Index(pdfBytes[spec.offset:], []byte("/EF << /F "))
+		if efPos < 0 {
+			return nil, fmt.Errorf("%s filespec missing /EF reference", fileName)
+		}
+		efPos += spec.offset + len("/EF << /F ")
+		refEnd := bytes.Index(pdfBytes[efPos:], []byte(" 0 R"))
+		if refEnd < 0 {
+			return nil, fmt.Errorf("%s object reference malformed", fileName)
+		}
+		objID, err := strconv.Atoi(strings.TrimSpace(string(pdfBytes[efPos : efPos+refEnd])))
+		if err != nil {
+			return nil, fmt.Errorf("%s object id invalid: %w", fileName, err)
+		}
+		streamStart, streamEnd, ok := lastObjectStreamData(pdfBytes, objID)
+		if !ok {
+			return nil, fmt.Errorf("%s stream not found in object %d", fileName, objID)
+		}
+		attachments = append(attachments, append([]byte(nil), pdfBytes[streamStart:streamEnd]...))
 	}
-	if ef := catalogEFRE.FindSubmatchIndex(dict); ef != nil && !bytes.Contains(dict[ef[4]:ef[5]], []byte(signingEvidenceFileName)) {
-		dict = catalogEFRE.ReplaceAll(dict, []byte("${1}${2} ("+signingEvidenceFileName+") "+string(ref)+"${3}"))
-	}
-	return dict, nil
+	return attachments, nil
 }

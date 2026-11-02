@@ -28,3 +28,29 @@ func TestRequiredSignatureFields(t *testing.T) {
 		t.Fatalf("expected nil for unparseable data, got %v", got)
 	}
 }
+
+func TestRequiredCredentialType(t *testing.T) {
+	contract := []byte(`{
+		"dcs:signatureFields": [
+			{"dcs:signatoryName": "did:web:qes-party", "dcs:requiredCredentialType": "QES"},
+			{"dcs:signatoryName": "did:web:aes-party", "dcs:requiredCredentialType": "AES"},
+			{"dcs:signatoryName": "did:web:unspecified-party"}
+		]
+	}`)
+
+	if got := RequiredCredentialType(contract, "did:web:qes-party"); got != "QES" {
+		t.Fatalf("expected QES, got %q", got)
+	}
+	if got := RequiredCredentialType(contract, "did:web:aes-party"); got != "AES" {
+		t.Fatalf("expected AES, got %q", got)
+	}
+	if got := RequiredCredentialType(contract, "did:web:unspecified-party"); got != "AES" {
+		t.Fatalf("expected the AES default for a field with no explicit requirement, got %q", got)
+	}
+	if got := RequiredCredentialType(contract, "did:web:undeclared-field"); got != "AES" {
+		t.Fatalf("expected the AES default for an undeclared field, got %q", got)
+	}
+	if got := RequiredCredentialType([]byte(`not json`), "did:web:x"); got != "AES" {
+		t.Fatalf("expected the AES default for malformed contract data, got %q", got)
+	}
+}

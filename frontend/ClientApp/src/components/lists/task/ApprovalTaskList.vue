@@ -13,7 +13,7 @@ import TaskListSearch from './TaskListSearch.vue'
 import ListSort from '../ListSort.vue'
 import ListStateFilter from '../ListStateFilter.vue'
 import type { ContractApprovalTask } from '@/models/contract/contract-approval-task'
-import type { ContractTemplateApprovalTask } from '@/models/contract-template-approval-task'
+import type { ContractTemplateApprovalTask } from '@/models/contract-template/contract-template-approval-task'
 
 type ApprovalTask = ContractTemplateApprovalTask | ContractApprovalTask
 
@@ -53,9 +53,7 @@ const filteredTasks = computed(() => {
   if (stateFilterStore.hasFilters) {
     return sortedTasks.value.filter((task) => stateFilterStore.hasFilter(task.state))
   }
-  return sortedTasks.value.filter(
-    (task) => !([ApprovalTaskState.approved, ApprovalTaskState.rejected] as ApprovalTaskState[]).includes(task.state),
-  )
+  return sortedTasks.value.filter(canApprove)
 })
 
 const getTemplateName = (task: ContractTemplateApprovalTask) => {
@@ -74,8 +72,11 @@ const getContractState = (task: ContractApprovalTask) => {
   return contractsStore.findContractByDid(task.did)?.state
 }
 
-const canApprove = (task: ContractTemplateApprovalTask) => {
-  return task.state === ApprovalTaskState.open && getTemplateState(task) === TemplateState.reviewed
+const canApprove = (task: ApprovalTask) => {
+  if (task.type === 'template') {
+    return task.state === ApprovalTaskState.open && getTemplateState(task) === TemplateState.reviewed
+  }
+  return task.state === ApprovalTaskState.open && getContractState(task) === ContractState.reviewed
 }
 
 const resolveViewRouteName = (task: ApprovalTask) => {
@@ -85,16 +86,18 @@ const resolveViewRouteName = (task: ApprovalTask) => {
     }
     return ROUTES.TEMPLATES.VIEW
   } else {
-    if (task.state === ApprovalTaskState.open && getContractState(task) === ContractState.reviewed) {
+    if (canApprove(task)) {
       return ROUTES.CONTRACTS.APPROVE
     }
     return ROUTES.CONTRACTS.VIEW
   }
 }
 
-const applySearchResult = (searchResult: ApprovalTask[]) => {
-  isSearchActive.value = searchResult.length !== props.tasks.length
-  searchedTasks.value = searchResult
+const applySearchResult = (searchResult: ApprovalTask[] | null) => {
+  isSearchActive.value = !!searchResult
+  if (searchResult) {
+    searchedTasks.value = searchResult
+  }
 }
 
 onUnmounted(() => stateFilterStore.reset())
@@ -103,15 +106,17 @@ onUnmounted(() => stateFilterStore.reset())
 <template>
   <div class="flex h-full min-h-0 flex-col">
     <ul class="list flex-1 overflow-y-auto">
-      <li class="flex flex-col justify-end px-4 tracking-wide sm:flex-row">
-        <TaskListSearch class="flex-1" :tasks="tasks" @search-result="applySearchResult" />
-        <ListStateFilter
-          label="Approval Task"
-          :filters="approvalTaskStates"
-          store-type="approvalTasks"
-          :disabled="!hasTasks"
-        />
-        <ListSort v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :sorter="sorter" :disabled="!hasTasks" />
+      <li class="flex flex-wrap items-center gap-3 px-4 py-2 tracking-wide [&>.join]:m-0">
+        <TaskListSearch class="w-full min-w-0 lg:w-auto lg:flex-1" :tasks="tasks" @search-result="applySearchResult" />
+        <div class="ml-auto flex shrink-0 items-center gap-3 [&>button]:m-0">
+          <ListStateFilter
+            label="Approval Task"
+            :filters="approvalTaskStates"
+            store-type="approvalTasks"
+            :disabled="!hasTasks"
+          />
+          <ListSort v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :sorter="sorter" :disabled="!hasTasks" />
+        </div>
       </li>
       <template v-if="filteredTasks.length > 0">
         <li v-for="task in filteredTasks" :key="task.did" class="list-row">
@@ -125,9 +130,6 @@ onUnmounted(() => stateFilterStore.reset())
                 <div class="badge badge-secondary">{{ task.state }}</div>
               </h2>
               <div class="flex justify-between">
-                <div v-if="task.type === 'template' && task.document_number">
-                  Document number: {{ task.document_number }}
-                </div>
                 <div v-if="task.type === 'template' && task.version">Version: {{ task.version }}</div>
                 <div v-else-if="task.type === 'contract' && task.contract_version">
                   Version: {{ task.contract_version }}

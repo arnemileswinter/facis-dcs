@@ -3,19 +3,21 @@ import fs from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Browser, BrowserContext, Page } from '@playwright/test'
+import { applySession, type DcsRole, E2E_ORG_A, E2E_ORG_B, expect, mintSession } from './dcs-test'
+import { selectBilateralClauseRoles, selectOriginatorRole } from './lifecycle-helpers'
 import {
   E2E_API_BASE,
   E2E_API_BASE_B,
   E2E_DSS_URL,
   E2E_FRONTEND_B_ORIGIN,
-  E2E_STATUSLIST_URL,
+  E2E_ISSUER_BASE_URL,
 } from '../playwright.config'
-import { applySession, type DcsRole, expect, mintSession } from './dcs-test'
+import { formatNumberInput } from '../src/modules/template-repository/utils/number-format'
+import type { Browser, BrowserContext, Page, Response } from '@playwright/test'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(here, '../../..')
-const python = process.env.E2E_BDD_PYTHON || path.join(homedir(), '.dcs-bdd-venv', 'bin', 'python3')
+const python = process.env.E2E_BDD_PYTHON ?? path.join(homedir(), '.dcs-bdd-venv', 'bin', 'python3')
 
 /**
  * Where the vertical persists every hop's PDF and its embedded JSON-LD for human
@@ -35,17 +37,26 @@ export interface Instance {
   readonly context: BrowserContext
   readonly origin: string
   readonly apiBase: string
+  /** The organization claim of this instance's users. */
+  readonly organization: string
   gotoAs(role: DcsRole, url: string): Promise<void>
 }
 
-function makeInstance(page: Page, context: BrowserContext, origin: string, apiBase: string): Instance {
+function makeInstance(
+  page: Page,
+  context: BrowserContext,
+  origin: string,
+  apiBase: string,
+  organization: string,
+): Instance {
   return {
     page,
     context,
     origin,
     apiBase,
+    organization,
     async gotoAs(role, url) {
-      await applySession(context, page, origin, mintSession(role, apiBase))
+      await applySession(context, page, origin, mintSession(role, apiBase, organization))
       await page.goto(url)
       // Two instances mean two browser contexts, and Chromium throttles timers
       // in pages it considers hidden. The signing ceremony dialog advances on a
@@ -60,7 +71,7 @@ function makeInstance(page: Page, context: BrowserContext, origin: string, apiBa
 
 /** Wraps the test's own fixture page/context as instance A (the originator). */
 export function instanceA(page: Page, context: BrowserContext, origin: string): Instance {
-  return makeInstance(page, context, origin, E2E_API_BASE)
+  return makeInstance(page, context, origin, E2E_API_BASE, E2E_ORG_A)
 }
 
 /** Opens a second browser context/page for instance B (the counterparty), on
@@ -68,27 +79,127 @@ export function instanceA(page: Page, context: BrowserContext, origin: string): 
 export async function openInstanceB(browser: Browser): Promise<Instance> {
   const context = await browser.newContext({ baseURL: E2E_FRONTEND_B_ORIGIN })
   const page = await context.newPage()
-  return makeInstance(page, context, E2E_FRONTEND_B_ORIGIN, E2E_API_BASE_B)
+  return makeInstance(page, context, E2E_FRONTEND_B_ORIGIN, E2E_API_BASE_B, E2E_ORG_B)
+}
+
+/** What one run of the Secure Contract Viewer's signing ceremony produced: the
+ *  ceremony it started, the signature field it bound, and the /signature/prepare
+ *  response the viewer received — asserted by the caller, because whether that
+ *  response is a document or a refusal is the whole subject of some of them. */
+interface PreparedCeremony {
+  ceremonyId: string
+  signField: string
+  prepared: Response
 }
 
 /**
- * Signs an APPROVED contract on a given instance through that instance's Secure
- * Contract Viewer, exactly as a real signer would (ADR-12): open from the
- * signing list, verify, run the wallet PID+PoA ceremony (the wallet leg arrives
- * over the wallet's own webhook channel against this instance's API base),
- * download the to-be-signed PDF, sign it externally with the test wallet's key
- * via the DSS SCA, upload it, and confirm SIGNED. The signature field is the
- * signing party's own DCS DID slot; the wallet discovers it from the PDF.
+ * The DID's final segment: unique per resource and untouched by the router's
+ * param encoding, so a list row can be picked out by its own View link's href
+ * without depending on how "did:web:..." is escaped into a URL.
  */
-export async function signOnInstance(inst: Instance, contractDid: string, signatory: string): Promise<void> {
+function didTail(did: string): string {
+  return did.split(':').pop()!
+}
+
+/**
+ * Follows one resource's own View link in whatever list is on screen.
+ *
+ * Arriving this way is the whole point of the helpers below. A hop that
+ * navigates straight to a URL reaches its page even when nothing in the product
+ * links there — which is how a negotiate view no list could reach passed every
+ * run of this vertical while a human clicking through could not get to it at
+ * all. Each stage keeps at least one hop that has to be FOUND.
+ */
+async function followViewLinkFor(inst: Instance, did: string, where: string): Promise<void> {
+  const row = inst.page.locator('.list-row').filter({ has: inst.page.locator(`a[href*="${didTail(did)}"]`) })
+  // The row appears when the peer's ship lands, and a list rendered before
+  // that moment never refreshes itself — so absence is re-checked on a fresh
+  // load rather than waited out on a stale one.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await expect(row).toHaveCount(1, { timeout: 30_000 })
+      break
+    } catch {
+      await inst.page.reload()
+    }
+  }
+  await expect(row, `${where} on ${inst.origin} shows no row for ${did}`).toHaveCount(1, { timeout: 30_000 })
+  await row.getByRole('link', { name: 'View', exact: true }).click()
+}
+
+/**
+ * Opens a contract from the Contracts list as a human would: searches the list
+ * for it by DID (the list's default search filter) and clicks the row's own View
+ * action.
+ *
+ * Where that lands is the product's decision, not this helper's:
+ * ContractListItem.resolveViewRouteName sends a contract to its task view when
+ * the acting instance holds a task for it, and to the read-only view otherwise.
+ * Callers assert the destination they expect, so a task that was never minted
+ * shows up as a wrong landing page rather than passing silently.
+ */
+export async function openContractFromList(inst: Instance, role: DcsRole, contractDid: string): Promise<void> {
+  await inst.gotoAs(role, '/ui/contracts')
+  const search = inst.page.getByRole('combobox', { name: 'Search contracts' })
+  await expect(search).toBeVisible({ timeout: 30_000 })
+  // The list is paginated and sorted oldest-first, so the contract under test is
+  // not reliably on the page a fresh visit shows; searching is how a human finds
+  // it. Armed before the fill and awaited before the row lookup: the list filters
+  // itself from the search response, and reading rows while it is still in flight
+  // reports "not in the list" for a contract that is.
+  const searched = inst.page.waitForResponse((r) => r.url().includes('/contract/search'), { timeout: 30_000 })
+  await search.fill(contractDid)
+  await search.press('Enter')
+  await searched
+  await followViewLinkFor(inst, contractDid, 'the contract list')
+}
+
+/**
+ * Opens a contract from one of the task tabs by clicking the task's own row.
+ * The tab is the discoverable route into work a party owes an answer on, so a
+ * tab that never grew a row — the federated contract's Negotiations tab, before
+ * accepting an offer minted anything — fails here.
+ */
+export async function openContractFromTaskTab(
+  inst: Instance,
+  role: DcsRole,
+  tab: 'negotiations' | 'reviews' | 'approvals',
+  contractDid: string,
+): Promise<void> {
+  await inst.gotoAs(role, `/ui/tasks/${tab}`)
+  await followViewLinkFor(inst, contractDid, `the ${tab} task tab`)
+}
+
+/**
+ * Drives one signing ceremony on an instance through the real Secure Contract
+ * Viewer (ADR-12): open the contract from the signing list, verify it, run the
+ * wallet PID+PoA ceremony (the wallet leg arrives over OpenID4VP direct_post
+ * against this instance's API base), and wait for the viewer's own
+ * /signature/prepare response.
+ *
+ * Stops there deliberately. Preparation is where the DCS decides whether this
+ * contract may be signed at all, so the two callers below share every step up
+ * to that answer and differ only in what they assert about it.
+ */
+async function runSigningCeremonyOn(inst: Instance, contractDid: string, signatory: string): Promise<PreparedCeremony> {
   await inst.gotoAs('Contract Signer', '/ui/signing')
   const row = inst.page.getByRole('row').filter({ hasText: contractDid })
   await expect(row).toBeVisible()
   await row.getByRole('link', { name: /Open/ }).click()
   await expect(inst.page).toHaveURL(/\/signing\/.+/)
 
+  // The badge follows the VERDICT, not the call completing
+  // (SecureContractViewerView.verify), so an absent badge is a failed integrity
+  // check rather than a slow one, and step 3 stays closed behind it. Capture the
+  // verdict the viewer read so the failure names the mismatch and its findings
+  // instead of reporting a missing element for fifteen seconds.
+  const verified = inst.page.waitForResponse((r) => r.url().includes('/signature/verify'), { timeout: 60_000 })
   await inst.page.getByRole('button', { name: 'Verify', exact: true }).click()
-  await expect(inst.page.getByText('Verified', { exact: true })).toBeVisible()
+  const verifyResponse = await verified
+  await expect(
+    inst.page.getByText('Verified', { exact: true }),
+    `the integrity check of ${contractDid} on ${inst.origin} did not pass, so the ceremony stays closed: HTTP ${verifyResponse.status()} ${await verifyResponse.text().catch(() => '')}`,
+  ).toBeVisible()
 
   // Match ANY ceremony-start response, then assert: an r.ok() filter turns a
   // refusal into "no response at all", which has cost several runs already.
@@ -129,40 +240,49 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
     ceremonyResponse.ok(),
     `start signing ceremony on ${inst.origin}: HTTP ${ceremonyResponse.status()} ${await ceremonyResponse.text().catch(() => '')}`,
   ).toBeTruthy()
-  const ceremony = (await ceremonyResponse.json()) as { ceremony_id: string }
+  const ceremony = (await ceremonyResponse.json()) as { ceremony_id: string; wallet_uri: string }
   expect(ceremony.ceremony_id).toBeTruthy()
+  expect(ceremony.wallet_uri).toBeTruthy()
 
-  execFileSync(python, [path.join(here, 'complete_signing_webhook.py'), ceremony.ceremony_id], {
+  const ceremonyStart = ceremonyResponse.request().postDataJSON() as { field_name?: string }
+  const signField = ceremonyStart.field_name?.trim() ?? ''
+  expect(signField, 'ceremony start must bind a signature field_name').toBeTruthy()
+
+  execFileSync(python, [path.join(here, 'complete_signing_webhook.py'), ceremony.wallet_uri], {
     cwd: repoRoot,
-    env: { ...process.env, STATUSLIST_SERVICE_URL: E2E_STATUSLIST_URL, BDD_DCS_BASE_URL: inst.apiBase },
+    // E2E_SIGNATORY must match what's passed to sign_prepared_pdf.py below —
+    // the DCS's cert-subject to PID name-match gate (ADR-20) checks the two
+    // against each other.
+    env: {
+      ...process.env,
+      ISSUER_BASE_URL: E2E_ISSUER_BASE_URL,
+      BDD_DCS_BASE_URL: inst.apiBase,
+      E2E_SIGNATORY: signatory,
+    },
     stdio: 'pipe',
   })
 
-  // The viewer only fetches the to-be-signed PDF once its poll sees the ceremony
-  // verified; a rejected ceremony makes applySignature return silently, with no
-  // error and no request. Assert the wallet leg landed so that failure reports
-  // the actual ceremony status instead of stalling on a missing response.
-  const token = await inst.page.evaluate(() => window.localStorage.getItem('access_token'))
-  await expect
-    .poll(
-      async () => {
-        const r = await inst.page.request.get(
-          `${inst.apiBase}/signature/request/${encodeURIComponent(ceremony.ceremony_id)}`,
-          { headers: { Authorization: `Bearer ${token}` }, timeout: 30_000 },
-        )
-        if (!r.ok()) return `HTTP ${r.status()}`
-        return ((await r.json()) as { status?: string }).status ?? 'unknown'
-      },
-      { timeout: 90_000, message: `signing ceremony on ${inst.origin} never reached "verified"` },
-    )
-    .toBe('verified')
-
-  const preparedPath = path.join(tmpdir(), `prepared-${ceremony.ceremony_id}.pdf`)
-  const prepared = await preparedResponse.catch((e: Error) => {
+  const prepared = await preparedResponse.catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error)
     throw new Error(
-      `${e.message}\nviewer signature calls:\n  ${viewerCalls.join('\n  ') || '(none)'}\nviewer console errors:\n  ${viewerErrors.join('\n  ') || '(none)'}`,
+      `${message}\nviewer signature calls:\n  ${viewerCalls.join('\n  ') || '(none)'}\nviewer console errors:\n  ${viewerErrors.join('\n  ') || '(none)'}`,
     )
   })
+  return { ceremonyId: ceremony.ceremony_id, signField, prepared }
+}
+
+/**
+ * Signs an APPROVED contract on a given instance through that instance's Secure
+ * Contract Viewer, exactly as a real signer would (ADR-12): run the ceremony
+ * above, download the to-be-signed PDF, sign it externally with the test
+ * wallet's key via the DSS SCA, upload it, and confirm SIGNED. The signature
+ * field is the signing party's own DCS DID slot; the wallet discovers it from
+ * the PDF.
+ */
+export async function signOnInstance(inst: Instance, contractDid: string, signatory: string): Promise<void> {
+  const { ceremonyId, signField, prepared } = await runSigningCeremonyOn(inst, contractDid, signatory)
+
+  const preparedPath = path.join(tmpdir(), `prepared-${ceremonyId}.pdf`)
   expect(
     prepared.ok(),
     `prepare the to-be-signed document on ${inst.origin}: HTTP ${prepared.status()} ${await prepared.text().catch(() => '')}`,
@@ -174,10 +294,15 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
   const preparedBytes = Buffer.from(preparedEnvelope.document, 'base64')
   expect(preparedBytes.subarray(0, 5).toString('latin1'), 'prepared document is a PDF').toBe('%PDF-')
   fs.writeFileSync(preparedPath, preparedBytes)
-  const signedPath = path.join(tmpdir(), `signed-${ceremony.ceremony_id}.pdf`)
+  const signedPath = path.join(tmpdir(), `signed-${ceremonyId}.pdf`)
   execFileSync(python, [path.join(here, 'sign_prepared_pdf.py'), preparedPath, signedPath], {
     cwd: repoRoot,
-    env: { ...process.env, DSS_URL: E2E_DSS_URL, E2E_SIGNATORY: signatory },
+    env: {
+      ...process.env,
+      DSS_URL: E2E_DSS_URL,
+      E2E_SIGNATORY: signatory,
+      E2E_SIGN_FIELD: signField,
+    },
     stdio: 'pipe',
   })
 
@@ -192,6 +317,57 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
     `submit signature on ${inst.origin}: HTTP ${submitResponse.status()} ${await submitResponse.text().catch(() => '')}`,
   ).toBeTruthy()
   await expect(inst.page.getByText('SIGNED', { exact: true })).toBeVisible({ timeout: 60_000 })
+}
+
+/**
+ * Stage 7 mutual-milestone gate — a signer whose OWN instance has finished its
+ * workflow still cannot sign while the counterparty has not settled this
+ * version.
+ *
+ * Distinct from assertNotYetSignable, which covers the local state gate before
+ * approval (ADR-2 allows EventSign only from APPROVED) and is satisfied by the
+ * contract simply not being offered. Here the instance is APPROVED and the
+ * contract IS offered to its signer: the state machine is content, the signatory
+ * presents their PID, and the refusal comes from the one thing local state
+ * cannot supply — locally-held, verified evidence that the OTHER party agreed to
+ * the document about to be signed (a settlement artifact the peer signs and
+ * ships over the DCS-to-DCS channel). Intrinsic state is local (ADR-13), so an
+ * instance reaching APPROVED says nothing at all about its counterparty, and a
+ * signature binds the moment it is made — refusing to deploy afterwards would
+ * not undo it.
+ *
+ * The refusal is asserted twice over: as the typed API code the frontend
+ * dispatches on, and as what the signer is actually told — a signer looking at
+ * a dead button with no explanation is the failure mode the code exists to
+ * prevent.
+ */
+export async function assertSigningRefusedUntilCounterpartySettles(
+  inst: Instance,
+  contractDid: string,
+  signatory: string,
+): Promise<void> {
+  const { prepared } = await runSigningCeremonyOn(inst, contractDid, signatory)
+
+  const body = await prepared.text().catch(() => '')
+  expect(
+    prepared.ok(),
+    `signing ${contractDid} on ${inst.origin} was allowed while the counterparty had not settled: HTTP ${prepared.status()} ${body}`,
+  ).toBeFalsy()
+  // By code, never by matching the message: bad_request also carries "you may
+  // not sign this contract", which is a different answer to the signer.
+  let refusal: { name?: string }
+  try {
+    refusal = JSON.parse(body) as { name?: string }
+  } catch {
+    throw new Error(`signing refusal on ${inst.origin} is not a typed error envelope: ${body}`)
+  }
+  expect(refusal.name, `signing refusal on ${inst.origin} must name the counterparty settlement, got ${body}`).toBe(
+    'counterparty_not_settled',
+  )
+
+  await expect(inst.page.getByText(/Waiting for the counterparty to settle this version/)).toBeVisible({
+    timeout: 30_000,
+  })
 }
 
 /**
@@ -326,12 +502,25 @@ export async function saveArtifact(inst: Instance, contractDid: string, label: s
   persistArtifact(await exportContractPdf(inst, contractDid), label)
 }
 
-/** The C2PA manifest-history URL for a contract on an instance. The C2PA
- *  service is mounted on the API muxer (backend cmd/dcs/http.go), so it lives
- *  under DCS_API_PATH (/digital-contracting-service/api) like every other app
- *  endpoint — not at the service root (that is did.json, on the raw mux). */
-function manifestHistoryUrl(inst: Instance, contractDid: string): string {
-  return `${inst.apiBase}/c2pa/manifest/${encodeURIComponent(contractDid)}?history=true`
+/** The C2PA provenance chain of a contract on an instance, read by its
+ *  Contract Manager. The public /c2pa/manifest endpoint serves signed contracts
+ *  only, and the chain grows before signing too. The session is minted without
+ *  navigating, so the page stays where the spec left it. */
+async function manifestChain(
+  inst: Instance,
+  contractDid: string,
+  auth: { Authorization: string },
+): Promise<{ status: number; chain: unknown[] | null }> {
+  const resp = await inst.page.request.get(`${inst.apiBase}/signature/provenance/${encodeURIComponent(contractDid)}`, {
+    headers: auth,
+  })
+  if (!resp.ok()) return { status: resp.status(), chain: null }
+  const body = (await resp.json()) as { chain?: unknown[] }
+  return { status: resp.status(), chain: Array.isArray(body.chain) ? body.chain : null }
+}
+
+function managerAuth(inst: Instance): { Authorization: string } {
+  return { Authorization: `Bearer ${mintSession('Contract Manager', inst.apiBase, inst.organization).token}` }
 }
 
 /**
@@ -347,18 +536,16 @@ export async function assertManifestChainGrew(inst: Instance, contractDid: strin
   // the export route reports "being regenerated" (backend exportcontract.go), so
   // poll the manifest history until the chain grows past prevCount, tolerating
   // the transient not-ready response.
+  const auth = managerAuth(inst)
   const deadline = Date.now() + 45_000
   let lastStatus = 0
   let lastLen = -1
   while (Date.now() < deadline) {
-    const resp = await inst.page.request.get(manifestHistoryUrl(inst, contractDid))
-    lastStatus = resp.status()
-    if (resp.ok()) {
-      const chain = (await resp.json()) as unknown[]
-      if (Array.isArray(chain)) {
-        lastLen = chain.length
-        if (chain.length > prevCount) return chain.length
-      }
+    const { status, chain } = await manifestChain(inst, contractDid, auth)
+    lastStatus = status
+    if (chain) {
+      lastLen = chain.length
+      if (chain.length > prevCount) return chain.length
     }
     await inst.page.waitForTimeout(1500)
   }
@@ -372,10 +559,8 @@ export async function assertManifestChainGrew(inst: Instance, contractDid: strin
 /** Current length of the contract's C2PA manifest chain on an instance (0 if
  *  none yet), for seeding assertManifestChainGrew. */
 export async function manifestChainLength(inst: Instance, contractDid: string): Promise<number> {
-  const resp = await inst.page.request.get(manifestHistoryUrl(inst, contractDid))
-  if (!resp.ok()) return 0
-  const chain = (await resp.json()) as unknown[]
-  return Array.isArray(chain) ? chain.length : 0
+  const { chain } = await manifestChain(inst, contractDid, managerAuth(inst))
+  return chain ? chain.length : 0
 }
 
 /**
@@ -477,6 +662,43 @@ ex:PaymentClauseShape
 }
 
 /**
+ * Publishes a SHACL shapes-graph entry into the instance's Semantic Hub through
+ * the dashboard UI (the Gaia-X case: an external shape enters a running
+ * instance without a rebuild), then confirms it resolves through the hub's
+ * public route and carries the expected shape.
+ *
+ * A domain vocabulary must be published on EVERY instance whose documents are
+ * modelled against it: a document declares the library it was authored under in
+ * its own sh:shapesGraph, and validation treats a declared graph the local hub
+ * cannot resolve as a hard failure (backend validation/shaclengine.go
+ * declaredShapes) — so a peer that never registered the library can neither
+ * validate the received document nor render its data objects.
+ */
+export async function publishHubShapesOn(
+  inst: Instance,
+  name: string,
+  ttl: string,
+  expectedContent: string,
+): Promise<void> {
+  // Reached through the sidebar the role actually sees, so a section that is
+  // navigable only by typing its URL fails here.
+  await inst.gotoAs('Template Manager', '/ui/templates')
+  await inst.page.getByRole('link', { name: 'Semantic Hub', exact: true }).click()
+  await expect(inst.page).toHaveURL(/\/ui\/semantic-hub$/)
+  await expect(inst.page.getByRole('heading', { name: 'Semantic Hub' })).toBeVisible()
+  await inst.page.getByLabel('Entry name').fill(name)
+  await inst.page.getByLabel('Entry kind').selectOption('shapes')
+  await inst.page.getByLabel('Entry content').fill(ttl)
+  await inst.page.getByRole('button', { name: 'Publish entry' }).click()
+  await expect(inst.page.getByRole('heading', { name })).toBeVisible()
+  await expect(inst.page.getByText('active').first()).toBeVisible()
+
+  const resolved = await inst.page.request.get(`${inst.apiBase}/semantic/shapes/${name}`)
+  expect(resolved.ok(), `published shape ${name} resolves on ${inst.origin}`).toBeTruthy()
+  expect(await resolved.text()).toContain(expectedContent)
+}
+
+/**
  * Stage 1 — publishes a brand-new, non-trivial SHACL shapes-graph entry into
  * the instance's Semantic Hub through the dashboard UI (the Gaia-X case: an
  * external shape enters the running instance without a rebuild), then confirms
@@ -484,18 +706,7 @@ ex:PaymentClauseShape
  * vocabulary rather than assuming a seeded fixture.
  */
 export async function publishShapeOnInstance(inst: Instance, name: string): Promise<void> {
-  await inst.gotoAs('Template Manager', '/ui/semantic-hub')
-  await expect(inst.page.getByRole('heading', { name: 'Semantic Hub' })).toBeVisible()
-  await inst.page.getByLabel('Entry name').fill(name)
-  await inst.page.getByLabel('Entry kind').selectOption('shapes')
-  await inst.page.getByLabel('Entry content').fill(paymentShapeTtl(name))
-  await inst.page.getByRole('button', { name: 'Publish entry' }).click()
-  await expect(inst.page.getByRole('heading', { name })).toBeVisible()
-  await expect(inst.page.getByText('active').first()).toBeVisible()
-
-  const resolved = await inst.page.request.get(`${inst.apiBase}/semantic/shapes/${name}`)
-  expect(resolved.ok(), `published shape ${name} resolves on ${inst.origin}`).toBeTruthy()
-  expect(await resolved.text()).toContain('PaymentClauseShape')
+  await publishHubShapesOn(inst, name, paymentShapeTtl(name), 'PaymentClauseShape')
 }
 
 /**
@@ -508,6 +719,7 @@ export async function publishShapeOnInstance(inst: Instance, name: string): Prom
 export async function authorSemanticComponent(inst: Instance, name: string): Promise<string> {
   await inst.gotoAs('Template Creator', '/ui/templates/new')
   await inst.page.getByRole('button', { name: /Component/ }).click()
+  await inst.page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
   await inst.page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(name)
   await inst.page
     .getByRole('group')
@@ -549,18 +761,27 @@ export async function authorSemanticComponent(inst: Instance, name: string): Pro
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
-  await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+  await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
+  await selectBilateralClauseRoles(editor)
   await editor.getByRole('button', { name: '+ constraint' }).click()
   const constraint = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
   await constraint.locator('select').nth(0).selectOption({ label: 'Payment Amount' })
-  await constraint.locator('select').nth(1).selectOption({ label: 'must be at most' })
+  await constraint.locator('select').nth(1).selectOption({ label: 'less than or equal to' })
   // The bound must admit the amounts this vertical negotiates (20000 -> 10000 ->
   // 15000). Carried over from the single-instance component (which fills 250),
   // 500 made every negotiated value violate the contract's own ODRL rule, so the
-  // reviewer's Approve stayed disabled on !verificationResult.isValid and the
-  // settle could never complete.
+  // reviewer's local semantic precheck withheld confirmation and the settle could
+  // never complete.
   await constraint.locator('input[placeholder="value"]').fill('50000')
+  // Denominate the boundary. A bare bound never reaches resolveConstraintUnit,
+  // so every unit-related audit finding was unreachable from this vertical: a
+  // declared unit was reported at warning severity, the workflow gate turns any
+  // warning into REVIEW, and REVIEW refuses the offer — meaning no contract that
+  // denominated a boundary could be offered at all, while this suite stayed
+  // green. Stage 5 is the assertion: if the gate withholds the offer, B never
+  // reaches OFFERED.
+  await constraint.getByTestId('constraint-unit').fill('https://w3id.org/facis/dcs/taxonomy/v1#currency-EUR')
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
   await expect(editor.getByPlaceholder('Clause title')).toHaveValue('')
@@ -592,22 +813,28 @@ export async function submitReviewApproveTemplateOn(inst: Instance, did: string,
   await submitted
   await assertPdfExportOn(inst, 'template', did, `${name} SUBMITTED`)
 
-  await inst.gotoAs('Template Reviewer', `/ui/templates/review/${did}`)
+  // Found in the Review Tasks tab rather than opened by URL: submitting is what
+  // opens the review task, and the tab row is the reviewer's route to it.
+  await inst.gotoAs('Template Reviewer', '/ui/tasks/reviews')
+  await followViewLinkFor(inst, did, 'the reviews task tab')
+  await expect(inst.page).toHaveURL(/\/ui\/templates\/review\//)
   await waitForTemplateLoadedOn(inst, name)
   const verified = inst.page.waitForResponse(
     (r) => r.url().includes('/template/verify') && r.request().method() === 'POST' && r.ok(),
   )
-  await inst.page.getByRole('button', { name: 'Verify', exact: true }).click()
-  await verified
-  await inst.page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click()
   const forwarded = inst.page.waitForResponse(
     (r) => r.url().includes('/template/submit') && r.request().method() === 'POST' && r.ok(),
   )
   await inst.page.getByRole('button', { name: 'Approve', exact: true }).click()
-  await confirmModalOn(inst, 'Submit')
+  await verified
+  await inst.page.getByRole('dialog').getByRole('button', { name: 'Confirm approval', exact: true }).click()
   await forwarded
 
-  await inst.gotoAs('Template Approver', `/ui/templates/approve/${did}`)
+  // Likewise the approver: the row points at the approve view only while its
+  // task is open and the template has been reviewed.
+  await inst.gotoAs('Template Approver', '/ui/tasks/approvals')
+  await followViewLinkFor(inst, did, 'the approvals task tab')
+  await expect(inst.page).toHaveURL(/\/ui\/templates\/approve\//)
   await waitForTemplateLoadedOn(inst, name)
   const approved = inst.page.waitForResponse(
     (r) => r.url().includes('/template/approve') && r.request().method() === 'POST' && r.ok(),
@@ -626,6 +853,7 @@ export async function submitReviewApproveTemplateOn(inst: Instance, did: string,
 export async function authorContractTemplate(inst: Instance, name: string, componentName: string): Promise<string> {
   await inst.gotoAs('Template Creator', '/ui/templates/new')
   await inst.page.getByRole('button', { name: /parent for other contracts/ }).click()
+  await inst.page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
   await inst.page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(name)
   await inst.page
     .getByRole('group')
@@ -662,7 +890,170 @@ export async function registerTemplateOn(inst: Instance, did: string, name: stri
     (r) => r.url().includes('/template/register') && r.request().method() === 'POST' && r.ok(),
   )
   await inst.page.getByRole('button', { name: 'Register', exact: true }).click()
+  // Register goes through the shared ConfirmationModal ("Proceed with
+  // registration?") before it actually submits — the click above only opens
+  // it.
+  await inst.page.getByRole('button', { name: 'Confirm', exact: true }).click()
   await registered
+}
+
+/**
+ * Publishes a REGISTERED contract template to the Federated Catalogue — the
+ * Template Manager's "Publish" action (TemplateManagerActions), which only
+ * appears for a contract template in REGISTERED. Registering makes a template
+ * usable locally; publishing is what puts it in the catalogue another DCS
+ * browses.
+ */
+export async function publishTemplateOn(inst: Instance, did: string, name: string): Promise<void> {
+  await inst.gotoAs('Template Manager', `/ui/templates/view/${did}`)
+  await waitForTemplateLoadedOn(inst, name)
+  const published = inst.page.waitForResponse(
+    (r) => r.url().includes('/template/publish') && r.request().method() === 'POST',
+    { timeout: 60_000 },
+  )
+  await inst.page.getByRole('button', { name: 'Publish', exact: true }).click()
+  await inst.page.getByRole('button', { name: 'Confirm', exact: true }).click()
+  const response = await published
+  expect(
+    response.ok(),
+    `publish template on ${inst.origin}: HTTP ${response.status()} ${await response.text().catch(() => '')}`,
+  ).toBeTruthy()
+}
+
+/**
+ * Takes a catalogue-published template into this instance's own repository
+ * through the real Template Catalogue UI: search the catalogue by name, open
+ * the entry, read its Preview, then Register + Confirm. Returns the DID the
+ * template got HERE — registering mints a local template (the view lands on
+ * /ui/templates/edit/{did}), which is a different DID from the publisher's.
+ */
+export async function registerCatalogueTemplateOn(inst: Instance, name: string): Promise<string> {
+  await inst.gotoAs('Template Manager', '/ui/catalogues/templates')
+
+  // The search filter defaults to DID; switch it to Name through its popover.
+  await inst.page.locator('#list-btn-search').click()
+  await inst.page.locator('#list-popover-search').getByText('Name', { exact: true }).click()
+  await inst.page.getByLabel('Search catalogue templates').fill(name)
+  await inst.page.getByRole('button', { name: 'Search', exact: true }).click()
+
+  const entry = inst.page.getByRole('listitem').filter({ hasText: name })
+  await expect(entry, `catalogue entry ${name} on ${inst.origin}`).toHaveCount(1, { timeout: 60_000 })
+  await entry.getByRole('link', { name: 'View' }).click()
+  await expect(inst.page).toHaveURL(/\/catalogues\/templates\/view\/.+version=/)
+
+  // The Preview tab renders the catalogue copy's own document — what a
+  // manager reads before taking someone else's template into their repository.
+  await inst.page.getByRole('tab', { name: 'Preview', exact: true }).click()
+
+  const register = inst.page.getByRole('button', { name: 'Register', exact: true })
+  await expect(register).toBeEnabled({ timeout: 60_000 })
+  const registered = inst.page.waitForResponse(
+    (r) => r.url().includes('/template/register') && r.request().method() === 'POST',
+    { timeout: 60_000 },
+  )
+  await register.click()
+  await inst.page.getByRole('button', { name: 'Confirm', exact: true }).click()
+  const response = await registered
+  expect(
+    response.ok(),
+    `register catalogue template on ${inst.origin}: HTTP ${response.status()} ${await response.text().catch(() => '')}`,
+  ).toBeTruthy()
+
+  await expect(inst.page).toHaveURL(/\/templates\/edit\/.+/, { timeout: 60_000 })
+  const localDid = decodeURIComponent(new URL(inst.page.url()).pathname.split('/templates/edit/')[1] ?? '')
+  expect(localDid, `local DID of the registered catalogue template on ${inst.origin}`).toBeTruthy()
+  return localDid
+}
+
+/**
+ * Fills a DRAFT contract's negotiable values through the real Contract Content
+ * tab and saves them with "Update".
+ *
+ * Two kinds of input live there, and a contract carries both: the typed domain
+ * objects of dcs:contractData render one control per negotiable leaf in the
+ * data-objects editor (keyed by the leaf's property local name), while a field
+ * placed inline in clause prose renders a PreviewParamInput labelled with the
+ * field's own label. A data leaf constrained by sh:in renders a <select>, so
+ * the control is driven by its tag rather than assumed to be a text input.
+ */
+export async function fillContractValuesOn(
+  inst: Instance,
+  contractDid: string,
+  values: { dataLeaves?: Record<string, string>; inlineFields?: Record<string, string> },
+): Promise<void> {
+  await inst.gotoAs('Contract Creator', `/ui/contracts/edit/${contractDid}`)
+  await inst.page.getByRole('tab', { name: 'Contract Content' }).click()
+
+  for (const [property, value] of Object.entries(values.dataLeaves ?? {})) {
+    const control = inst.page.getByTestId(`fill-${property}`)
+    await expect(control, `negotiable leaf ${property} on ${inst.origin}`).toBeVisible({ timeout: 30_000 })
+    if ((await control.evaluate((el) => el.tagName)) === 'SELECT') await control.selectOption(value)
+    else await control.fill(value)
+  }
+  for (const [label, value] of Object.entries(values.inlineFields ?? {})) {
+    const input = inst.page.getByRole('textbox', { name: label }).first()
+    await expect(input, `inline field ${label} on ${inst.origin}`).toBeVisible({ timeout: 30_000 })
+    await input.fill(value)
+    await input.blur()
+  }
+
+  const updated = inst.page.waitForResponse(
+    (r) => r.url().includes('/contract/update') && r.request().method() === 'PUT',
+  )
+  await inst.page.getByRole('button', { name: 'Update', exact: true }).click()
+  const response = await updated
+  expect(
+    response.ok(),
+    `contract update on ${inst.origin}: HTTP ${response.status()} ${await response.text().catch(() => '')}`,
+  ).toBeTruthy()
+}
+
+/**
+ * Asserts the DRAFT contract cannot be submitted while a filled value violates
+ * the contract's own ODRL policy: the Contract Creator clicks Submit, the
+ * editor's semantic verification (NewContractView verifySemanticValues) refuses
+ * before any request leaves the browser, and the refusal names the violated
+ * constraint in an alert. Asserting that NO /contract/submit was issued is what
+ * makes this a refusal rather than a message.
+ */
+export async function expectSubmitRefusedOn(inst: Instance, contractDid: string, reason: RegExp): Promise<void> {
+  await inst.gotoAs('Contract Creator', `/ui/contracts/edit/${contractDid}`)
+  // Verification runs over the values the editor has LOADED, so clicking Submit
+  // before the document arrived would refuse for "required but has no value"
+  // instead of the policy violation this asserts.
+  await inst.page.getByRole('tab', { name: 'Contract Content' }).click()
+  await expect(inst.page.getByTestId('data-objects-editor')).toBeVisible({ timeout: 30_000 })
+  const submitCalls: string[] = []
+  inst.page.on('request', (request) => {
+    if (request.url().includes('/contract/submit')) submitCalls.push(request.url())
+  })
+  await inst.page.getByRole('button', { name: 'Submit', exact: true }).click()
+  await expect(inst.page.getByRole('alert').filter({ hasText: reason })).toBeVisible({ timeout: 30_000 })
+  expect(submitCalls, `submit must not reach the DCS on ${inst.origin}`).toHaveLength(0)
+}
+
+/** The contract record as this instance holds it (the authenticated
+ *  retrieve-by-id the Contract Manager's views read): its document plus the
+ *  negotiation rounds this instance itself recorded. */
+async function contractRecordOn(inst: Instance, contractDid: string): Promise<ContractRecord> {
+  const auth = await apiAuthHeaders(inst, 'Contract Manager', `/ui/contracts/view/${contractDid}`)
+  const resp = await inst.page.request.get(`${inst.apiBase}/contract/retrieve/${encodeURIComponent(contractDid)}`, {
+    headers: auth,
+  })
+  expect(resp.ok(), `retrieve ${contractDid} on ${inst.origin}: HTTP ${resp.status()}`).toBeTruthy()
+  const body = (await resp.json()) as ContractRecord
+  expect(body.contract_data, `contract ${contractDid} on ${inst.origin} carries no document`).toBeTruthy()
+  return body
+}
+
+interface ContractRecord {
+  contract_data?: Record<string, unknown>
+  negotiations?: { created_by?: string; change_request?: unknown }[]
+}
+
+/** The contract document as this instance holds it. */
+export async function contractDocumentOn(inst: Instance, contractDid: string): Promise<Record<string, unknown>> {
+  return (await contractRecordOn(inst, contractDid)).contract_data!
 }
 
 /** The counterparty's own did:web, resolved from its origin-root DID document
@@ -681,7 +1072,13 @@ export async function resolveDidWeb(inst: Instance): Promise<string> {
  * counterparty did:web input). Returns the created contract's DID.
  */
 export async function createContractViaUi(inst: Instance, templateName: string, counterparty: string): Promise<string> {
-  await inst.gotoAs('Contract Creator', '/ui/contracts/new')
+  // Entered from the Contracts list through its own New Contract action, so the
+  // creator's route in is exercised rather than assumed. The list renders the
+  // action twice — the page header and the empty-state hint both link to it —
+  // and either one is the creator's route in.
+  await inst.gotoAs('Contract Creator', '/ui/contracts')
+  await inst.page.getByRole('link', { name: 'New Contract', exact: true }).first().click()
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/new$/)
   const picker = inst.page.locator('select').first()
   const option = picker.locator('option', { hasText: templateName })
   await expect(option).toHaveCount(1)
@@ -691,6 +1088,10 @@ export async function createContractViaUi(inst: Instance, templateName: string, 
   const dialog = inst.page.getByRole('dialog').filter({ hasText: 'Contract Counterparty' })
   await expect(dialog).toBeVisible()
   await dialog.getByPlaceholder('did:web:...').fill(counterparty)
+  // The counterparty's users read their received copy only when named here.
+  const counterpartyOrganization = inst.organization === E2E_ORG_A ? E2E_ORG_B : E2E_ORG_A
+  await dialog.getByPlaceholder('Acme GmbH, Beispiel AG').fill(counterpartyOrganization)
+  await selectOriginatorRole(dialog)
   const created = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/create') && r.request().method() === 'POST',
   )
@@ -700,6 +1101,86 @@ export async function createContractViaUi(inst: Instance, templateName: string, 
   const contractDid = String(((await resp.json()) as { did?: string }).did ?? '')
   expect(contractDid).toBeTruthy()
   return contractDid
+}
+
+/**
+ * Fills the contract's Payment Amount through the real edit UI and saves it via
+ * "Update" — Contract Generation ends with a filled-out contract (SRS §2.2.2),
+ * and command/offer.go's closedness gate rejects offering a draft whose
+ * required placeholder is still unfilled, so the originator must propose its
+ * opening amount before the draft may leave the instance.
+ */
+export async function fillContractAmountOn(inst: Instance, contractDid: string, value: string): Promise<void> {
+  await inst.gotoAs('Contract Creator', `/ui/contracts/edit/${contractDid}`)
+  await inst.page
+    .getByRole('tab', { name: /content/i })
+    .or(inst.page.getByText('Contract Content', { exact: true }))
+    .first()
+    .click()
+  const amount = inst.page
+    .getByRole('spinbutton', { name: /amount/i })
+    .or(inst.page.getByRole('textbox', { name: /amount/i }))
+    .first()
+  await expect(amount).toBeVisible({ timeout: 30_000 })
+  await amount.fill(value)
+  await amount.blur()
+  const updated = inst.page.waitForResponse(
+    (r) => r.url().includes('/contract/update') && r.request().method() === 'PUT',
+  )
+  await inst.page.getByRole('button', { name: 'Update', exact: true }).click()
+  const resp = await updated
+  expect(resp.ok(), `contract update ${resp.status()}: ${await resp.text()}`).toBeTruthy()
+}
+
+/**
+ * Makes a counter-offer through the SRS §3.1.1 "Save draft" leg: stages the
+ * redline as the party's negotiation draft, proves it survives leaving the
+ * view (restored value + Discard draft offered on return), then proposes it
+ * via "Change Proposal". Until the propose, the staged redline is invisible
+ * to the peer — the caller's assertManifestChainGrew after this call is what
+ * proves the chain grew from the PROPOSE, the save itself ships nothing.
+ */
+export async function stagedCounterOffer(inst: Instance, contractDid: string, opts: { value: string }): Promise<void> {
+  // Now that the party has engaged, the tab row IS the route: the task points at
+  // the round, and following it must land on the negotiate view rather than the
+  // read-only one.
+  await openContractFromTaskTab(inst, 'Contract Negotiator', 'negotiations', contractDid)
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/negotiate\//)
+  await inst.page
+    .getByRole('tab', { name: /content/i })
+    .or(inst.page.getByText('Contract Content', { exact: true }))
+    .first()
+    .click()
+  const amount = inst.page.getByRole('textbox', { name: 'Payment Amount' }).first()
+  await expect(amount).toBeVisible({ timeout: 30_000 })
+  await amount.fill(opts.value)
+  const saved = inst.page.waitForResponse(
+    (r) => r.url().includes('/contract/negotiation_draft') && r.request().method() === 'PUT',
+  )
+  await inst.page.getByRole('button', { name: 'Save draft', exact: true }).click()
+  const saveResp = await saved
+  expect(saveResp.ok(), `draft save ${saveResp.status()}: ${await saveResp.text()}`).toBeTruthy()
+
+  // The staged draft survives navigation: a fresh visit restores the value
+  // and offers Discard draft.
+  await inst.gotoAs('Contract Manager', '/ui/contracts')
+  await inst.gotoAs('Contract Manager', `/ui/contracts/negotiate/${contractDid}`)
+  await inst.page
+    .getByRole('tab', { name: /content/i })
+    .or(inst.page.getByText('Contract Content', { exact: true }))
+    .first()
+    .click()
+  const restored = inst.page.getByRole('textbox', { name: 'Payment Amount' }).first()
+  await expect(restored).toBeVisible({ timeout: 30_000 })
+  await expect(restored).toHaveValue(formatNumberInput(opts.value))
+  await expect(inst.page.getByRole('button', { name: 'Discard draft', exact: true })).toBeVisible()
+
+  const proposed = inst.page.waitForResponse(
+    (r) => r.url().includes('/contract/negotiate') && r.request().method() === 'POST' && r.ok(),
+    { timeout: 30_000 },
+  )
+  await inst.page.getByRole('button', { name: 'Change Proposal' }).click()
+  await proposed
 }
 
 /**
@@ -716,7 +1197,17 @@ export async function counterOffer(inst: Instance, contractDid: string, opts: { 
   // role (not Creator), so it cannot /contract/submit (Creator-only) — instead
   // its "Change Proposal" (/contract/negotiate) opens negotiation directly
   // (Offered --EventNegotiate--> Negotiation; SRS DCS-IR-CWE-03/DCS-FR-CWE-18).
-  await inst.gotoAs('Contract Manager', `/ui/contracts/negotiate/${contractDid}`)
+  // Both parties hold a task, so the originator has its own tab row to arrive
+  // by: authoring the contract is its engagement with the first round, and a
+  // re-ship carries that task to each new round rather than dropping it. Its
+  // copy is still OFFERED (a peer's re-ship never moves this instance's own
+  // intrinsic state), so the tab lists the contract on the strength of the
+  // TASK's state — an entry that a filter keyed on the contract's state would
+  // hide, which is how the tab used to look empty here.
+  // Negotiation tasks deep-link straight to /contracts/negotiate (same as
+  // stagedCounterOffer); there is no view → open-negotiation hop anymore.
+  await openContractFromTaskTab(inst, 'Contract Creator', 'negotiations', contractDid)
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/negotiate\//)
   // The negotiable requirement-field value inputs live under the Contract Content
   // tab (NegotiateContractView renders them via TemplatePreview). Editing the
   // Payment Amount field THERE is what flips changedContractData, so the change
@@ -751,13 +1242,72 @@ export async function counterOffer(inst: Instance, contractDid: string, opts: { 
  * §1.2 offer→acceptance). The transition ships the PDF to the trusted peer.
  */
 export async function offerToCounterparty(inst: Instance, contractDid: string): Promise<void> {
-  await inst.gotoAs('Contract Creator', `/ui/contracts/view/${contractDid}`)
+  // Found from the contract list rather than opened by URL: A's own route to
+  // the contract it just authored is a row in that list.
+  await openContractFromList(inst, 'Contract Creator', contractDid)
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/view\//)
   const offered = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/offer') && r.request().method() === 'POST' && r.ok(),
     { timeout: 30_000 },
   )
   await inst.page.getByRole('button', { name: 'Offer to counterparty' }).click()
   await offered
+}
+
+/**
+ * The Responder takes an inbound offer into negotiation as it stands (SRS §4:
+ * accept, negotiate or refuse), through the real "Accept offer" button.
+ *
+ * Receiving an offer mints nothing — a negotiation task records that a party
+ * ENGAGED with the round, which is what submit's settlement gate reads. So this
+ * is also what puts the contract in the Responder's Negotiations tab, asserted
+ * here: no task, no row, which is how the tab stayed empty for every federated
+ * contract.
+ */
+export async function acceptOfferOn(inst: Instance, contractDid: string): Promise<void> {
+  // Symptom 1, before the accept: the offer has arrived and replicated, and the
+  // Negotiations tab still knows nothing about it. Nothing was minted on
+  // receipt, so there is no row to find.
+  await inst.gotoAs('Contract Negotiator', '/ui/tasks/negotiations')
+  const taskRow = inst.page.locator('.list-row').filter({
+    has: inst.page.locator(`a[href*="${didTail(contractDid)}"]`),
+  })
+  // Absence only means something once the tab has actually rendered its answer:
+  // an empty DOM satisfies toHaveCount(0) while the tasks are still loading.
+  await expect(
+    inst.page.locator('.list-row').or(inst.page.getByText('No negotiation tasks found.')).first(),
+  ).toBeVisible({ timeout: 30_000 })
+  await expect(taskRow, `${inst.origin} holds a negotiation task for an offer it has not accepted`).toHaveCount(0)
+
+  // Symptom 2 — the Responder's route in. With no task there is no tab row, so
+  // the contract list is the only surface the offer appears on and the contract
+  // view's own action is the only way through to the negotiate view. Reaching it
+  // by clicking is what makes a missing or wrongly-gated entry point fail here.
+  await openContractFromList(inst, 'Contract Negotiator', contractDid)
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/view\//)
+  const intoNegotiation = inst.page.getByTestId('open-negotiation')
+  await expect(intoNegotiation, `${inst.origin} offers no route from the received offer into negotiation`).toHaveText(
+    'Review offer',
+  )
+  await intoNegotiation.click()
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/negotiate\//)
+
+  // Accepting as it stands: no redline, nothing edited.
+  const accepted = inst.page.waitForResponse(
+    (r) => r.url().includes('/contract/accept-offer') && r.request().method() === 'POST' && r.ok(),
+    { timeout: 30_000 },
+  )
+  await inst.page.getByTestId('accept-offer').click()
+  await accepted
+
+  // Symptom 1, after: the accept minted the task, so the contract is now in the
+  // Responder's Negotiations tab — matched by the row's own link, not counted,
+  // so a row for some other contract cannot stand in for it.
+  await inst.gotoAs('Contract Negotiator', '/ui/tasks/negotiations')
+  await expect(
+    taskRow,
+    `accepting the offer put no negotiation task for ${contractDid} in ${inst.origin}'s Negotiations tab`,
+  ).toHaveCount(1, { timeout: 30_000 })
 }
 
 /**
@@ -773,110 +1323,369 @@ export async function assertNotYetSignable(inst: Instance, contractDid: string):
 }
 
 /**
- * Accepts every outstanding change request on this instance (NegotiationList
- * Show → Accept → /contract/respond) until none remain.
+ * Waits for a counter-offer the PEER proposed to land on this instance as a
+ * synced negotiation proposal, and returns that change_request document.
  *
- * hasOpenDecisions counts EVERY undecided decision on the contract, including
- * the counterparty's, and that record replicates to both copies. So after the
- * final counter the offering side cannot submit until the RECEIVING side has
- * decided — settling is a mutual agreement, not a unilateral one. Reload between
- * rounds so the compare view "Show" opens (itself a Submit blocker) clears
- * before the next decision.
+ * Propose does not apply the redline to formal contract_data or re-ship a PDF.
+ * The proposal crosses on the negotiation outbound channel; Accept + Submit
+ * later merge it into the formal document and ship the PDF. So this waits on
+ * retrieve.negotiations[].change_request, not on the formal Payment Amount field.
  */
-export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string): Promise<void> {
-  for (let round = 0; round < 10; round++) {
-    await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
-    // Wait for the contract to actually be loaded before probing for decisions.
-    // Submit only renders once contract.state is known, and isVisible() below
-    // does NOT auto-wait — probing straight after navigation reported "no open
-    // decisions" while the fetch was still in flight, silently skipping the
-    // accept and leaving the round unresolvable.
-    await expect(inst.page.getByRole('button', { name: 'Submit', exact: true })).toBeVisible({ timeout: 30_000 })
-    const pending = await inst.page.getByRole('button', { name: 'Show' }).count()
-    if (pending === 0) break
-
-    // Walk every pending round rather than only the first: a change request this
-    // instance authored itself stays pending forever (FR-CWE-07 refuses an accept
-    // by its own author), so it must be stepped over to reach the peer's.
-    let accepted = false
-    for (let i = 0; i < pending && !accepted; i++) {
-      await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
-      await expect(inst.page.getByRole('button', { name: 'Submit', exact: true })).toBeVisible({ timeout: 30_000 })
-      const showBtn = inst.page.getByRole('button', { name: 'Show' }).nth(i)
-      if (!(await showBtn.isVisible().catch(() => false))) continue
-      await showBtn.click()
-      const responded = inst.page.waitForResponse(
-        (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST',
-        { timeout: 30_000 },
-      )
-      await inst.page.getByRole('button', { name: 'Accept', exact: true }).click()
-      await confirmModalOn(inst, 'Confirm')
-      accepted = (await responded).ok()
+export async function awaitPeerRedlineOn(
+  inst: Instance,
+  contractDid: string,
+  opts: { label: string; value: string },
+): Promise<Record<string, unknown>> {
+  let record: ContractRecord = {}
+  let held = ''
+  let matched: Record<string, unknown> | undefined
+  for (let attempt = 0; attempt < 12; attempt++) {
+    record = await contractRecordOn(inst, contractDid)
+    for (const negotiation of record.negotiations ?? []) {
+      const cr = negotiation.change_request
+      if (cr == null || typeof cr !== 'object') continue
+      const blob = JSON.stringify(cr)
+      if (!blob.includes(opts.value)) continue
+      const data = (cr as { contract_data?: Record<string, unknown> }).contract_data
+      if (data) {
+        const fields = (data['dcs:contractFields'] ?? []) as Record<string, unknown>[]
+        held = JSON.stringify(fields.find((field) => field['dcs:label'] === opts.label)?.['dcs:value'] ?? null)
+        if (held.includes(opts.value)) {
+          matched = data
+          break
+        }
+      } else if (blob.includes(opts.label) || blob.includes(opts.value)) {
+        held = blob
+        matched = cr as Record<string, unknown>
+        break
+      }
     }
-    if (!accepted) break
+    if (matched) break
+    await inst.page.waitForTimeout(5_000)
   }
+  expect(held, `the peer's redline of ${opts.label} never reached ${inst.origin} for ${contractDid}`).toContain(
+    opts.value,
+  )
+  expect(
+    record.negotiations ?? [],
+    `${inst.origin} never received a synced proposal for the counter-offer`,
+  ).not.toHaveLength(0)
+  return matched!
 }
 
 /**
- * Stage 7 settle — drives an instance's contract from an open negotiation round
- * to APPROVED through the real UI, the SRS consolidation path (there is no
- * /contract/settle route; ACCEPTED is not a contract state). Accepts the
- * outstanding change request (NegotiationList Show → Accept → /contract/respond),
- * submits the merged round (NEGOTIATION → SUBMITTED), reviews it (SUBMITTED →
- * REVIEWED), and approves it (REVIEWED → APPROVED, EventApprove). Mirrors the
- * proven single-instance submit→review→approve sequence.
+ * Opens an instance's negotiate view and waits for it to have loaded the
+ * contract: Submit only renders once contract.state is known, and the counts
+ * probed after it do NOT auto-wait — probing straight after navigation reported
+ * "no open decisions" while the fetch was still in flight, silently skipping the
+ * accept and leaving the round unresolvable.
+ *
+ * The navigation is repeated rather than waited on longer because the suite runs
+ * against a Vite dev server: a page load that loses its module requests
+ * mid-flight (net::ERR_NETWORK_CHANGED took out ~60 of them on the second
+ * instance in run 30573745114) leaves an app that never mounts, and no wait
+ * recovers a document that has already finished loading. A genuinely absent
+ * Submit still fails, on the same assertion.
  */
-export async function settleToApprovedOn(inst: Instance, contractDid: string): Promise<void> {
-  await acceptOpenDecisionsOn(inst, contractDid)
+async function openNegotiateView(inst: Instance, contractDid: string): Promise<void> {
+  const submit = inst.page.getByTestId('submit-negotiation')
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
+    const mounted = await submit
+      .waitFor({ state: 'visible', timeout: 30_000 })
+      .then(() => true)
+      .catch(() => false)
+    if (mounted) return
+  }
+  await expect(submit, `negotiate view never mounted on ${inst.origin} for ${contractDid}`).toBeVisible({
+    timeout: 30_000,
+  })
+}
 
-  // Reload so the compare view that "Show" opened (which disables Submit) and
-  // the now-resolved decision clear, then submit the merged round
-  // (NEGOTIATION -> SUBMITTED) once Submit is enabled.
-  await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
-  const submit = inst.page.getByRole('button', { name: 'Submit', exact: true })
-  await expect(submit).toBeEnabled({ timeout: 30_000 })
-  const submitted = inst.page.waitForResponse(
-    (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
-    { timeout: 30_000 },
-  )
-  await submit.click()
-  await submitted
+/**
+ * Accepts every peer proposal this instance still owes a decision on
+ * (NegotiationList Show → Accept → /contract/respond) until none remain.
+ *
+ * Own proposals stay listed with Show/Withdraw and never offer Accept.
+ * Walking Show by index hit the newest (own) row first and waited for an
+ * Accept that is not rendered. Target the "Awaiting your decision" card
+ * instead, expand it, wait until Accept is enabled (sync drain), then
+ * complete respond — do not skip the Accept path.
+ */
+export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string): Promise<void> {
+  for (let round = 0; round < 10; round++) {
+    await openNegotiateView(inst, contractDid)
+    const proposalsTab = inst.page.getByRole('tab', { name: /proposals/i })
+    if (await proposalsTab.isVisible().catch(() => false)) {
+      await proposalsTab.click()
+    }
 
-  // Review: SUBMITTED -> REVIEWED.
-  await inst.gotoAs('Contract Reviewer', `/ui/contracts/review/${contractDid}`)
+    // Own proposals render "Your proposal" without an Accept path. Peer cards
+    // are every "Change proposal by" row that is not our own. Only cards with
+    // "Awaiting your decision" are Acceptable — after Accept the peer card
+    // stays listed (same formal version) without that badge. Do not treat
+    // "peer card present, no Awaiting" as a permanent wait (that hung
+    // acceptOpenDecisionsOn after a successful Accept). A short grace covers
+    // late list/DID paint;
+    // product already gates NegotiationList on localInstanceDid.
+    const proposalCards = inst.page.locator('li.list-row').filter({ hasText: 'Change proposal by:' })
+    const ownCards = proposalCards.filter({ hasText: 'Your proposal' })
+    const peerCards = proposalCards.filter({ hasNotText: 'Your proposal' })
+    const awaiting = inst.page.locator('li.list-row').filter({ hasText: 'Awaiting your decision' })
+    const submit = inst.page.getByTestId('submit-negotiation')
+    const refresh = inst.page.getByTestId('refresh-proposals')
+    await expect
+      .poll(
+        async () => {
+          if ((await awaiting.count()) > 0) return 'awaiting'
+          if (await submit.isEnabled().catch(() => false)) return 'settled'
+          if ((await ownCards.count()) > 0 && (await peerCards.count()) === 0) return 'settled'
+          if ((await peerCards.count()) > 0) return 'peer-idle'
+          return 'loading'
+        },
+        {
+          timeout: 90_000,
+          message: `${inst.origin} proposals list never settled on ${contractDid}`,
+        },
+      )
+      .not.toEqual('loading')
+
+    if ((await awaiting.count()) === 0) {
+      if ((await peerCards.count()) === 0) break
+      // Grace for a late Awaiting badge, then stop: remaining peer cards are
+      // already decided (or not ours to Accept). Submit's enablement gate
+      // still fails the suite if a real open decision was skipped.
+      await expect
+        .poll(
+          async () => {
+            if ((await awaiting.count()) > 0) return 'awaiting'
+            if (await refresh.isEnabled().catch(() => false)) {
+              await refresh.click().catch(() => undefined)
+            }
+            return 'peer-idle'
+          },
+          { timeout: 15_000 },
+        )
+        .toEqual('awaiting')
+        .catch(() => undefined)
+      if ((await awaiting.count()) === 0) break
+    }
+
+    const card = awaiting.first()
+    const showBtn = card.getByRole('button', { name: 'Show', exact: true })
+    if (await showBtn.isVisible().catch(() => false)) {
+      await showBtn.click()
+    }
+
+    const accept = card.getByTestId('accept-negotiation')
+    await expect(
+      accept,
+      `${inst.origin} opened a peer proposal on ${contractDid} but Accept never appeared`,
+    ).toBeVisible({ timeout: 30_000 })
+    // pending_negotiation_sync disables Accept until outbound ACK lands.
+    await expect(
+      accept,
+      `${inst.origin} Accept stayed disabled on ${contractDid} (negotiation sync still pending)`,
+    ).toBeEnabled({ timeout: 90_000 })
+
+    const responded = inst.page.waitForResponse(
+      (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST',
+      { timeout: 30_000 },
+    )
+    await accept.click()
+    await confirmModalOn(inst, 'Confirm')
+    const response = await responded
+    expect(
+      response.ok(),
+      `${inst.origin} Accept respond failed on ${contractDid}: HTTP ${response.status()} ${await response.text().catch(() => '')}`,
+    ).toBeTruthy()
+  }
+
+  await openNegotiateView(inst, contractDid)
+  const proposalsTab = inst.page.getByRole('tab', { name: /proposals/i })
+  if (await proposalsTab.isVisible().catch(() => false)) {
+    await proposalsTab.click()
+  }
+  await expect(
+    inst.page.locator('li.list-row').filter({ hasText: 'Awaiting your decision' }),
+    `${inst.origin} still has undecided peer proposals on ${contractDid} after Accept rounds`,
+  ).toHaveCount(0)
+}
+
+async function localContractState(inst: Instance, contractDid: string): Promise<string> {
+  const auth = await apiAuthHeaders(inst, 'Contract Manager', `/ui/contracts/view/${contractDid}`)
+  const resp = await inst.page.request.get(`${inst.apiBase}/contract/retrieve/${encodeURIComponent(contractDid)}`, {
+    headers: auth,
+  })
+  expect(
+    resp.ok(),
+    `retrieve ${contractDid} on ${inst.origin}: HTTP ${resp.status()} ${await resp.text()}`,
+  ).toBeTruthy()
+  return String(((await resp.json()) as { state?: string }).state ?? '').toUpperCase()
+}
+
+/**
+ * Accept open decisions, then Submit until SUBMITTED. That transition records
+ * and ships this instance's settlement. A Submit with accepted proposals may
+ * merge and stay NEGOTIATION; Submit review advances to SUBMITTED.
+ */
+export async function advanceToSubmittedOn(inst: Instance, contractDid: string): Promise<void> {
+  const before = await localContractState(inst, contractDid)
+  if (before === 'SUBMITTED' || before === 'REVIEWED' || before === 'APPROVED' || before === 'SIGNED') {
+    return
+  }
+
+  for (let round = 0; round < 5; round++) {
+    await acceptOpenDecisionsOn(inst, contractDid)
+
+    const submit = inst.page.getByTestId('submit-negotiation')
+    await expect(async () => {
+      await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
+      await expect(submit).toBeEnabled({ timeout: 10_000 })
+    }).toPass({
+      timeout: 120_000,
+      intervals: [2_000, 5_000, 10_000],
+    })
+    const submitted = inst.page.waitForResponse(
+      (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
+      { timeout: 30_000 },
+    )
+    await submit.click()
+    await submitted
+
+    let after = ''
+    await expect
+      .poll(
+        async () => {
+          after = await localContractState(inst, contractDid)
+          return after === 'SUBMITTED' || after === 'NEGOTIATION' ? after : 'other'
+        },
+        {
+          timeout: 30_000,
+          message: `${inst.origin} post-submit state for ${contractDid} never settled`,
+        },
+      )
+      .not.toEqual('other')
+    if (after === 'SUBMITTED') break
+    expect(
+      after,
+      `${inst.origin} submit round ${round + 1} on ${contractDid} left state ${after}; expected NEGOTIATION (merge) or SUBMITTED`,
+    ).toBe('NEGOTIATION')
+    if (round === 4) {
+      expect(after, `${inst.origin} never reached SUBMITTED for ${contractDid}`).toBe('SUBMITTED')
+    }
+  }
+}
+
+/** Reviewer Approve: SUBMITTED → REVIEWED. */
+export async function forwardReviewOn(inst: Instance, contractDid: string): Promise<void> {
+  const state = await localContractState(inst, contractDid)
+  if (state === 'REVIEWED' || state === 'APPROVED' || state === 'SIGNED') {
+    return
+  }
+  expect(state, `${inst.origin} forwardReview expected SUBMITTED for ${contractDid}`).toBe('SUBMITTED')
+
+  await openContractFromTaskTab(inst, 'Contract Reviewer', 'reviews', contractDid)
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/review\//)
   const forwarded = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
     { timeout: 30_000 },
   )
   await inst.page.getByRole('button', { name: 'Approve', exact: true }).click()
-  await confirmModalOn(inst, 'Submit')
+  await inst.page
+    .getByRole('dialog', { name: /local semantic precheck/i })
+    .getByRole('button', { name: 'Confirm approval', exact: true })
+    .click()
   await forwarded
+}
 
-  // Approve: REVIEWED -> APPROVED.
-  await inst.gotoAs('Contract Approver', `/ui/contracts/approve/${contractDid}`)
+/** Approver Approve: REVIEWED → APPROVED (peer settlement is a Sign gate, not Approve). */
+export async function approveWhenSettlementReadyOn(inst: Instance, contractDid: string): Promise<void> {
+  const state = await localContractState(inst, contractDid)
+  if (state === 'APPROVED' || state === 'SIGNED') {
+    return
+  }
+  expect(state, `${inst.origin} approve expected REVIEWED for ${contractDid}`).toBe('REVIEWED')
+
+  await openContractFromTaskTab(inst, 'Contract Approver', 'approvals', contractDid)
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/approve\//)
+  const approveBtn = inst.page.getByRole('button', { name: 'Approve', exact: true })
+  await expect(approveBtn).toBeEnabled({ timeout: 30_000 })
   const approved = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/approve') && r.request().method() === 'POST' && r.ok(),
     { timeout: 30_000 },
   )
-  await inst.page.getByRole('button', { name: 'Approve', exact: true }).click()
+  await approveBtn.click()
   await confirmModalOn(inst, 'Confirm')
   await approved
 }
 
 /**
- * Stage 9 — the Contract Manager deploys the fully-signed contract to the target
- * system through the real UI: the "Deploy" action in ContractManagerActions
- * (SIGNED -> ACTIVE, EventDeploy), gated on the Manager role and SIGNED state.
+ * Accept open decisions, then Submit / Submit review until SUBMITTED, then
+ * review → approve to APPROVED. A Submit with accepted proposals merges and
+ * stays NEGOTIATION; Submit review advances to SUBMITTED.
+ */
+export async function settleToApprovedOn(inst: Instance, contractDid: string): Promise<void> {
+  await advanceToSubmittedOn(inst, contractDid)
+  await forwardReviewOn(inst, contractDid)
+  await approveWhenSettlementReadyOn(inst, contractDid)
+}
+
+/**
+ * Contract Manager deploys a SIGNED contract (EventDeploy → ACTIVE).
  */
 export async function deployContract(inst: Instance, contractDid: string): Promise<void> {
-  await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
+  // The manager finds the signed contract in the list and opens it; a SIGNED
+  // contract carries no open task, so the row leads to the contract view where
+  // the Deploy action lives.
+  await openContractFromList(inst, 'Contract Manager', contractDid)
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/view\//)
+
+  // Picker is on Contract Details (v-show); Proposals may be the active tab.
+  const detailsTab = inst.page.getByRole('tab', { name: /contract details/i })
+  if (await detailsTab.isVisible().catch(() => false)) {
+    await detailsTab.click()
+  }
+
+  // A contract deploys to the target system it designates (ADR-25), so the
+  // manager picks one first. The registry is seeded by the chart
+  // (contractTargets in values.bdd.yml), so an entry is already there to pick.
+  // Wait for the picker itself before deciding: an isVisible() poll on a page
+  // that has not finished loading answers "no" and silently skips designation,
+  // which then surfaces as a deploy refusal further down.
+  await expect(inst.page.getByTestId('contract-target-picker')).toBeVisible({ timeout: 30_000 })
+  if (
+    await inst.page
+      .getByTestId('contract-target-unset')
+      .isVisible()
+      .catch(() => false)
+  ) {
+    // Index 0 is the "none" placeholder.
+    await inst.page.getByTestId('contract-target-select').selectOption({ index: 1 })
+    const designated = inst.page.waitForResponse(
+      (r) => r.url().includes('/contract/target/designate') && r.request().method() === 'POST',
+      { timeout: 30_000 },
+    )
+    await inst.page.getByTestId('contract-target-save').click()
+    const designateResponse = await designated
+    expect(
+      designateResponse.ok(),
+      `designate target on ${inst.origin}: HTTP ${designateResponse.status()}`,
+    ).toBeTruthy()
+    // reloadContract may re-select Proposals when history remains; Details holds the name.
+    if (await detailsTab.isVisible().catch(() => false)) {
+      await detailsTab.click()
+    }
+    await expect(inst.page.getByTestId('contract-target-name')).toBeVisible({ timeout: 15_000 })
+  }
+
   // Match ANY deploy response, then assert: filtering on r.ok() made a refusal
   // indistinguishable from no request at all.
   const deployed = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/deploy') && r.request().method() === 'POST',
     { timeout: 30_000 },
   )
-  await inst.page.getByRole('button', { name: 'Deploy', exact: true }).click()
+  await inst.page.getByTestId('deploy-contract').click()
   const deployResponse = await deployed
   expect(
     deployResponse.ok(),

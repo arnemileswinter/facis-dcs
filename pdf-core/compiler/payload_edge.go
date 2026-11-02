@@ -114,6 +114,7 @@ func (l *inProcessLoader) LoadDocument(u string) (*ld.RemoteDocument, error) {
 var dcsListProperties = map[string]bool{
 	dcsOntologyIRI + "blocks":  true,
 	dcsOntologyIRI + "content": true,
+	dcsOntologyIRI + "layout":  true,
 }
 
 // dcsListIRIProperties are DCS properties that are both ordered RDF lists
@@ -232,7 +233,25 @@ func ValidatePayloadSHACL(raw []byte) error {
 	if report.Conforms {
 		return nil
 	}
-	return &PayloadSHACLValidationError{Report: formatSHACLReport(report)}
+	return &PayloadSHACLValidationError{Report: formatSHACLReport(report) + payloadTypeDiagnostic(raw)}
+}
+
+// payloadTypeDiagnostic names the document's and its metadata node's @type in
+// a SHACL failure so a class-constraint report identifies the offending
+// payload shape without access to the payload itself.
+func payloadTypeDiagnostic(raw []byte) string {
+	var doc map[string]any
+	if json.Unmarshal(raw, &doc) != nil {
+		return ""
+	}
+	metaType := ""
+	for _, key := range []string{"dcs:metadata", "metadata"} {
+		if node, ok := doc[key].(map[string]any); ok {
+			metaType, _ = node["@type"].(string)
+			break
+		}
+	}
+	return fmt.Sprintf(" (document @type=%v, metadata @type=%q)", doc["@type"], metaType)
 }
 
 func formatSHACLReport(report shacl.ValidationReport) string {

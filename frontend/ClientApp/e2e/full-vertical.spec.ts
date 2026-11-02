@@ -1,7 +1,8 @@
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import type { Page } from '@playwright/test'
 import { type DcsRole, expect, test } from './dcs-test'
-import { signApprovedContractViaViewer } from './lifecycle-helpers'
+import { selectBilateralClauseRoles, selectOriginatorRole, signApprovedContractViaViewer } from './lifecycle-helpers'
+import type { Page } from '@playwright/test'
 
 /**
  * Full vertical: a component template with a semantic clause — human prose
@@ -26,6 +27,29 @@ async function gotoAs(page: Page, loginAs: LoginAs, role: DcsRole, url: string):
   await page.goto(url)
 }
 
+/**
+ * Navigates and waits for the control that proves the page arrived, reloading
+ * once if it does not. The runner hosts both DCS stacks and their
+ * port-forwards, and re-establishing one resets the browser's network stack
+ * mid-flight — the request dies rather than being slow, so nothing is pending
+ * and a longer timeout cannot help. Only re-issuing it can.
+ */
+async function gotoAsAndFind(
+  page: Page,
+  loginAs: LoginAs,
+  role: DcsRole,
+  url: string,
+  control: ReturnType<Page['getByRole']>,
+): Promise<void> {
+  await gotoAs(page, loginAs, role, url)
+  try {
+    await expect(control).toBeVisible({ timeout: 20_000 })
+  } catch {
+    await page.reload()
+    await expect(control).toBeVisible({ timeout: 20_000 })
+  }
+}
+
 /** Confirms the shared ConfirmationModal (comment/decision-note dialogs). */
 async function confirmModal(page: Page, buttonName: 'Submit' | 'Confirm'): Promise<void> {
   const dialog = page.getByRole('dialog').filter({ hasText: 'Confirmation' })
@@ -39,16 +63,31 @@ async function confirmModal(page: Page, buttonName: 'Submit' | 'Confirm'): Promi
 async function completeParticipantDialog(page: Page): Promise<void> {
   const dialog = page.getByRole('dialog').filter({ hasText: 'Contract Counterparty' })
   await expect(dialog).toBeVisible()
+  await selectOriginatorRole(dialog)
   await dialog.getByRole('button', { name: 'Apply', exact: true }).click()
 }
 
-/** Waits until the template detail view finished loading (name populated). */
+/**
+ * Waits until the template detail view finished loading (name populated).
+ *
+ * Reloads rather than waiting longer. The runner hosts both DCS stacks and
+ * their port-forwards, and re-establishing one resets the browser's network
+ * stack: the trace of the last failure carries 36 net::ERR_NETWORK_CHANGED and
+ * not one HTTP status. The view's load request dies in flight, so nothing is
+ * pending and no timeout can help — the fetch has to be issued again. A longer
+ * timeout was tried first and still failed.
+ */
 async function waitForTemplateLoaded(page: Page, name: string): Promise<void> {
-  // The default 15s is tight while the e2e runner also hosts the second DCS
-  // stack — this step was flaky, passing only on retry.
-  await expect(page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox')).toHaveValue(name, {
-    timeout: 45_000,
-  })
+  const field = page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox')
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await expect(field).toHaveValue(name, { timeout: 20_000 })
+      return
+    } catch {
+      await page.reload()
+    }
+  }
+  await expect(field).toHaveValue(name, { timeout: 20_000 })
 }
 
 /**
@@ -89,19 +128,17 @@ async function submitReviewApproveTemplate(page: Page, loginAs: LoginAs, did: st
     await gotoAs(page, loginAs, 'Template Reviewer', `/ui/templates/review/${did}`)
     await waitForTemplateLoaded(page, name)
     await assertPdfExport(page, 'template', did, `${name} REVIEWED (in review)`)
-    // The backend accepts the reviewer recommendation only after a
-    // verification run — the Verify dialog is part of the review flow.
+    // Approve performs the mandatory verification before it offers the
+    // forwarding confirmation.
     const verified = page.waitForResponse(
       (r) => r.url().includes('/template/verify') && r.request().method() === 'POST' && r.ok(),
     )
-    await page.getByRole('button', { name: 'Verify', exact: true }).click()
-    await verified
-    await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click()
     const forwarded = page.waitForResponse(
       (r) => r.url().includes('/template/submit') && r.request().method() === 'POST' && r.ok(),
     )
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
-    await confirmModal(page, 'Submit')
+    await verified
+    await page.getByRole('dialog').getByRole('button', { name: 'Confirm approval', exact: true }).click()
     await forwarded
   })
 
@@ -119,7 +156,8 @@ async function submitReviewApproveTemplate(page: Page, loginAs: LoginAs, did: st
 }
 
 test('full vertical through the real UI', async ({ page, loginAs }) => {
-  test.setTimeout(600_000)
+  // DCS-FR-UC-04-1
+  test.setTimeout(90_000)
   page.setDefaultTimeout(15_000)
 
   const unique = Date.now()
@@ -132,6 +170,7 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
     await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
 
     await page.getByRole('button', { name: /Component/ }).click()
+    await page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
     await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(componentName)
     // An empty description is a verification finding at review time.
     await page
@@ -162,12 +201,13 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
     // field carries no value yet (the contract fills it), so a permission's
     // constraint is informational — an obligation would error as "value not
     // provided" and block create.
-    await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+    await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
     await ruleSelect('Action').selectOption({ label: 'use' })
+    await selectBilateralClauseRoles(editor)
     await editor.getByRole('button', { name: '+ constraint' }).click()
     const constraint = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
     await constraint.locator('select').nth(0).selectOption({ label: 'Payment Amount' })
-    await constraint.locator('select').nth(1).selectOption({ label: 'must be at most' })
+    await constraint.locator('select').nth(1).selectOption({ label: 'less than or equal to' })
     await constraint.locator('input[placeholder="value"]').fill('500')
 
     await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
@@ -195,8 +235,11 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
   // ---- Stage 3: Contract Template composing the approved component ----
   let contractTemplateDid = ''
   await test.step('create contract template from approved component', async () => {
-    await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
-    await page.getByRole('button', { name: /parent for other contracts/ }).click()
+    // DCS-FR-TR-25
+    const parentChoice = page.getByRole('button', { name: /parent for other contracts/ })
+    await gotoAsAndFind(page, loginAs, 'Template Creator', '/ui/templates/new', parentChoice)
+    await parentChoice.click()
+    await page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
     await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(contractTemplateName)
     await page
       .getByRole('group')
@@ -233,12 +276,17 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
       (r) => r.url().includes('/template/register') && r.request().method() === 'POST' && r.ok(),
     )
     await page.getByRole('button', { name: 'Register', exact: true }).click()
+    // Register goes through the shared ConfirmationModal ("Proceed with
+    // registration?") before it actually submits — the click above only
+    // opens it.
+    await page.getByRole('button', { name: 'Confirm', exact: true }).click()
     await registered
   })
 
   // ---- Stage 5: Contract Creator derives a contract ----
   let contractDid = ''
   await test.step('create contract from registered template', async () => {
+    // DCS-IR-CWE-01 (step-title/comment citation)
     await gotoAs(page, loginAs, 'Contract Creator', '/ui/contracts/new')
     // The template picker is a plain <select> with "Version {n} - {name}" options.
     const picker = page.locator('select').first()
@@ -311,7 +359,7 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
     const accepted = page.waitForResponse(
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
     )
-    await page.getByRole('button', { name: 'Submit', exact: true }).click()
+    await page.getByTestId('submit-negotiation').click()
     await accepted
     await assertPdfExport(page, 'contract', contractDid, 'contract in negotiation')
   })
@@ -322,7 +370,10 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
     )
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
-    await confirmModal(page, 'Submit')
+    await page
+      .getByRole('dialog', { name: /local semantic precheck/i })
+      .getByRole('button', { name: 'Confirm approval', exact: true })
+      .click()
     await forwarded
     await assertPdfExport(page, 'contract', contractDid, 'contract REVIEWED')
   })
@@ -340,6 +391,7 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
   // ---- Stage 8: signing through the Secure Contract Viewer, wallet leg over
   // its own channel (ADR-12) ----
   await test.step('sign contract', async () => {
+    // DCS-FR-SM-23
     await signApprovedContractViaViewer(page, loginAs, contractDid)
   })
 
@@ -354,13 +406,42 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
     // so give it a realistic window.
     const pdfDownload = page.waitForEvent('download', { timeout: 90_000 })
     await page.getByRole('button', { name: 'Export PDF' }).click()
-    const pdfBytes = readFileSync((await (await pdfDownload).path())!)
+    const pdfBytes = readFileSync(await (await pdfDownload).path())
     expect(pdfBytes.subarray(0, 5).toString('latin1')).toBe('%PDF-')
 
     const bundleDownload = page.waitForEvent('download', { timeout: 90_000 })
     await page.getByRole('button', { name: 'Export bundle' }).click()
-    const bundleBytes = readFileSync((await (await bundleDownload).path())!)
+    const bundlePath = await (await bundleDownload).path()
+    const bundleBytes = readFileSync(bundlePath)
     expect(bundleBytes.subarray(0, 2).toString('latin1')).toBe('PK')
+
+    // The bundle must carry the contract's business data, not just a
+    // well-formed zip. contract.jsonld is the stored payload verbatim, so the
+    // negotiated value has to be in it: a bundle that exports an empty
+    // contract would satisfy every other check here.
+    const contractJsonld = JSON.parse(
+      execFileSync('python3', [
+        '-c',
+        'import sys,zipfile;print(zipfile.ZipFile(sys.argv[1]).read("contract.jsonld").decode())',
+        bundlePath,
+      ]).toString(),
+    ) as {
+      'dcs:contractFields'?: { 'dcs:label'?: string; 'dcs:value'?: unknown }[]
+      'dcs:contractData'?: unknown[]
+    }
+
+    const amount = (contractJsonld['dcs:contractFields'] ?? []).find((f) => /amount/i.test(f['dcs:label'] ?? ''))
+    expect(amount, 'the exported payload declares the negotiated field').toBeTruthy()
+    expect(amount!['dcs:value'], 'and carries the value that was agreed').toEqual({
+      '@value': '250',
+      '@type': 'xsd:decimal',
+    })
+
+    // Empty is correct here and worth pinning: dcs:contractData holds typed
+    // domain object graphs, and a negotiated scalar's one home is the field
+    // itself (ADR-23). An export that started putting scalars here instead
+    // would mean the value had two homes.
+    expect(Array.isArray(contractJsonld['dcs:contractData'] ?? []), 'contractData is a graph, absent here').toBe(true)
   })
 
   // ---- Stage 10: Auditor runs a scoped audit over the contract ----

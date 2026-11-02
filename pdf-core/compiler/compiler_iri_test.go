@@ -67,14 +67,14 @@ func TestPayloadWithExplicitPrefixCompiles(t *testing.T) {
 		},
 		"dcs:documentStructure": {
 			"@type": "dcs:DocumentStructure",
-			"dcs:layout": [
-				{"@type": "dcs:LayoutNode", "dcs:isRoot": true, "dcs:children": ["urn:doc:prefix-iri#s1"]},
-				{"@type": "dcs:LayoutNode", "@id": "urn:doc:prefix-iri#s1", "dcs:children": ["urn:doc:prefix-iri#c1"]}
-			],
-			"dcs:blocks": [
+			"dcs:layout": {"@list": [
+				{"@type": "dcs:LayoutNode", "dcs:isRoot": true, "dcs:children": {"@list": [{"@id": "urn:doc:prefix-iri#s1"}]}},
+				{"@type": "dcs:LayoutNode", "@id": "urn:doc:prefix-iri#s1", "dcs:children": {"@list": [{"@id": "urn:doc:prefix-iri#c1"}]}}
+			]},
+			"dcs:blocks": {"@list": [
 				{"@type": "dcs:Section", "@id": "urn:doc:prefix-iri#s1", "dcs:title": "Explicit Heading"},
-				{"@type": "dcs:Clause", "@id": "urn:doc:prefix-iri#c1", "dcs:content": ["Explicit clause."]}
-			]
+				{"@type": "dcs:Clause", "@id": "urn:doc:prefix-iri#c1", "dcs:content": {"@list": ["Explicit clause."]}}
+			]}
 		}
 	}`)
 	doc := mustExtractFromPayload(t, payload)

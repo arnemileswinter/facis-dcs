@@ -1,3 +1,4 @@
+import { ExtrinsicLifecycle } from '@/types/extrinsic-lifecycle'
 import type { ContractState } from '@/types/contract-state'
 import type { ContractTemplateState } from '@/types/contract-template-state'
 import type { TemplateType } from '@/types/template-type'
@@ -41,7 +42,7 @@ const TEMPLATE_STEPS: StoryStep[] = [
 ]
 
 const COMPONENT_NOTE =
-  'This is a Component — it is composed into Contract Templates and cannot be instantiated directly.'
+  'This Component can be added to Contract Templates but cannot be used to create contracts directly.'
 
 export function templateStory(
   state: ContractTemplateState | null | undefined,
@@ -67,8 +68,8 @@ export function templateStory(
         'DRAFT',
         'This template is a draft',
         opts?.isEditableView
-          ? "Complete the template's content — sections, clauses, placeholders and typed clauses from the Semantic Hub — then submit it for review. (Template Creator)"
-          : 'The Template Creator completes the content — sections, clauses, placeholders and typed clauses from the Semantic Hub — and submits it for review.',
+          ? "Complete the template's content, including sections, clauses, placeholders and typed clauses from the Semantic Hub, then submit it for review. (Template Creator)"
+          : 'The Template Creator completes the content, including sections, clauses, placeholders and typed clauses from the Semantic Hub, and submits it for review.',
       )
     case 'SUBMITTED':
       return story(
@@ -89,8 +90,8 @@ export function templateStory(
         'APPROVED',
         'This template is approved',
         isComponent
-          ? `Approved — one step left: a Template Manager registers it in the Template Catalogue. ${COMPONENT_NOTE}`
-          : 'Approved — one step left: a Template Manager registers it in the Template Catalogue; only registered templates can be used to create contracts.',
+          ? `Approved. ${COMPONENT_NOTE}`
+          : 'Approved. A Template Manager can now register it in the Template Catalogue so Contract Creators can use it to create contracts.',
         [{ label: 'Open Template Catalogue', routeName: 'template.catalogues.list' }],
       )
     case 'REJECTED':
@@ -105,13 +106,13 @@ export function templateStory(
       return story(
         'DEPRECATED',
         'This template is deprecated',
-        'Deprecated — new contracts can no longer be created from it; existing contracts are unaffected.',
+        'Deprecated. New contracts can no longer be created from it, but existing contracts are unaffected.',
       )
     case 'DELETED':
       return story(
         'DELETED',
         'This template was deleted',
-        'Deleted — it is no longer part of the working repository. Its history remains in the tamper-proof audit trail.',
+        'Deleted. It is no longer part of the working repository. Its history remains in the tamper-evident audit trail.',
       )
     case 'REGISTERED':
       return story(
@@ -119,7 +120,7 @@ export function templateStory(
         'This template is registered in the catalogue',
         isComponent
           ? `Registered in the catalogue. ${COMPONENT_NOTE}`
-          : 'Registered in the catalogue — Contract Creators can now create contracts from it.',
+          : 'Registered in the catalogue. Contract Creators can now create contracts from it.',
         isComponent
           ? [{ label: 'Open Template Catalogue', routeName: 'template.catalogues.list' }]
           : [{ label: 'Create a contract', routeName: 'contracts.new' }],
@@ -129,8 +130,8 @@ export function templateStory(
         'IN_USE',
         'This template is published in the catalogue',
         isComponent
-          ? `Published in the federated catalogue — discoverable by other participants. ${COMPONENT_NOTE}`
-          : 'Published in the federated catalogue — discoverable by other participants, and Contract Creators can now create contracts from it.',
+          ? `Published in the federated catalogue and discoverable by other participants. ${COMPONENT_NOTE}`
+          : 'Published in the federated catalogue and discoverable by other participants. Contract Creators can now create contracts from it.',
         isComponent
           ? [{ label: 'Open Template Catalogue', routeName: 'template.catalogues.list' }]
           : [{ label: 'Create a contract', routeName: 'contracts.new' }],
@@ -153,7 +154,10 @@ const CONTRACT_STEPS: StoryStep[] = [
   { key: 'ACTIVE', label: 'Active' },
 ]
 
-export function contractStory(state: ContractState | null | undefined): WorkflowStory {
+export function contractStory(
+  state: ContractState | null | undefined,
+  opts?: { extrinsicLifecycle?: string | null },
+): WorkflowStory {
   const story = (
     currentKey: string,
     headline: string,
@@ -172,7 +176,7 @@ export function contractStory(state: ContractState | null | undefined): Workflow
       return story(
         'DRAFT',
         'This contract is a draft',
-        'Fill in the required values under Contract Content — placeholders and typed clauses carry the machine-readable terms — then submit for review. (Contract Creator)',
+        'Fill in the required values under Contract Content. Placeholders and typed clauses carry the machine-readable terms. Then submit for review. (Contract Creator)',
       )
     case 'OFFERED':
       return story(
@@ -185,7 +189,7 @@ export function contractStory(state: ContractState | null | undefined): Workflow
       return story(
         'NEGOTIATION',
         'This contract is in negotiation',
-        'The counterparty proposed changes. Compare versions and respond under Negotiation Tasks. Each accepted adjustment creates a new version of the same contract.',
+        'The counterparty proposed changes. Compare proposals and respond under Negotiation Tasks. Accepted proposals stay pending until Submit merges them into a new formal version.',
         [{ label: 'Open Negotiation Tasks', routeName: 'tasks.negotiations' }],
       )
     case 'SUBMITTED':
@@ -210,10 +214,21 @@ export function contractStory(state: ContractState | null | undefined): Workflow
         [{ label: 'Open Signing', routeName: 'signing.list' }],
       )
     case 'SIGNED':
+      // SIGNED is reached on the FIRST signature, so it says nothing about the
+      // counterparty. Whether the agreement is executed is the backend's
+      // extrinsic lifecycle, which checks every declared signature field
+      // (ADR-13, DCS-FR-SM-10). Without that signal, say only what is certain.
+      if (opts?.extrinsicLifecycle === ExtrinsicLifecycle.executed) {
+        return story(
+          'SIGNED',
+          'This contract is signed',
+          'All signatures are applied, so the contract is executed. It is archived with its signature evidence and C2PA-provenanced PDF.',
+        )
+      }
       return story(
         'SIGNED',
         'This contract is signed',
-        'All signatures are applied — the contract is executed. It is archived with its signature evidence and C2PA-provenanced PDF.',
+        'Your signature is applied and archived with its signature evidence and C2PA-provenanced PDF. The contract becomes executed once every declared signatory has signed.',
       )
     case 'ACTIVE':
       return story(
@@ -225,7 +240,7 @@ export function contractStory(state: ContractState | null | undefined): Workflow
       return story(
         'REJECTED',
         'This contract was rejected',
-        'It was returned with findings. Address the comments, adjust the values under Contract Content and resubmit. (Contract Creator)',
+        'Approval returned it with findings. Review the audit trail, then reopen negotiation to continue the round without rewriting the formal document here. (Contract Creator)',
       )
     case 'WITHDRAWN':
       return story(
@@ -237,19 +252,19 @@ export function contractStory(state: ContractState | null | undefined): Workflow
       return story(
         'REVOKED',
         'This contract was revoked',
-        'Revoked after signing — it is no longer in force. The revocation is recorded in the audit trail and reflected in the C2PA status of the PDF.',
+        'Revoked after signing. It is no longer in force. The revocation is recorded in the audit trail, in the status list, and in a suspended lifecycle manifest appended to the signed PDF.',
       )
     case 'TERMINATED':
       return story(
         'TERMINATED',
         'This contract is terminated',
-        'Terminated before its natural expiry — it is no longer in force. Its full history remains archived and auditable.',
+        'Terminated before its natural expiry. It is no longer in force. Its full history remains archived and auditable.',
       )
     case 'EXPIRED':
       return story(
         'EXPIRED',
         'This contract has expired',
-        'It reached the end of its agreed term. It remains archived with its complete, tamper-proof audit trail.',
+        'It reached the end of its agreed term. It remains archived with its complete, tamper-evident audit trail.',
       )
     default:
       return story(

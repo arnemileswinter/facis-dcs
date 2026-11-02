@@ -1,11 +1,32 @@
-import type { Page } from '@playwright/test'
 import { type DcsRole, expect, test } from './dcs-test'
+import type { Page } from '@playwright/test'
 
 type LoginAs = (role: DcsRole) => Promise<void>
 
 async function gotoAs(page: Page, loginAs: LoginAs, role: DcsRole, url: string): Promise<void> {
   await loginAs(role)
   await page.goto(url)
+}
+
+async function fillRequiredTemplateDetails(page: Page, name: string): Promise<void> {
+  await page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
+  await page.getByTestId('template-global-name').fill(name)
+  await page.getByTestId('template-base-description').fill('Playwright clause-editor fixture.')
+}
+
+async function selectBilateralRoles(editor: ReturnType<Page['getByTestId']>): Promise<void> {
+  const roleSelect = (label: string) =>
+    editor.locator('label.form-control').filter({ hasText: label }).locator('select')
+  const assigner = roleSelect('Granted by')
+  const assignee = roleSelect('Applies to')
+  const values = await assigner
+    .locator('option:not([disabled])')
+    .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value).filter(Boolean))
+  expect(values.length, 'the role catalog exposes a bilateral choice').toBeGreaterThanOrEqual(2)
+  const [assignerRole, assigneeRole] = values
+  if (!assignerRole || !assigneeRole) throw new Error('the role catalog does not expose two roles')
+  await assigner.selectOption(assignerRole)
+  await assignee.selectOption(assigneeRole)
 }
 
 interface Ref {
@@ -24,7 +45,7 @@ interface Rule {
 }
 interface TemplateData {
   'dcs:policies': { 'odrl:permission'?: Rule[] }
-  'dcs:contractData': { '@id': string }[]
+  'dcs:contractFields': { '@id': string }[]
   'dcs:documentStructure': { 'dcs:blocks': { '@list': { 'dcs:title'?: string }[] } }
 }
 
@@ -40,7 +61,7 @@ test('an exhaustive access-grant template lets the Appendix C policy be negotiat
 
   await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
   await page.getByRole('button', { name: /Component/ }).click()
-  await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(`FV Access ${Date.now()}`)
+  await fillRequiredTemplateDetails(page, `FV Access ${Date.now()}`)
   await page.getByRole('tab', { name: /Clauses/ }).click()
 
   const editor = page.getByTestId('split-clause-editor')
@@ -59,9 +80,21 @@ test('an exhaustive access-grant template lets the Appendix C policy be negotiat
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
-  await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+  await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
-  await ruleSelect('Applies to').selectOption({ label: 'The counterparty' })
+  // Party roles are supplied by the Semantic Hub catalog. Pick two distinct
+  // enabled catalog entries without coupling this test to a particular role
+  // vocabulary or its ordering labels.
+  const assigner = ruleSelect('Granted by')
+  const assignee = ruleSelect('Applies to')
+  const partyRoleValues = await assigner
+    .locator('option:not([disabled])')
+    .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value).filter(Boolean))
+  expect(partyRoleValues.length, 'the role catalog exposes a bilateral choice').toBeGreaterThanOrEqual(2)
+  const [assignerRole, assigneeRole] = partyRoleValues
+  if (!assignerRole || !assigneeRole) throw new Error('the role catalog does not expose two roles')
+  await assigner.selectOption(assignerRole)
+  await assignee.selectOption(assigneeRole)
   // The target is the accessed asset — a declared object, not the contract.
   await ruleSelect('Toward').selectOption({ label: 'Service Description' })
 
@@ -74,8 +107,8 @@ test('an exhaustive access-grant template lets the Appendix C policy be negotiat
     await row.locator('select').nth(1).selectOption({ label: operator })
     await row.locator('select').nth(2).selectOption({ index: boundaryIndex })
   }
-  await addContext('access region (spatial)', 'must equal', 1)
-  await addContext('access time (dateTime)', 'must be at most', 2)
+  await addContext('access region (spatial)', 'equal to', 1)
+  await addContext('access time (dateTime)', 'less than or equal to', 2)
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
   await expect(editor.getByPlaceholder('Clause title')).toHaveValue('')
@@ -89,9 +122,9 @@ test('an exhaustive access-grant template lets the Appendix C policy be negotiat
     'prose block persisted',
   ).toBeTruthy()
 
-  // The two boundaries are declared as fillable typed placeholders.
-  const fieldIds = new Set(doc['dcs:contractData'].map((ph) => ph['@id']))
-  expect(fieldIds.size, 'two negotiated placeholders declared').toBeGreaterThanOrEqual(2)
+  // The two boundaries are declared as fillable typed contract fields.
+  const fieldIds = new Set(doc['dcs:contractFields'].map((field) => field['@id']))
+  expect(fieldIds.size, 'two negotiated fields declared').toBeGreaterThanOrEqual(2)
 
   // The Permission's spatial + temporal constraints reference those fields as
   // their boundaries — resolved to the filled values at negotiation.
@@ -129,7 +162,7 @@ test('the builder emits a logical (or) constraint when constraints are combined 
   page.setDefaultTimeout(15_000)
   await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
   await page.getByRole('button', { name: /Component/ }).click()
-  await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(`FV Logical ${Date.now()}`)
+  await fillRequiredTemplateDetails(page, `FV Logical ${Date.now()}`)
   await page.getByRole('tab', { name: /Clauses/ }).click()
 
   const editor = page.getByTestId('split-clause-editor')
@@ -139,18 +172,19 @@ test('the builder emits a logical (or) constraint when constraints are combined 
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
-  await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+  await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
+  await selectBilateralRoles(editor)
 
   const addSpatial = async (value: string) => {
     await editor.getByRole('button', { name: '+ constraint' }).click()
     const row = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
     await row.locator('select').nth(0).selectOption({ label: 'access region (spatial)' })
-    await row.locator('select').nth(1).selectOption({ label: 'must equal' })
-    await row.locator('input[placeholder="value"]').fill(value)
+    await row.locator('select').nth(1).selectOption({ label: 'equal to' })
+    await row.locator('select').nth(3).selectOption({ label: value })
   }
-  await addSpatial('DE')
-  await addSpatial('FR')
+  await addSpatial('Germany (DEU)')
+  await addSpatial('Austria (AUT)')
   await editor.locator('select[title="How the constraints combine"]').selectOption('or')
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
@@ -174,7 +208,7 @@ test('a Permission can carry a nested duty the assignee must fulfil', async ({ p
   page.setDefaultTimeout(15_000)
   await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
   await page.getByRole('button', { name: /Component/ }).click()
-  await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(`FV Duty ${Date.now()}`)
+  await fillRequiredTemplateDetails(page, `FV Duty ${Date.now()}`)
   await page.getByRole('tab', { name: /Clauses/ }).click()
 
   const editor = page.getByTestId('split-clause-editor')
@@ -184,8 +218,9 @@ test('a Permission can carry a nested duty the assignee must fulfil', async ({ p
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
-  await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+  await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
+  await selectBilateralRoles(editor)
 
   // Attach a duty: the assignee MUST delete, bounded by two of the duty's own
   // constraints combined with ANY — a duty is as expressive as a rule.
@@ -196,11 +231,11 @@ test('a Permission can carry a nested duty the assignee must fulfil', async ({ p
     await duty.getByRole('button', { name: '+ constraint' }).click()
     const row = duty.locator('.flex.flex-wrap.items-center.gap-1').last()
     await row.locator('select').nth(0).selectOption({ label: 'access region (spatial)' })
-    await row.locator('select').nth(1).selectOption({ label: 'must equal' })
-    await row.locator('input[placeholder="value"]').fill(value)
+    await row.locator('select').nth(1).selectOption({ label: 'equal to' })
+    await row.locator('select').nth(3).selectOption({ label: value })
   }
-  await addDutyRegion('DE')
-  await addDutyRegion('FR')
+  await addDutyRegion('Germany (DEU)')
+  await addDutyRegion('Austria (AUT)')
   await duty.locator('select[title="How the duty\'s constraints combine"]').selectOption('or')
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
@@ -209,8 +244,10 @@ test('a Permission can carry a nested duty the assignee must fulfil', async ({ p
   const doc = (await created).postDataJSON().template_data as {
     'dcs:policies': {
       'odrl:permission'?: {
+        'dcs:prose': { '@id': string }
         'odrl:duty'?: {
           '@type': string
+          'dcs:prose'?: { '@id': string }
           'odrl:action': { '@id': string }
           'odrl:constraint'?: { '@type': string; 'odrl:or'?: { '@list': unknown[] } }[]
         }[]
@@ -222,6 +259,12 @@ test('a Permission can carry a nested duty the assignee must fulfil', async ({ p
   const duties = permission?.['odrl:duty'] ?? []
   expect(duties.length, 'one duty attached to the permission').toBe(1)
   expect(duties[0]?.['@type']).toBe('odrl:Duty')
+  // A nested duty is an odrl:Duty like any other, so the hub shapes demand the
+  // prose it is backed by: the clause it was authored in, the same block its
+  // permission cites. Without it the template is refused at submit.
+  expect(duties[0]?.['dcs:prose']?.['@id'], 'the duty is backed by the clause it was authored in').toBe(
+    permission?.['dcs:prose']['@id'],
+  )
   expect(duties[0]?.['odrl:action']['@id'], 'the duty action').toBe('odrl:delete')
   // The duty's two constraints combined into a single logical (or) node.
   const dutyConstraints = duties[0]?.['odrl:constraint'] ?? []
@@ -237,7 +280,7 @@ test('the builder authors a nested constraint tree (and over an or-group)', asyn
   page.setDefaultTimeout(15_000)
   await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
   await page.getByRole('button', { name: /Component/ }).click()
-  await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(`FV Tree ${Date.now()}`)
+  await fillRequiredTemplateDetails(page, `FV Tree ${Date.now()}`)
   await page.getByRole('tab', { name: /Clauses/ }).click()
 
   const editor = page.getByTestId('split-clause-editor')
@@ -247,16 +290,17 @@ test('the builder authors a nested constraint tree (and over an or-group)', asyn
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
-  await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+  await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
+  await selectBilateralRoles(editor)
 
   // A top-level atomic constraint (purpose), then a nested group of two spatial
   // constraints combined with ANY — while the top level stays ALL.
   await editor.getByRole('button', { name: '+ constraint' }).click()
   const topRow = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
   await topRow.locator('select').nth(0).selectOption({ label: 'purpose' })
-  await topRow.locator('select').nth(1).selectOption({ label: 'must equal' })
-  await topRow.locator('input[placeholder="value"]').fill('research')
+  await topRow.locator('select').nth(1).selectOption({ label: 'equal to' })
+  await topRow.locator('select').nth(3).selectOption({ label: 'Research (RESEARCH)' })
 
   await editor.getByRole('button', { name: '+ group' }).click()
   const group = editor.locator('.border-dashed').last()
@@ -264,11 +308,11 @@ test('the builder authors a nested constraint tree (and over an or-group)', asyn
     await group.getByRole('button', { name: '+ constraint' }).click()
     const row = group.locator('.flex.flex-wrap.items-center.gap-1').last()
     await row.locator('select').nth(0).selectOption({ label: 'access region (spatial)' })
-    await row.locator('select').nth(1).selectOption({ label: 'must equal' })
-    await row.locator('input[placeholder="value"]').fill(value)
+    await row.locator('select').nth(1).selectOption({ label: 'equal to' })
+    await row.locator('select').nth(3).selectOption({ label: value })
   }
-  await addGroupRegion('DE')
-  await addGroupRegion('FR')
+  await addGroupRegion('Germany (DEU)')
+  await addGroupRegion('Austria (AUT)')
   await group.locator('select[title="How this group combines"]').selectOption('or')
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
@@ -301,7 +345,7 @@ test('a duty can carry a consequence duty', async ({ page, loginAs }) => {
   page.setDefaultTimeout(15_000)
   await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
   await page.getByRole('button', { name: /Component/ }).click()
-  await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(`FV Conseq ${Date.now()}`)
+  await fillRequiredTemplateDetails(page, `FV Conseq ${Date.now()}`)
   await page.getByRole('tab', { name: /Clauses/ }).click()
 
   const editor = page.getByTestId('split-clause-editor')
@@ -311,8 +355,9 @@ test('a duty can carry a consequence duty', async ({ page, loginAs }) => {
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
-  await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+  await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
+  await selectBilateralRoles(editor)
 
   await editor.getByRole('button', { name: '+ duty' }).click()
   const duty = editor.getByTestId('odrl-duty').last()
@@ -327,18 +372,24 @@ test('a duty can carry a consequence duty', async ({ page, loginAs }) => {
   const doc = (await created).postDataJSON().template_data as {
     'dcs:policies': {
       'odrl:permission'?: {
+        'dcs:prose': { '@id': string }
         'odrl:duty'?: {
           'odrl:action': { '@id': string }
-          'odrl:consequence'?: { '@type': string; 'odrl:action': { '@id': string } }[]
+          'odrl:consequence'?: { '@type': string; 'dcs:prose'?: { '@id': string }; 'odrl:action': { '@id': string } }[]
         }[]
       }[]
     }
   }
 
-  const duties = (doc['dcs:policies']['odrl:permission'] ?? [])[0]?.['odrl:duty'] ?? []
+  const permission = (doc['dcs:policies']['odrl:permission'] ?? [])[0]
+  const duties = permission?.['odrl:duty'] ?? []
   expect(duties[0]?.['odrl:action']['@id'], 'the duty action').toBe('odrl:delete')
   const consequences = duties[0]?.['odrl:consequence'] ?? []
   expect(consequences.length, 'one consequence duty').toBe(1)
   expect(consequences[0]?.['@type']).toBe('odrl:Duty')
   expect(consequences[0]?.['odrl:action']['@id'], 'the consequence action').toBe('odrl:display')
+  // A consequence is a Duty too, so it owes prose as well.
+  expect(consequences[0]?.['dcs:prose']?.['@id'], 'the consequence is backed by the same clause').toBe(
+    permission?.['dcs:prose']['@id'],
+  )
 })

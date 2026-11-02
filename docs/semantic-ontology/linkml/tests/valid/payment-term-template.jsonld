@@ -6,12 +6,12 @@
     },
     "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3",
     "@type": "dcs:ContractTemplate",
-    "dcs:contractData": [
+    "dcs:contractFields": [
         {
             "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#field-contract.payment.amount",
-            "@type": "dcs:Placeholder",
+            "@type": "dcs:ContractField",
             "dcs:label": "Payment Amount",
-            "dcs:datatype": "xsd:decimal",
+            "dcs:datatype": "xsd:decimal", "dcs:required": true,
             "dcs:shape": {
                 "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-payment-amount"
             },
@@ -20,9 +20,9 @@
         },
         {
             "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#field-contract.payment.currency",
-            "@type": "dcs:Placeholder",
+            "@type": "dcs:ContractField",
             "dcs:label": "Payment Currency",
-            "dcs:datatype": "xsd:string",
+            "dcs:datatype": "xsd:string", "dcs:required": true,
             "dcs:shape": {
                 "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-payment-currency"
             },
@@ -30,9 +30,9 @@
         },
         {
             "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#field-contract.payment.dueDate",
-            "@type": "dcs:Placeholder",
+            "@type": "dcs:ContractField",
             "dcs:label": "Payment Due Date",
-            "dcs:datatype": "xsd:date",
+            "dcs:datatype": "xsd:date", "dcs:required": true,
             "dcs:shape": {
                 "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-payment-dueDate"
             },
@@ -40,9 +40,9 @@
         },
         {
             "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#field-contract.payment.dueDays",
-            "@type": "dcs:Placeholder",
+            "@type": "dcs:ContractField",
             "dcs:label": "Payment Due Days",
-            "dcs:datatype": "xsd:integer",
+            "dcs:datatype": "xsd:integer", "dcs:required": true,
             "dcs:shape": {
                 "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-payment-dueDays"
             },

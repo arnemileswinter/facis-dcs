@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { ref, useId } from 'vue'
+import { computed, ref, useId } from 'vue'
+import { setSigningDeadline, setSigningOrder, signatureFieldNames, signingWorkflow } from '@/utils/signing-workflow'
 import type { Contract } from '@/models/contract/contract'
 
-defineProps<{
+const props = defineProps<{
   disabled?: boolean
+  nameError?: string
+  descriptionError?: string
 }>()
 
 const contract = defineModel<Contract>('contract', { required: true })
@@ -22,17 +25,80 @@ const expirationPolicies = [
 interface ContractDetailData {
   name?: string
   description?: string
+  start_date?: string
+  exp_date?: string
   exp_notice_period?: string
   exp_policy?: string
 }
 
 const nameId = useId()
 const descriptionId = useId()
+const nameErrorId = useId()
+const descriptionErrorId = useId()
+const startDateId = useId()
+const expDateId = useId()
 const exp_notice_periodId = useId()
 const exp_policyId = useId()
-const responsiblesId = useId()
 
 const originalContract = ref(Object.assign({}, contract.value))
+
+const minSelectableDate = computed(() => {
+  const d = new Date()
+  d.setUTCHours(0, 0, 0, 0)
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
+})
+
+function toDateInputValue(iso?: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toISOString().slice(0, 10)
+}
+
+function fromDateInputValue(dateOnly: string): string | undefined {
+  if (!dateOnly) return undefined
+  return `${dateOnly}T00:00:00Z`
+}
+
+const startDateInput = computed({
+  get: () => toDateInputValue(inserted.value?.start_date ?? contract.value.start_date),
+  set: (value: string) => {
+    if (inserted.value) return
+    contract.value.start_date = fromDateInputValue(value)
+  },
+})
+
+const expDateInput = computed({
+  get: () => toDateInputValue(inserted.value?.exp_date ?? contract.value.exp_date),
+  set: (value: string) => {
+    if (inserted.value) return
+    contract.value.exp_date = fromDateInputValue(value)
+  },
+})
+
+// DCS-FR-SM-13: the signing order and deadline live in the contract document,
+// where the signing workflow reads and enforces them.
+const signingDeadlineId = useId()
+const signatureFields = computed(() => signatureFieldNames(contract.value.contract_data))
+const workflow = computed(() => signingWorkflow(contract.value.contract_data))
+
+function signingPosition(field: string): number | undefined {
+  return workflow.value.order.find((entry) => entry.field === field)?.position
+}
+
+function onSigningPosition(field: string, event: Event) {
+  if (!contract.value.contract_data) return
+  const value = (event.target as HTMLInputElement).value
+  setSigningOrder(contract.value.contract_data, field, value === '' ? undefined : Number(value))
+}
+
+const signingDeadlineInput = computed({
+  get: () => workflow.value.deadline?.toISOString().slice(0, 10) ?? '',
+  set: (value: string) => {
+    if (contract.value.contract_data) setSigningDeadline(contract.value.contract_data, value)
+  },
+})
 </script>
 
 <template>
@@ -40,7 +106,7 @@ const originalContract = ref(Object.assign({}, contract.value))
     <div class="card-body gap-5">
       <h2 class="card-title justify-between text-sm">
         <div class="flex gap-2">Contract Details</div>
-        <div class="badge badge-sm badge-secondary">{{ contract.state }}</div>
+        <div data-testid="contract-state-badge" class="badge badge-sm badge-secondary">{{ contract.state }}</div>
       </h2>
 
       <fieldset class="fieldset border-none p-0">
@@ -60,10 +126,13 @@ const originalContract = ref(Object.assign({}, contract.value))
           :id="nameId"
           v-model="contract.name"
           class="input-bordered input w-full"
+          data-testid="contract-global-name"
           :class="{ 'border-2 input-primary': !!inserted && originalContract.name !== contract.name }"
           type="text"
           :disabled="disabled"
           required
+          :aria-invalid="!!props.nameError"
+          :aria-describedby="props.nameError ? nameErrorId : undefined"
         />
         <input
           v-else
@@ -74,6 +143,9 @@ const originalContract = ref(Object.assign({}, contract.value))
           type="text"
           disabled
         />
+        <p v-if="props.nameError && !inserted?.name" :id="nameErrorId" class="text-sm text-error">
+          {{ props.nameError }}
+        </p>
       </fieldset>
 
       <fieldset class="fieldset border-none p-0">
@@ -84,9 +156,12 @@ const originalContract = ref(Object.assign({}, contract.value))
           :id="descriptionId"
           v-model="contract.description"
           class="textarea-bordered textarea h-24 w-full"
+          data-testid="contract-base-description"
           :class="{ 'border-2 textarea-primary': originalContract.description !== contract.description }"
           :disabled="disabled"
           required
+          :aria-invalid="!!props.descriptionError"
+          :aria-describedby="props.descriptionError ? descriptionErrorId : undefined"
         />
         <textarea
           v-else
@@ -94,6 +169,59 @@ const originalContract = ref(Object.assign({}, contract.value))
           v-model="inserted.description"
           class="textarea-bordered textarea h-24 w-full"
           :class="{ 'text-red-400': !!inserted && inserted.description !== contract.description }"
+          disabled
+        />
+        <p v-if="props.descriptionError && !inserted?.description" :id="descriptionErrorId" class="text-sm text-error">
+          {{ props.descriptionError }}
+        </p>
+      </fieldset>
+
+      <fieldset class="fieldset border-none p-0">
+        <legend class="fieldset-legend">Start date</legend>
+        <label :for="startDateId" class="sr-only">Start date</label>
+        <input
+          v-if="!inserted?.start_date"
+          :id="startDateId"
+          v-model="startDateInput"
+          type="date"
+          class="input-bordered input w-full"
+          data-testid="contract-start-date"
+          :min="minSelectableDate"
+          :disabled="disabled"
+          :class="{ 'border-2 input-primary': !!inserted && originalContract.start_date !== contract.start_date }"
+        />
+        <input
+          v-else
+          :id="startDateId"
+          :value="toDateInputValue(inserted.start_date)"
+          type="date"
+          class="input-bordered input w-full"
+          :class="{ 'text-red-400': inserted.start_date !== contract.start_date }"
+          disabled
+        />
+      </fieldset>
+
+      <fieldset class="fieldset border-none p-0">
+        <legend class="fieldset-legend">Expiration date</legend>
+        <label :for="expDateId" class="sr-only">Expiration date</label>
+        <input
+          v-if="!inserted?.exp_date"
+          :id="expDateId"
+          v-model="expDateInput"
+          type="date"
+          class="input-bordered input w-full"
+          data-testid="contract-exp-date"
+          :min="minSelectableDate"
+          :disabled="disabled"
+          :class="{ 'border-2 input-primary': !!inserted && originalContract.exp_date !== contract.exp_date }"
+        />
+        <input
+          v-else
+          :id="expDateId"
+          :value="toDateInputValue(inserted.exp_date)"
+          type="date"
+          class="input-bordered input w-full"
+          :class="{ 'text-red-400': inserted.exp_date !== contract.exp_date }"
           disabled
         />
       </fieldset>
@@ -144,41 +272,41 @@ const originalContract = ref(Object.assign({}, contract.value))
           disabled
         />
       </fieldset>
-      <fieldset class="fieldset border-none p-0">
-        <div class="collapse-arrow collapse [&>input~.collapse-title::after]:scale-75">
-          <label :for="responsiblesId" class="sr-only">Responsible Participants</label>
-          <input :id="responsiblesId" type="checkbox" name="responsibles" />
-          <legend class="collapse-title fieldset-legend pl-0 font-semibold">Responsible Participants</legend>
-          <div class="collapse-content grid">
-            <ul class="list col-start-1 row-start-1">
-              <li class="p-4 pb-2 text-xs tracking-wide opacity-60">Creator</li>
-              <li class="list-row py-0">{{ contract.responsible?.creator }}</li>
-            </ul>
-            <ul class="list col-start-2 row-start-1">
-              <li class="p-4 pb-2 text-xs tracking-wide opacity-60">Approvers:</li>
-              <li v-for="(approver, i) in contract.responsible?.approvers" :key="i + approver" class="list-row py-0">
-                {{ approver }}
-              </li>
-            </ul>
-            <ul class="list col-start-1 row-start-2">
-              <li class="p-4 pb-2 text-xs tracking-wide opacity-60">Negotiators:</li>
-              <li
-                v-for="(negotiator, i) in contract.responsible?.negotiators"
-                :key="i + negotiator"
-                class="list-row py-0"
-              >
-                {{ negotiator }}
-              </li>
-            </ul>
-            <ul class="list col-start-2 row-start-2">
-              <li class="p-4 pb-2 text-xs tracking-wide opacity-60">Reviewers</li>
-              <li v-for="(reviewer, i) in contract.responsible?.reviewers" :key="i + reviewer" class="list-row py-0">
-                {{ reviewer }}
-              </li>
-            </ul>
-          </div>
-        </div>
-      </fieldset>
+
+      <template v-if="!inserted && contract.contract_data">
+        <fieldset class="fieldset border-none p-0">
+          <legend class="fieldset-legend">Signing deadline</legend>
+          <label :for="signingDeadlineId" class="sr-only">Signing deadline</label>
+          <input
+            :id="signingDeadlineId"
+            v-model="signingDeadlineInput"
+            type="date"
+            class="input-bordered input w-full"
+            data-testid="contract-signing-deadline"
+            :disabled="disabled"
+          />
+          <p class="label">No signature is accepted after this day (UTC).</p>
+        </fieldset>
+
+        <fieldset v-if="signatureFields.length > 0" class="fieldset border-none p-0">
+          <legend class="fieldset-legend">Signing order</legend>
+          <p class="label">Lower positions sign first. Leave a position empty to sign at any time.</p>
+          <label v-for="field in signatureFields" :key="field" class="flex items-center gap-2">
+            <input
+              :value="signingPosition(field) ?? ''"
+              type="number"
+              min="1"
+              step="1"
+              class="input-bordered input w-24"
+              :aria-label="`Signing position of ${field}`"
+              :data-testid="`contract-signing-order-${field}`"
+              :disabled="disabled"
+              @change="onSigningPosition(field, $event)"
+            />
+            <span class="font-mono text-xs break-all">{{ field }}</span>
+          </label>
+        </fieldset>
+      </template>
     </div>
   </div>
 </template>

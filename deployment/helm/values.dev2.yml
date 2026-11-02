@@ -2,13 +2,13 @@
 # Run the backend locally with `air` and the frontend with `vite`.
 #
 # First-time setup (packages local subcharts):
-#   helm dependency update ./deployment/helm
+#   helm dependency build --skip-refresh ./deployment/helm
 #
 # Install:
 #   helm install dcs ./deployment/helm -f ./deployment/helm/values.dev.yml
 #
 # Upgrade (after chart changes):
-#   helm dependency update ./deployment/helm  # re-run if Chart.yaml changed
+#   helm dependency build --skip-refresh ./deployment/helm  # if Chart.yaml changed
 #   helm upgrade dcs ./deployment/helm -f ./deployment/helm/values.dev.yml
 #
 # Services exposed on localhost via NodePort (Rancher Desktop forwards these automatically):
@@ -17,17 +17,12 @@
 #   Hydra public : localhost:30555  (backend + Vite proxy only — browser goes via Vite)
 #   Hydra admin  : localhost:31285
 #   NATS             : localhost:30122
-#   Neo4j HTTP       : localhost:31373
-#   Neo4j Bolt       : localhost:32287
-#   FC service       : localhost:31081
 #   ORCE             : localhost:31188
 #   Status List Service : localhost:30221  (XFSC status list management)
 #   IPFS Gateway: localhost:31486
 #   IPFS API    : localhost:31512
 #
 # Backend .env.dev2 (see that file for the full set):
-#   STATUSLIST_SERVICE_URL=http://localhost:30221
-#   OID4VP_XFSC_ALLOW_UNSIGNED_FALLBACK=true
 #   ISSUER_DID=did:web:localhost%3A8992
 # The backend runs natively and provisions its own SoftHSM2 token via
 # dev-stack2.sh (scripts/hsm-provision.sh), so no in-cluster PKCS#11 token here.
@@ -56,33 +51,12 @@ postgresql:
     username: dcs
     password: dcs
     database: dcs
-  additionalDatabases: ["fc", "statuslist", "hydra"]
+  additionalDatabases: ["fc", "hydra"]
   persistence:
     enabled: false
   service:
     type: NodePort
     nodePort: 31513
-
-keycloak:
-  enabled: true
-  service:
-    type: NodePort
-    port: 8080
-    nodePort: 30010
-  auth:
-    adminUser: admin
-    adminPassword: admin
-  realm:
-    import: true
-  extraEnv:
-    - name: KC_HOSTNAME
-      value: "localhost"
-    - name: KC_HOSTNAME_PORT
-      value: "30010"
-    - name: KC_HOSTNAME_STRICT_HTTPS
-      value: "false"
-    - name: KC_HTTP_ENABLED
-      value: "true"
 
 hydra:
   enabled: true
@@ -118,33 +92,41 @@ nats:
     type: NodePort
     nodePort: 30122
 
-neo4j:
-  enabled: true
-  persistence:
-    enabled: false
-  service:
-    type: NodePort
-    nodePortHttp: 31373
-    nodePortBolt: 32287
-
-# XFSC Federated Catalogue (requires neo4j, keycloak, postgresql with "fc" database)
-# See charts/federated-catalogue/values.yaml for all configurable fields.
+# Federated Catalogue: CONSUMED from instance A's release ("dcs",
+# values.dev.yml), not co-deployed. Both dev releases share one cluster, and
+# A already publishes fc-service on NodePort 30081 and its FC Keycloak on
+# 30080 — a second stack would collide on those NodePorts before it ran out
+# of laptop. fcservice therefore stays at its default false, which switches
+# off the federated-catalogue/keycloak/fuseki/fc-postgres sub-charts together
+# (one shared `fcservice.enabled` condition in Chart.yaml).
+#
+# The values below are documentation for backend/.env.dev2 more than runtime
+# config: replicaCount is 0 here, so instance B's backend runs natively on the
+# host and reads its FC settings from that .env file. Keep the two in sync —
+# .env.dev2 uses the host-facing NodePort URLs for both, since a host process
+# cannot resolve in-cluster Service names.
+#
+# ADR-18: the `federated-catalogue` service account carries ADMIN_ALL, so a
+# second DCS pointed at a shared catalogue can administer every entry in it,
+# including instance A's. Acceptable here: one developer's local cluster, a
+# disposable catalogue, both instances ours. It is not tenant isolation and
+# does not transfer to two independently operated deployments.
 federatedCatalogue:
   enabled: true
-  service:
-    type: NodePort
-    nodePort: 31081
-  keycloak:
-    hostname: "localhost:30010"
-    issuerScheme: "http"
+  apiURL: "http://fc-service:8081"
   oauth:
-    clientID: "dcs-fc-client"
-  # Allow POSTing self-descriptions without signature verification in dev
-  verificationVpSignature: false
-  verificationVcSignature: false
+    # The service account instance A's realm-provision job actually creates.
+    # Not "dcs-fc-client": nothing provisions that, and the token grant 401s.
+    clientID: "federated-catalogue"
+    clientSecret: "**********"
+  remote:
+    acknowledgeAdminAllTrustBoundary: true
 
+# Instance A's FC Keycloak realm on A's NodePort — the realm the chart's
+# fc-realm-provision job creates, NOT "gaia-x" (see backend/.env.dev1).
 fcKeycloak:
-  realmURL: "http://localhost:30010/realms/gaia-x"
+  realmURL: "http://localhost:30080/auth/realms/federated-catalogue-realm"
+
 # Not used when replicaCount=0, but kept as documentation for the backend .env.
 signing:
   issuerDID: "did:web:localhost"
@@ -156,31 +138,23 @@ oidc:
   realm: "gaia-x"
   keycloakScheme: "http"
 
-# XFSC Status List Service (DCS-OR-C2PA-005)
-statuslistService:
-  enabled: true
-  service:
-    type: NodePort
-    port: 8080
-    nodePort: 30221
-  keycloak:
-    hostname: "localhost:30010"
-    issuerScheme: "http"
-  oauth:
-    clientID: "dcs-fc-client"
-  # Allow POSTing self-descriptions without signature verification in dev
-  verificationVpSignature: false
-  verificationVcSignature: false
-  database:
+# The chart default trusts no issuer (values.yaml). The dev stack runs against
+# the dev fixture baked into the image, so it opts back in explicitly —
+# otherwise the backend renders with no trust document and every credential
+# presentation fails closed.
+oid4vp:
+  trust:
     enabled: true
-    host: "dcs2-postgresql"
-    port: "5432"
-    name: "statuslist"
-    user: "dcs"
-    password: "dcs"
-    sslMode: "disable"
-  nats:
-    url: "nats://dcs2-nats:4222"
+    dataPath: /app/config/oid4vp/trust.dev.json
+    # The dev/BDD stack points both lists at the same bundle: it holds the ORCE
+    # dev root its login and peer credentials chain to AND the dev CA the
+    # synthetic PID x5c issuer signs under. A real deployment separates them —
+    # that is the point of the split (ADR-35) — but here one file is what the
+    # fixtures actually mint under, and pretending otherwise would mean two
+    # copies of the same certificates.
+    x5cAnchors:
+      poa: /app/config/oid4vp/x5c-trust-anchors.dev.pem
+      pid: /app/config/oid4vp/x5c-trust-anchors.dev.pem
 
 orce:
   enabled: true
@@ -195,6 +169,9 @@ ipfs:
   persistence:
     enabled: true
   api:
+    # The backend runs on the host and calls the NodePort without a token.
+    auth:
+      enabled: false
     cors:
       enabled: true
       allowOrigins:
@@ -209,26 +186,31 @@ ipfs:
     gatewayNodePort: 31486
     apiNodePort: 31512
 
-ipfsDocumentManager:
-  enabled: true
-  service:
-    type: NodePort
-    nodePort: 30486
-  ipfs:
-    host: "dcs2-ipfs"
-    apiGatewayURL: "http://dcs2-ipfs:8080/ipfs"
-    rpcApiPort: 5001
-    logLevel: "debug"
-  config:
-    serverMode: "debug"
 
 # IPFS client env vars are not used when replicaCount=0 (backend runs locally).
 # For local dev, set in backend/.env.dev:
-#   IPFS_TENANT_BASE_URL=
 #   IPFS_MFS_BASE_URL=http://localhost:31512
-# In-cluster, IPFS_MFS_BASE_URL is auto-wired from the ipfs sub-chart. If
-# ipfsDocumentManager is enabled with a valid image, IPFS_TENANT_BASE_URL is
-# auto-wired to the document-manager service.
+# In-cluster, IPFS_MFS_BASE_URL is auto-wired from the ipfs sub-chart.
 
 route:
   basePath: "/api"
+
+extraEnv:
+  # This stack trusts the issuer fixture committed to the repo.
+  - name: DCS_ALLOW_DEV_TRUST
+    value: "true"
+
+# In-cluster service credential for the background PDF regenerator, which runs on
+# NATS events with no user JWT. Never a shared or committed value in a real
+# deployment: the chart refuses to render without one.
+
+global:
+  # In-cluster TLS off: the backend runs on the host (replicaCount 0) and
+  # reaches PostgreSQL, NATS, IPFS and ORCE through their NodePorts.
+  internalTLS:
+    enabled: false
+
+# The backend runs on the host and reaches PostgreSQL, NATS, IPFS and Hydra
+# through NodePorts, which the NetworkPolicies would refuse.
+networkPolicy:
+  enabled: false

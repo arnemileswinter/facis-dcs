@@ -41,7 +41,6 @@ function existLocally(did: string): boolean {
           </RouterLink>
         </h2>
         <div class="flex justify-between">
-          <div v-if="template.document_number">Document number: {{ template.document_number }}</div>
           <div v-if="template.version">Version: {{ template.version }}</div>
         </div>
         <div v-if="template.did" class="min-w-0 text-sm break-all">DID: {{ template.did }}</div>

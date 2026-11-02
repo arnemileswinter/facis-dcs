@@ -5,7 +5,7 @@
 # docs/semantic-ontology). Reads are public — produced artifacts carry
 # hub-served anchors external verifiers resolve without a DCS login —
 # writes are Template Manager-scoped. The normalization layer anchors every
-# produced canonical document to the hub (@context URL, sh:shapesGraph, dcterms:conformsTo) and rejects
+# produced canonical document to the hub (@context URL, sh:shapesGraph) and rejects
 # documents that redefine a hub-declared ontology prefix.
 
 @DCS-FR-TR-03 @UC-02-08
@@ -25,14 +25,27 @@ Feature: Semantic Hub — versioned schema storage, anchoring, and enforcement
     Then get http 200:Success code
     And the retrieved schema is version 1, active, of kind "shapes"
 
-  # The dereference target of the dcs: term IRIs: w3id.org/facis/dcs/...
-  # redirects (docs/w3id/facis) land on this public route.
-  Scenario: The genesis ontology is seeded and publicly resolvable
-    When the active "ontology" schema "facis-dcs" is retrieved from the Semantic Hub
+  # The dereference target of the dcst: taxonomy IRIs: w3id.org/facis/dcs/...
+  # redirects (docs/w3id/facis) land on this public route. The dcs: envelope
+  # terms have no ontology document; they dereference to the shapes graph
+  # above, which is what actually constrains them.
+  Scenario: The genesis domain-field ontology is seeded and publicly resolvable
+    When the active "ontology" schema "facis-sla" is retrieved from the Semantic Hub
     Then get http 200:Success code
     And the retrieved schema is version 1, active, of kind "ontology"
-    When the ontology "facis-dcs" is resolved from the Semantic Hub without authentication
+    When the ontology "facis-sla" is resolved from the Semantic Hub without authentication
     Then get http 200:Success code
+
+  @REQ-semantic-catalog-grouped-constraints-AC6 @DCS-FR-TR-03
+  Scenario Outline: The default ontology provides multiple grouped catalogs for a constraint operand
+    When the ontology "facis-sla" is resolved from the Semantic Hub without authentication
+    Then get http 200:Success code
+    And the ontology defines at least 2 labeled value catalogs with labeled concepts for ODRL left operand "<operand>"
+
+    Examples:
+      | operand |
+      | purpose |
+      | spatial |
 
   # Registered versions persist across suite runs (the hub is seeded once at
   # startup, not per run), so the assertions are relative to the versions
@@ -99,18 +112,19 @@ Feature: Semantic Hub — versioned schema storage, anchoring, and enforcement
   @DCS-FR-TR-03 @UC-02-08
   Scenario: Activating a stricter SHACL shapes version changes what NEW contracts get flagged for, while already-produced contracts stay pinned
     Given contract "Hub Pinned Pre-V2 Contract" is in "Draft" status
-    When the Auditor triggers a process audit with scope "contracts"
+    When the Auditor triggers a process audit for contract "Hub Pinned Pre-V2 Contract"
     Then the contract content audit trail for "Hub Pinned Pre-V2 Contract" does not report an error for rule "title-InConstraintComponent"
     When the Template Manager registers a stricter version of the "shapes" schema "facis-dcs" that narrows the canonical contract title
     Then get http 200:Success code
     Given contract "Hub Strict Post-V2 Contract" is in "Draft" status
-    When the Auditor triggers a process audit with scope "contracts"
+    When the Auditor triggers a process audit for contract "Hub Strict Post-V2 Contract"
     Then the contract content audit trail for "Hub Strict Post-V2 Contract" reports rule "title-InConstraintComponent" with severity "error"
-    And the contract content audit trail for "Hub Pinned Pre-V2 Contract" does not report an error for rule "title-InConstraintComponent"
+    When the Auditor triggers a process audit for contract "Hub Pinned Pre-V2 Contract"
+    Then the contract content audit trail for "Hub Pinned Pre-V2 Contract" does not report an error for rule "title-InConstraintComponent"
     When the Template Manager rolls the "shapes" schema "facis-dcs" back to version 1
     Then get http 200:Success code
     Given contract "Hub Restored Post-Rollback Contract" is in "Draft" status
-    When the Auditor triggers a process audit with scope "contracts"
+    When the Auditor triggers a process audit for contract "Hub Restored Post-Rollback Contract"
     Then the contract content audit trail for "Hub Restored Post-Rollback Contract" does not report an error for rule "title-InConstraintComponent"
 
   # Phase 3 (DCS-FR-TR-03/TR-04, ADR-10): the template builder's clause

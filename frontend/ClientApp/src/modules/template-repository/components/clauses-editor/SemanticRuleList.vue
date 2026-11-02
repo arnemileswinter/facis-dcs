@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import RuleParamRow from './RuleParamRow.vue'
 import type { SemanticCondition } from '@template-repository/models/contract-template'
+import type { ClausePlaceholderHighlight } from '@template-repository/models/template-editor-ui-store'
 
 const props = withDefaults(
   defineProps<{
@@ -12,12 +13,14 @@ const props = withDefaults(
     isParamRequiredAndUnused?: (conditionId: string, parameterName: string) => boolean
     highlightRuleTitle?: boolean
     isConditionUsedInOtherClauses?: (conditionId: string) => boolean
+    highlight?: ClausePlaceholderHighlight
   }>(),
   {
     isParamUsedInText: () => false,
     isParamRequiredAndUnused: () => false,
     highlightRuleTitle: false,
     isConditionUsedInOtherClauses: () => false,
+    highlight: null,
   },
 )
 
@@ -65,6 +68,11 @@ function onParamClick(conditionId: string, parameterName: string) {
           @mouseenter="onRuleEnter(c.conditionId)"
           @mouseleave="onRuleLeave"
         >
+          <span
+            v-if="c.accentColor"
+            class="mr-1 inline-block h-2 w-2 rounded-full align-baseline"
+            :style="{ backgroundColor: c.accentColor }"
+          />
           {{ c.conditionName }}
         </span>
         <ul class="mt-1 ml-3 space-y-0.5">
@@ -74,6 +82,7 @@ function onParamClick(conditionId: string, parameterName: string) {
             :param="p"
             :is-used="isParamUsedInText(c.conditionId, p.parameterName)"
             :is-required-and-unused="isParamRequiredAndUnused(c.conditionId, p.parameterName)"
+            :is-highlighted="highlight?.conditionId === c.conditionId && highlight?.parameterName === p.parameterName"
             @mouseenter="onParamEnter(c.conditionId, p.parameterName)"
             @mouseleave="onParamLeave"
             @click="onParamClick(c.conditionId, p.parameterName)"

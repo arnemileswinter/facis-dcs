@@ -5,6 +5,8 @@ import WorkflowStageBanner from '@core/components/WorkflowStageBanner.vue'
 import { templateStory, toBannerActions } from '@core/workflow-story'
 import CopyTemplateButton from '@template-repository/components/CopyTemplateButton.vue'
 import TemplateEditors from '@template-repository/components/TemplateEditors.vue'
+import TemplateReviewNotes from '@template-repository/components/TemplateReviewNotes.vue'
+import TemplateVerificationPanel from '@template-repository/components/TemplateVerificationPanel.vue'
 import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
@@ -13,11 +15,15 @@ import { useDocumentExport } from '@/composables/useDocumentExport'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { useNavStore } from '@/stores/nav-store'
 import { TemplateState } from '@/types/contract-template-state'
-import type { PartialContractTemplate } from '@/models/contract-template'
+import { reportActionError } from '@/utils/report-action-error'
+import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
 
 const props = defineProps<{
   did: string
   embedded?: boolean
+}>()
+const emit = defineEmits<{
+  'load-state': [value: { did: string; state: 'loading' | 'loaded' | 'error' }]
 }>()
 
 const navStore = useNavStore()
@@ -42,11 +48,13 @@ watch(
 
     hasChosenType.value = true
     const did = `${props.did}`
+    emit('load-state', { did, state: 'loading' })
     contractTemplateService
       .retrieveById({ did })
       .then((template) => {
         if (!template) {
           draftStore.reset()
+          emit('load-state', { did, state: 'error' })
           return
         }
         templateEditorUiStore.setTemplateEditable(false)
@@ -57,16 +65,24 @@ watch(
           name: template.name ?? '',
           description: template.description ?? '',
           templateType: template.template_type,
+          partyType: template.party_type,
+          jurisdiction: template.jurisdiction,
+          templateLevel: template.template_level,
+          requiredTemplates: template.required_templates,
+          industry: template.industry,
           state: template.state,
           version: template.version ?? null,
-          document_number: template.document_number ?? null,
+          created_at: template.created_at ?? null,
           updated_at: template.updated_at ?? null,
           created_by: template.created_by,
           responsible: template.responsible ?? null,
         })
+        emit('load-state', { did, state: 'loaded' })
       })
       .catch((error: unknown) => {
-        console.error('Failed to load template for editing', error)
+        draftStore.reset()
+        emit('load-state', { did, state: 'error' })
+        reportActionError(error, 'Load template')
       })
   },
   { immediate: true },
@@ -74,7 +90,10 @@ watch(
 
 const submitTemplate = async () => {
   try {
-    if (!draftStore.did || !draftStore.updated_at) return
+    if (!draftStore.did || !draftStore.updated_at) {
+      reportActionError(new Error('The current template version is unavailable.'), 'Submit template')
+      return
+    }
     const response = await contractTemplateService.submit({
       did: draftStore.did,
       updated_at: draftStore.updated_at,
@@ -83,13 +102,16 @@ const submitTemplate = async () => {
       await navStore.goToPreviousRoute()
     }
   } catch (error) {
-    console.error('Template Submission failed', error)
+    reportActionError(error, 'Submit template')
   }
 }
 
 const submitRejectedTemplate = async () => {
   try {
-    if (!draftStore.did || !draftStore.updated_at) return
+    if (!draftStore.did || !draftStore.updated_at) {
+      reportActionError(new Error('The current template version is unavailable.'), 'Resubmit template')
+      return
+    }
     const response = await contractTemplateService.submit({
       did: draftStore.did,
       updated_at: draftStore.updated_at,
@@ -98,7 +120,7 @@ const submitRejectedTemplate = async () => {
       await navStore.goToPreviousRoute()
     }
   } catch (error) {
-    console.error('Template Submission failed', error)
+    reportActionError(error, 'Resubmit template')
   }
 }
 
@@ -111,7 +133,7 @@ const exportPDF = async () => {
 
 <template>
   <div :class="embedded ? 'flex flex-1 flex-col' : '-mx-4 -my-4 flex min-h-full flex-col md:-mx-8 md:-my-8'">
-    <TemplateEditors title="Contract">
+    <TemplateEditors title="View Template">
       <template #before-tabs>
         <WorkflowStageBanner
           v-if="!embedded && state"
@@ -121,6 +143,8 @@ const exportPDF = async () => {
           :narrative="story.narrative"
           :actions="toBannerActions(story.actionHints)"
         />
+        <TemplateReviewNotes :notes="contractTemplate?.review_notes" />
+        <TemplateVerificationPanel v-if="!embedded && contractTemplate" :key="did" :did="did" />
         <slot name="before-tabs" />
       </template>
     </TemplateEditors>

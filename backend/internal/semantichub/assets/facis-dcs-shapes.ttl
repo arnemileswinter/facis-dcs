@@ -13,7 +13,7 @@
 # blank node — SHACL's equivalent of "requires a stable @id".
 
 dcs:CanonicalContractShape
-  a sh:NodeShape ;
+  a sh:NodeShape, dcs:TechnicalShape ;
   sh:targetClass dcs:Contract ;
   sh:nodeKind sh:IRI ;
   sh:property [
@@ -31,7 +31,7 @@ dcs:CanonicalContractShape
   ] .
 
 dcs:ContractMetadataShape
-  a sh:NodeShape ;
+  a sh:NodeShape, dcs:TechnicalShape ;
   sh:targetClass dcs:ContractMetadata ;
   sh:property [
     sh:path dcs:title ;
@@ -39,12 +39,37 @@ dcs:ContractMetadataShape
     sh:minCount 1 ;
     sh:maxCount 1 ;
     sh:message "A canonical contract requires a title in dcs:metadata." ;
+  ] ;
+  sh:property [
+    sh:path dcs:description ;
+    sh:datatype xsd:string ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs:startDate ;
+    sh:datatype xsd:dateTime ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs:expirationDate ;
+    sh:datatype xsd:dateTime ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs:expirationNoticePeriod ;
+    sh:datatype xsd:integer ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs:expirationPolicy ;
+    sh:datatype xsd:string ;
+    sh:maxCount 1 ;
   ] .
 
 # Every machine-readable ODRL rule must be backed by human-audited prose:
 # dcs:prose references the clause node whose text the rule operationalizes.
 dcs:OdrlDutyProseShape
-  a sh:NodeShape ;
+  a sh:NodeShape, dcs:TechnicalShape ;
   sh:targetClass odrl:Duty ;
   sh:property [
     sh:path dcs:prose ;
@@ -54,7 +79,7 @@ dcs:OdrlDutyProseShape
   ] .
 
 dcs:OdrlPermissionProseShape
-  a sh:NodeShape ;
+  a sh:NodeShape, dcs:TechnicalShape ;
   sh:targetClass odrl:Permission ;
   sh:property [
     sh:path dcs:prose ;
@@ -64,7 +89,7 @@ dcs:OdrlPermissionProseShape
   ] .
 
 dcs:OdrlProhibitionProseShape
-  a sh:NodeShape ;
+  a sh:NodeShape, dcs:TechnicalShape ;
   sh:targetClass odrl:Prohibition ;
   sh:property [
     sh:path dcs:prose ;
@@ -73,18 +98,32 @@ dcs:OdrlProhibitionProseShape
     sh:message "An ODRL Prohibition requires dcs:prose referencing the human-readable clause it is backed by." ;
   ] .
 
-dcs:RequirementFieldShape
-    a sh:NodeShape ;
-    sh:targetClass dcs:RequirementField ;
+dcs:ContractFieldShape
+    a sh:NodeShape, dcs:TechnicalShape ;
+    sh:targetClass dcs:ContractField ;
     sh:property [
-        sh:path dcs:parameterName ;
+        sh:path dcs:label ;
         sh:datatype xsd:string ;
         sh:minCount 1 ;
         sh:maxCount 1 ;
-        sh:message "A requirement field must declare the parameter it binds (dcs:parameterName)." ;
+        sh:message "A contract field must declare dcs:label." ;
     ] ;
     sh:property [
-        sh:path dcs:parameterValue ;
+        sh:path dcs:datatype ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
         sh:maxCount 1 ;
-        sh:message "A requirement field carries at most one inline submitted value (dcs:parameterValue)." ;
+        sh:message "A contract field must declare dcs:datatype." ;
+    ] ;
+    sh:property [
+        sh:path dcs:required ;
+        sh:datatype xsd:boolean ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message "A contract field must declare boolean dcs:required." ;
+    ] ;
+    sh:property [
+        sh:path dcs:value ;
+        sh:maxCount 1 ;
+        sh:message "A contract field carries at most one inline dcs:value." ;
     ] .

@@ -11,9 +11,11 @@ import (
 	"time"
 
 	genauth "digital-contracting-service/gen/auth"
+	"digital-contracting-service/internal/auth"
 	authdb "digital-contracting-service/internal/auth/db"
 	"digital-contracting-service/internal/auth/oid4vp"
 	oid4vprequest "digital-contracting-service/internal/auth/oid4vp/request"
+	"digital-contracting-service/internal/middleware"
 
 	goa "goa.design/goa/v3/pkg"
 )
@@ -110,7 +112,7 @@ func (s *authSvc) buildLoginResult(ctx context.Context, presentationState, nonce
 
 	return &genauth.LoginResult{
 		RequestURI:      requestURI,
-		PresentationURL: buildOpenID4VPPresentationURI(s.hydra.ClientID(), requestURI),
+		PresentationURL: buildOpenID4VPPresentationURI(s.oid4vpClientID, requestURI),
 		State:           presentationState,
 		AuthorizeURL:    authorizeURL,
 		ExpiresIn:       expiresIn,
@@ -170,7 +172,7 @@ func (s *authSvc) PresentationRequest(ctx context.Context, p *genauth.Presentati
 
 	responseURI := strings.TrimRight(s.publicAPIBase, "/") + "/auth/presentation/callback"
 	jwt, err := oid4vprequest.BuildJWT(s.requestSigner, oid4vprequest.Params{
-		ClientID:    s.hydra.ClientID(),
+		ClientID:    s.oid4vpClientID,
 		ResponseURI: responseURI,
 		State:       attempt.PresentationState,
 		Nonce:       attempt.Nonce,
@@ -223,32 +225,43 @@ func (s *authSvc) PresentationCallback(ctx context.Context, p *genauth.Presentat
 		vpToken = *p.VpToken
 	}
 
-	queryID, err := credentialQueryIDFromDCQL(s.dcqlQuery)
+	queryIDs, err := credentialQueryIDsFromDCQL(s.dcqlQuery)
 	if err != nil {
 		return nil, goa.PermanentError("bad_request", "invalid dcql_query: %v", err)
 	}
 
-	presentation, err := extractSinglePresentation(vpToken, queryID)
-	if err != nil {
-		return nil, goa.PermanentError("bad_request", "invalid vp_token: %v", err)
-	}
-
-	verified, err := oid4vp.NewVerifier(s.trust).Verify(presentation, oid4vp.PresentationContext{
-		Nonce:    attempt.Nonce,
-		ClientID: s.hydra.ClientID(),
-	})
-
-	if err != nil {
-		_ = s.presentations.MarkFailed(ctx, attempt.PresentationState, err.Error())
-		oid4vp.RecordPresentationAudit(ctx, oid4vp.PresentationAuditEvent{
-			PresentationState: attempt.PresentationState,
-			Success:           false,
-			ErrorMessage:      err.Error(),
+	// Repeated invalid presentations lock out the holder key they name, or
+	// the caller address when they name none (FR-UC-01-4). A holder key
+	// that is locked is refused before the presentation is verified.
+	ip := middleware.IPFromContext(ctx)
+	lockKey := ip
+	var verified *oid4vp.VerifiedLoginClaims
+	presentation, err := extractSinglePresentation(vpToken, queryIDs...)
+	if err == nil {
+		if holder := oid4vp.HolderLockoutKey(presentation, s.trust, oid4vp.PurposeLogin); holder != "" {
+			lockKey = holder
+		}
+		if until, locked := s.LockedUntil(ctx, lockKey); locked {
+			s.refusePresentation(ctx, attempt.PresentationState, "the holder key is locked out after repeated invalid credentials")
+			return nil, auth.LockedOut(ctx, until)
+		}
+		verified, err = oid4vp.NewVerifier(s.trust, oid4vp.PurposeLogin).Verify(presentation, oid4vp.PresentationContext{
+			Nonce:    attempt.Nonce,
+			ClientID: s.oid4vpClientID,
 		})
-		return nil, goa.PermanentError("unauthorized", "vp verification failed: %v", err)
+	}
+	if err != nil {
+		s.RecordInvalidCredential(ctx, lockKey, ip, nil)
+		s.refusePresentation(ctx, attempt.PresentationState, err.Error())
+		return nil, goa.PermanentError("unauthorized", auth.CredentialRefused)
 	}
 
 	grantedRoles := verified.GrantedRoles
+
+	credentialStatus, err := oid4vp.StatusReference(verified.RawClaims)
+	if err != nil {
+		return nil, goa.PermanentError("unauthorized", "credential status reference: %v", err)
+	}
 
 	redirectTo, err := s.hydra.AcceptLoginAndConsent(
 		ctx,
@@ -256,6 +269,7 @@ func (s *authSvc) PresentationCallback(ctx context.Context, p *genauth.Presentat
 		verified.SubjectDID,
 		verified.ParticipantDID,
 		grantedRoles,
+		credentialStatus,
 	)
 
 	if err != nil {
@@ -288,6 +302,18 @@ func (s *authSvc) PresentationCallback(ctx context.Context, p *genauth.Presentat
 	return &genauth.PresentationCallbackResult{}, nil
 }
 
+// refusePresentation marks a login presentation failed with the FR-UC-01-4
+// refusal, which the login page shows, and keeps the detail in the audit
+// trail only.
+func (s *authSvc) refusePresentation(ctx context.Context, state, detail string) {
+	_ = s.presentations.MarkFailed(ctx, state, auth.CredentialRefused)
+	oid4vp.RecordPresentationAudit(ctx, oid4vp.PresentationAuditEvent{
+		PresentationState: state,
+		Success:           false,
+		ErrorMessage:      detail,
+	})
+}
+
 func pointerString(v *string) string {
 	if v == nil {
 		return ""
@@ -295,40 +321,50 @@ func pointerString(v *string) string {
 	return *v
 }
 
-func credentialQueryIDFromDCQL(dcqlQuery any) (string, error) {
+// credentialQueryIDsFromDCQL returns every credential query id the request
+// offered the wallet. A query asks for one credential under more than one
+// format identifier, and the wallet answers under the id of whichever it
+// matched, so the answer is looked for under all of them.
+func credentialQueryIDsFromDCQL(dcqlQuery any) ([]string, error) {
 	query, ok := dcqlQuery.(map[string]any)
 	if !ok {
-		return "", fmt.Errorf("dcql query must be a JSON object")
+		return nil, fmt.Errorf("dcql query must be a JSON object")
 	}
 
 	rawCredentials, ok := query["credentials"]
 	if !ok {
-		return "", fmt.Errorf("missing credentials")
+		return nil, fmt.Errorf("missing credentials")
 	}
 
 	credentials, ok := rawCredentials.([]any)
 	if !ok || len(credentials) == 0 {
-		return "", fmt.Errorf("credentials must be a non-empty array")
+		return nil, fmt.Errorf("credentials must be a non-empty array")
 	}
 
-	first, ok := credentials[0].(map[string]any)
-	if !ok {
-		return "", fmt.Errorf("credentials[0] must be an object")
+	ids := make([]string, 0, len(credentials))
+	for i, raw := range credentials {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("credentials[%d] must be an object", i)
+		}
+		id, _ := entry["id"].(string)
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return nil, fmt.Errorf("credentials[%d].id is required", i)
+		}
+		ids = append(ids, id)
 	}
 
-	id, _ := first["id"].(string)
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return "", fmt.Errorf("credentials[0].id is required")
-	}
-
-	return id, nil
+	return ids, nil
 }
 
-func extractSinglePresentation(rawVPToken, queryID string) (string, error) {
+func extractSinglePresentation(rawVPToken string, queryIDs ...string) (string, error) {
 	rawVPToken = strings.TrimSpace(rawVPToken)
 	if rawVPToken == "" {
 		return "", fmt.Errorf("vp_token is required")
+	}
+	if len(queryIDs) == 0 {
+		return "", fmt.Errorf("no credential query id to read the vp_token under")
 	}
 
 	var tokenByQuery map[string]json.RawMessage
@@ -336,26 +372,30 @@ func extractSinglePresentation(rawVPToken, queryID string) (string, error) {
 		return "", fmt.Errorf("vp_token must be a JSON object")
 	}
 
-	rawPresentations, ok := tokenByQuery[queryID]
-	if !ok {
-		return "", fmt.Errorf("missing vp_token entry for query id %q", queryID)
+	for _, queryID := range queryIDs {
+		rawPresentations, ok := tokenByQuery[queryID]
+		if !ok {
+			continue
+		}
+
+		var presentations []string
+		if err := json.Unmarshal(rawPresentations, &presentations); err != nil {
+			return "", fmt.Errorf("vp_token[%q] must be an array of strings", queryID)
+		}
+
+		if len(presentations) != 1 {
+			return "", fmt.Errorf("vp_token[%q] must contain exactly one presentation", queryID)
+		}
+
+		presentation := strings.TrimSpace(presentations[0])
+		if presentation == "" {
+			return "", fmt.Errorf("vp_token[%q][0] must be a non-empty string", queryID)
+		}
+
+		return presentation, nil
 	}
 
-	var presentations []string
-	if err := json.Unmarshal(rawPresentations, &presentations); err != nil {
-		return "", fmt.Errorf("vp_token[%q] must be an array of strings", queryID)
-	}
-
-	if len(presentations) != 1 {
-		return "", fmt.Errorf("vp_token[%q] must contain exactly one presentation", queryID)
-	}
-
-	presentation := strings.TrimSpace(presentations[0])
-	if presentation == "" {
-		return "", fmt.Errorf("vp_token[%q][0] must be a non-empty string", queryID)
-	}
-
-	return presentation, nil
+	return "", fmt.Errorf("missing vp_token entry for query ids %v", queryIDs)
 }
 
 func (s *authSvc) LoginStatus(ctx context.Context, p *genauth.PresentationStatePayload) (*genauth.PresentationStatusResult, error) {

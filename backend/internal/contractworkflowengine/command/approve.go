@@ -8,6 +8,7 @@ import (
 	"log"
 	"time"
 
+	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/identity"
@@ -16,9 +17,9 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
-	"digital-contracting-service/internal/base/ipfs"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/approvaltaskstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
@@ -45,7 +46,7 @@ type Approver struct {
 }
 
 type ArchiveSnapshotStorer interface {
-	CreateFile(ctx context.Context, data any) (*ipfs.IPFSResult, error)
+	Put(ctx context.Context, scope artifactstore.Scope, plaintext []byte) (string, error)
 }
 
 type ArchiveNotary interface {
@@ -80,9 +81,9 @@ func (h *Approver) Handle(ctx context.Context, cmd ApproveCmd) error {
 	// caller to force a full peer re-sync first.
 	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
 		if localPeer != cmd.CauserDID {
-			return errors.New("contract was updated elsewhere, please force synchronisation and reload")
+			return fmt.Errorf("contract %w, please force synchronisation and reload", base.ErrUpdatedElsewhere)
 		}
-		return errors.New("contract was updated elsewhere, please reload")
+		return fmt.Errorf("contract %w, please reload", base.ErrUpdatedElsewhere)
 	}
 
 	if err := contractstate.ValidateTransition(contractstate.ContractState(processData.State), contractstate.EventApprove); err != nil {
@@ -138,7 +139,7 @@ func (h *Approver) Handle(ctx context.Context, cmd ApproveCmd) error {
 	}
 
 	if !existOpenTasks {
-		err = h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Approved.String())
+		err = h.CRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contractstate.Approved.String())
 		if err != nil {
 			return fmt.Errorf("could not update current template state: %w", err)
 		}
@@ -164,18 +165,24 @@ func (h *Approver) Handle(ctx context.Context, cmd ApproveCmd) error {
 		}
 	}
 
-	evt := contractevents.ApproveEvent{
-		DID:             cmd.DID,
-		ContractVersion: processData.ContractVersion,
-		ApprovedBy:      cmd.ApprovedBy,
-		HolderDID:       cmd.HolderDID,
-		UserRoles:       cmd.UserRoles,
-		OccurredAt:      time.Now().UTC(),
-	}
-	err = event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine)
+	err = event.Create(ctx, tx, cmd.event(processData.ContractVersion), componenttype.ContractWorkflowEngine)
 	if err != nil {
 		return fmt.Errorf("could not create event: %w", err)
 	}
 
 	return tx.Commit()
+}
+
+// event is the audit record of one approval decision, with the approver's
+// comments (DCS-FR-CWE-15).
+func (cmd ApproveCmd) event(contractVersion int) contractevents.ApproveEvent {
+	return contractevents.ApproveEvent{
+		DID:             cmd.DID,
+		ContractVersion: contractVersion,
+		ApprovedBy:      cmd.ApprovedBy,
+		DecisionNotes:   cmd.DecisionNotes,
+		HolderDID:       cmd.HolderDID,
+		UserRoles:       cmd.UserRoles,
+		OccurredAt:      time.Now().UTC(),
+	}
 }

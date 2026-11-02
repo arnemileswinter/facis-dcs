@@ -10,7 +10,8 @@ import { buildApprovedContract, gotoAs } from './lifecycle-helpers'
  */
 
 test('secure contract viewer shows the real contract content and guides the signer', async ({ page, loginAs }) => {
-  test.setTimeout(600_000)
+  // DCS-FR-CWE-26 // DCS-FR-SM-09
+  test.setTimeout(60_000)
   page.setDefaultTimeout(15_000)
   page.on('console', (m) => {
     if (m.text().includes('SUBMIT-GATE')) console.log(m.text())
@@ -32,6 +33,13 @@ test('secure contract viewer shows the real contract content and guides the sign
     // The Contract Signer can now read the approved-unsigned contract's content
     // (the read-gap fix): the clause prose authored into the component renders.
     await expect(page.getByText(/provider invoices the agreed payment amount/i)).toBeVisible()
+  })
+
+  await test.step('the signer cannot edit the contract values', async () => {
+    const amount = page.getByRole('textbox', { name: 'Payment Amount', exact: true })
+    await expect(amount).toBeVisible()
+    await expect(amount).toBeDisabled()
+    await expect(amount).not.toBeEditable()
   })
 
   await test.step('the guided steps gate signing until the contract is verified', async () => {

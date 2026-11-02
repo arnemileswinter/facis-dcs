@@ -94,6 +94,28 @@ class AuthService:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _authorization_request_key(header: dict[str, Any]):
+        """Resolve the key that signed the authorization request object.
+
+        A verifier that identifies itself with the x509_san_dns client id
+        prefix proves it owns that hostname with a certificate chain, so the
+        request object carries x5c rather than a bare jwk. Both encodings are
+        accepted here: the request is signed either way, and which one arrives
+        depends on how the deployment names itself to the wallet.
+        """
+        jwk = header.get("jwk")
+        if isinstance(jwk, dict):
+            return ECAlgorithm.from_jwk(json.dumps(jwk))
+
+        x5c = header.get("x5c")
+        if isinstance(x5c, list) and x5c:
+            from cryptography import x509 as _x509
+
+            return _x509.load_der_x509_certificate(base64.b64decode(str(x5c[0]))).public_key()
+
+        raise RuntimeError("authorization request JWT header missing jwk or x5c")
+
+    @staticmethod
     def resolve_wallet_root() -> Path:
         """Locate testWallet root (repo checkout or helm/BDD override)."""
         override = os.getenv("BDD_TEST_WALLET_DIR", "").strip()
@@ -156,27 +178,30 @@ class AuthService:
         wallet_keys = keys or AuthService.load_wallet_keys()
         AuthService._ensure_dcs_wallet_importable()
         from dcs_wallet.issuer import (
-            DEFAULT_ISSUER_DID,
             attach_key_binding,
             issue_stored_credential,
         )
-        from dcs_wallet.status_list import BDD_CREDENTIAL_TENANT
+        from dcs_wallet.status_list import ISSUER_BASE_ENV, role_credential_index
 
-        issuer_did = os.getenv("BDD_ISSUER_DID", DEFAULT_ISSUER_DID)
-        statuslist_base = os.getenv("STATUSLIST_SERVICE_URL", "http://localhost:30821").strip()
-        if not statuslist_base:
+        # The issuer base is the credential's ISSUER, not only the host of the
+        # list it names: a status list is believed only from the issuer that
+        # publishes it (backend/internal/auth/oid4vp/status/credentialbinding.go),
+        # so the two cannot be set independently.
+        issuer_base = os.getenv(ISSUER_BASE_ENV, "").strip()
+        if not issuer_base:
             raise RuntimeError(
-                "STATUSLIST_SERVICE_URL is required for BDD OID4VP credentials "
-                "(set by run_bdd_helm.sh; dev uses credentials/*.jwt with localhost:30821)"
+                f"{ISSUER_BASE_ENV} is required for BDD OID4VP credentials — it names the "
+                "ORCE issuer these credentials are issued as, serving the status list they "
+                "point at (set by run_bdd_helm.sh)"
             )
         stored_sd_jwt = issue_stored_credential(
             organization=credentials.organization,
             roles=credentials.roles,
-            issuer_private=wallet_keys.issuer_private,
             wallet_private=wallet_keys.wallet_private,
-            issuer_did=issuer_did,
-            statuslist_service_base=statuslist_base,
-            statuslist_tenant=BDD_CREDENTIAL_TENANT,
+            status_index=role_credential_index(
+                organization=credentials.organization, roles=credentials.roles
+            ),
+            issuer_base=issuer_base,
         )
         return attach_key_binding(
             issued_sd_jwt=stored_sd_jwt,
@@ -293,14 +318,12 @@ class AuthService:
 
         if str(header.get("typ") or "") != "oauth-authz-req+jwt":
             raise RuntimeError("authorization request JWT typ is invalid")
-        jwk = header.get("jwk")
-        if not isinstance(jwk, dict):
-            raise RuntimeError("authorization request JWT header missing jwk")
+        verification_key = AuthService._authorization_request_key(header)
 
         try:
             payload = jwt.decode(
                 jar_token,
-                ECAlgorithm.from_jwk(json.dumps(jwk)),
+                verification_key,
                 algorithms=["ES256"],
                 options={"verify_aud": False, "require": ["exp"]},
             )
@@ -426,6 +449,19 @@ class AuthService:
             if url.startswith("http://localhost:5173") or url.startswith("https://localhost:5173"):
                 url = AuthService.normalize_callback_url(url, api_base)
 
+            # A refused login redirects to the UI with the reason in the query
+            # and, being same-origin, does it with a relative Location. Fetching
+            # that raises MissingSchema and buries the reason under an invalid
+            # URL, so report what the authorization server actually said.
+            auth_error = parse_qs(urlparse(url).query).get("auth_error")
+            if auth_error:
+                description = parse_qs(urlparse(url).query).get(
+                    "auth_error_description", [""]
+                )[0]
+                raise RuntimeError(
+                    f"login refused ({auth_error[0]}): {description or 'no description given'}"
+                )
+
             parsed = urlparse(url)
             if parsed.path.endswith("/auth/callback") and parse_qs(parsed.query).get("code"):
                 return url
@@ -502,6 +538,27 @@ class AuthService:
             if time.time() < expires_at - AuthService._TOKEN_EXPIRY_MARGIN_SECONDS:
                 return token
 
+        # The login is scenario setup, not the behavior under test. A dropped
+        # connection on one of its hops starts the whole login again: the
+        # request_uri and the presentation are single-use, so a request-level
+        # retry would be refused.
+        for attempt in range(1, AuthService._LOGIN_ATTEMPTS + 1):
+            try:
+                access_token, expires_in = AuthService._login(api_base, credentials, timeout)
+                break
+            except (requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError) as exc:
+                if attempt == AuthService._LOGIN_ATTEMPTS:
+                    raise
+                print(f"WARNING: login for roles {credentials.roles} lost its connection, attempt {attempt}: {exc}", file=sys.stderr)
+        if expires_in > 0:
+            AuthService._token_cache[cache_key] = (access_token, time.time() + expires_in)
+        return access_token
+
+    _LOGIN_ATTEMPTS = 3
+
+    @staticmethod
+    def _login(api_base: str, credentials, timeout: float) -> tuple[str, int]:
+        """One headless OID4VP login. Returns the access token and its lifetime."""
         session = requests.Session()
         session.headers.update({
             "User-Agent": "bdd-auth-service",
@@ -535,15 +592,12 @@ class AuthService:
             vp_token=vp_token,
             timeout=timeout,
         )
-        access_token, expires_in = AuthService.complete_session(
+        return AuthService.complete_session(
             session,
             api_base,
             redirect_uri,
             timeout=timeout,
         )
-        if expires_in > 0:
-            AuthService._token_cache[cache_key] = (access_token, time.time() + expires_in)
-        return access_token
 
 
     # ------------------------------------------------------------------
@@ -554,15 +608,13 @@ class AuthService:
     def set_headers_for_roles(
         context,
         roles: list[str],
-        username_prefix: str = "bdd",
         use_expired_jwt: bool = False,
         organization: str | None = None,
     ):
         """Set context.headers with a bearer token for the given roles."""
-        del username_prefix  # OID4VP login derives identity from VP, not BDD username.
         # TBD: extend issue_credentials.py to support generating expired JWT credentials
         if use_expired_jwt:
-            username = AuthService.username_for_roles(roles, "bdd")
+            username = AuthService.username_for_roles(roles)
             token = AuthService.create_expired_jwt(AuthService.CLIENT_ID, username, roles)
         else:
             api_base = getattr(context, "base_url", os.getenv("BDD_DCS_BASE_URL", "http://localhost:5173/api"))
@@ -581,15 +633,20 @@ class AuthService:
     @staticmethod
     def get_headers_for_roles(
         roles: list[str],
-        username_prefix: str = "bdd",
         use_expired_jwt: bool = False,
         organization: str | None = None,
         api_base: str | None = None,
         timeout: float = 60,
     ) -> dict:
-        """Return auth headers for a given role (without modifying context)."""
+        """Return auth headers for a given role (without modifying context).
+
+        `organization` is the only way to obtain a credential distinct from the
+        suite-shared one for the same roles: the OID4VP login derives identity
+        from the presented VP, so (roles, organization) is the whole identity —
+        both for the token cache and for anything the server keys per client.
+        """
         if use_expired_jwt:
-            username = AuthService.username_for_roles(roles, username_prefix)
+            username = AuthService.username_for_roles(roles)
             token = AuthService.create_expired_jwt(AuthService.CLIENT_ID, username, roles)
         else:
             token = AuthService.exchange_roles_for_access_token(
@@ -631,31 +688,30 @@ class AuthService:
 
     # TBD: credential didn't contain any username info.
     @staticmethod
-    def username_for_roles(roles: list[str], username_prefix: str = "bdd") -> str:
+    def username_for_roles(roles: list[str]) -> str:
         """Convert role names to a deterministic BDD username."""
         role_safe = [
             re.sub(r"[^A-Za-z0-9]+", "-", role.lower()).strip("-")
             for role in roles
             if role and role.strip()
         ]
-        return f"{username_prefix}-{'-'.join(role_safe)}"
+        return f"bdd-{'-'.join(role_safe)}"
 
     @staticmethod
     def create_expired_jwt(client_id, username, roles):
         """Create an expired JWT token for negative credential tests.
 
         The issuer must match the backend's HYDRA_PUBLIC_ISSUER_URL: go-oidc
-        checks issuer before expiry, so a foreign issuer fails with
-        "issued by a different provider" instead of the "token is expired"
-        message the scenarios assert on. Expiry is checked before the
-        signature, so the token needs no valid signature.
+        checks the signature, then the issuer, then the expiry. The token is
+        signed with the development key whose public half the BDD stack names
+        in DCS_DEV_ACCESS_TOKEN_KEY (deployment/helm/values.bdd.yml), so the
+        backend checks signatures and refuses the token for its expiry.
         """
         issuer = (
             os.getenv("BDD_HYDRA_ISSUER_URL", "").strip()
             or os.getenv("BDD_PUBLIC_ORIGIN", "").strip()
             or "http://localhost:18080"
         ).rstrip("/")
-        header = {"alg": "none"}
         payload = {
             "sub": username,
             "iss": issuer,
@@ -663,7 +719,5 @@ class AuthService:
             "ext": {"roles": roles, "iss": issuer},
             "exp": int(time.time()) - 3600,
         }
-
-        encoded_header = base64.urlsafe_b64encode(json.dumps(header).encode()).decode().rstrip("=")
-        encoded_payload = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
-        return f"{encoded_header}.{encoded_payload}."
+        key = (Path(__file__).resolve().parents[1] / "keys" / "access-token-dev.key.pem").read_text()
+        return jwt.encode(payload, key, algorithm="ES256")

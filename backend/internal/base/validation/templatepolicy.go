@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tggo/goRDFlib/shacl"
+
 	"digital-contracting-service/internal/base/datatype"
 )
 
@@ -22,14 +24,18 @@ type TemplatePolicyAuditMetadata struct {
 }
 
 type PolicyFinding struct {
-	PolicySetID    string `json:"policySetId"`
-	PolicyVersion  string `json:"policyVersion"`
-	RuleID         string `json:"ruleId"`
-	Title          string `json:"title"`
-	Severity       string `json:"severity"`
-	Message        string `json:"message"`
-	Path           string `json:"path,omitempty"`
-	FieldIri       string `json:"fieldIri,omitempty"`
+	PolicySetID   string `json:"policySetId"`
+	PolicyVersion string `json:"policyVersion"`
+	RuleID        string `json:"ruleId"`
+	Title         string `json:"title"`
+	Severity      string `json:"severity"`
+	Message       string `json:"message"`
+	Path          string `json:"path,omitempty"`
+	FieldIri      string `json:"fieldIri,omitempty"`
+	// FocusNode is the SHACL sh:focusNode IRI when this finding came from
+	// hub-shape validation. Kept as structured data — do not re-parse it from
+	// Message (PACM-07 clause reporting).
+	FocusNode      string `json:"focusNode,omitempty"`
 	OntologyTerm   string `json:"ontologyTerm,omitempty"`
 	Requirement    string `json:"requirement,omitempty"`
 	ActualValue    any    `json:"actualValue,omitempty"`
@@ -41,6 +47,10 @@ type PolicyFinding struct {
 	// validateAgainstHubShapes (shaclengine.go, ADR-8/ADR-9); zero for
 	// findings from other audit sources (ODRL, the SLA validation profile).
 	ShapesVersion int `json:"shapesVersion,omitempty"`
+	// Source names the audit that produced this finding (the Source*
+	// constants in severity.go). AuditContractContent sets it; the template
+	// policy audit and ad-hoc callers leave it empty.
+	Source string `json:"source,omitempty"`
 }
 
 type templatePolicySet struct {
@@ -76,6 +86,8 @@ func AuditTemplatePolicies(raw *datatype.JSON, metadata TemplatePolicyAuditMetad
 		return nil, err
 	}
 
+	libraryFields := declaredLibraryFields(ctx, data)
+
 	findings := []PolicyFinding{}
 	if !isCanonicalEnvelope(data) {
 		findings = append(findings, templateStructureFinding(policySet, "template data must use the canonical dcs:documentStructure envelope"))
@@ -84,9 +96,39 @@ func AuditTemplatePolicies(raw *datatype.JSON, metadata TemplatePolicyAuditMetad
 		if !templatePolicyRuleApplies(rule, metadata.TemplateType) {
 			continue
 		}
-		findings = append(findings, evaluateTemplatePolicyRule(policySet, rule, data, metadata, ontology)...)
+		findings = append(findings, evaluateTemplatePolicyRule(policySet, rule, data, metadata, ontology, libraryFields)...)
 	}
 	return findings, nil
+}
+
+// declaredLibraryFields are the properties (sh:path) of the shapes libraries
+// the document declares in sh:shapesGraph, the canonical envelope excluded. A
+// library this hub does not hold adds no field, so a field bound to it stays
+// unknown.
+func declaredLibraryFields(ctx context.Context, data documentData) map[string]bool {
+	fields := map[string]bool{}
+	source, err := requireShapeSource()
+	if err != nil {
+		return fields
+	}
+	pathPredicate := shacl.IRI(shacl.SH + "path")
+	for _, anchor := range declaredShapesGraphs(data) {
+		if anchor.Name == source.CanonicalShapesName() {
+			continue
+		}
+		content, _, err := source.ShapesAt(ctx, anchor.Name, anchor.Version)
+		if err != nil {
+			continue
+		}
+		graph, err := shacl.LoadTurtleString(content, "urn:dcs:hub:"+anchor.Name)
+		if err != nil {
+			continue
+		}
+		for _, triple := range graph.All(nil, &pathPredicate, nil) {
+			fields[triple.Object.Value()] = true
+		}
+	}
+	return fields
 }
 
 func loadTemplatePolicySet() (*templatePolicySet, error) {
@@ -94,7 +136,7 @@ func loadTemplatePolicySet() (*templatePolicySet, error) {
 	if err != nil {
 		return nil, err
 	}
-	bytes, err := os.ReadFile(path)
+	bytes, err := os.ReadFile(path) // #nosec G304 -- path comes from operator configuration (environment), not from a request
 	if err != nil {
 		return nil, fmt.Errorf("read template policy file %q: %w", path, err)
 	}
@@ -127,7 +169,7 @@ func resolveTemplatePolicyFile() (string, error) {
 	return "", errors.New("template policy file not found")
 }
 
-func evaluateTemplatePolicyRule(policySet *templatePolicySet, rule templatePolicyRule, data documentData, metadata TemplatePolicyAuditMetadata, ontology *domainOntology) []PolicyFinding {
+func evaluateTemplatePolicyRule(policySet *templatePolicySet, rule templatePolicyRule, data documentData, metadata TemplatePolicyAuditMetadata, ontology *domainOntology, libraryFields map[string]bool) []PolicyFinding {
 	switch rule.Builtin {
 	case "canonical_document_structure":
 		return auditCanonicalDocumentStructure(policySet, rule, data)
@@ -146,7 +188,7 @@ func evaluateTemplatePolicyRule(policySet *templatePolicySet, rule templatePolic
 	case "finished_template_state":
 		return auditFinishedTemplateState(policySet, rule, metadata)
 	case "canonical_domain_fields":
-		return auditCanonicalDomainFields(policySet, rule, data, ontology)
+		return auditCanonicalDomainFields(policySet, rule, data, ontology, libraryFields)
 	case "constrained_parameters_use_value_constraint":
 		return auditConstrainedParameters(policySet, rule, data, ontology)
 	case "required_domain_fields":
@@ -250,7 +292,7 @@ func auditComponentDocumentStructureIntegrity(policySet *templatePolicySet, rule
 }
 
 func auditComponentContractDataIntegrity(policySet *templatePolicySet, rule templatePolicyRule, data documentData) []PolicyFinding {
-	if _, exists := topLevelValueExists(data, "contractData"); !exists {
+	if _, exists := topLevelValueExists(data, "contractFields"); !exists {
 		return nil
 	}
 	return auditContractDataIntegrity(policySet, rule, data, false)
@@ -268,36 +310,36 @@ func auditCanonicalContractData(policySet *templatePolicySet, rule templatePolic
 }
 
 func auditContractDataIntegrity(policySet *templatePolicySet, rule templatePolicyRule, data documentData, requireAtLeastOne bool) []PolicyFinding {
-	placeholders, ok := topLevelValue(data, "contractData").([]any)
-	if !ok || len(placeholders) == 0 {
+	fields, ok := topLevelValue(data, "contractFields").([]any)
+	if !ok || len(fields) == 0 {
 		if !requireAtLeastOne && ok {
 			return nil
 		}
-		return []PolicyFinding{newPolicyFinding(policySet, rule, "dcs:contractData must contain at least one dcs:Placeholder", "dcs:contractData", "")}
+		return []PolicyFinding{newPolicyFinding(policySet, rule, "dcs:contractFields must contain at least one dcs:ContractField", "dcs:contractFields", "")}
 	}
 	findings := []PolicyFinding{}
 	fieldIDs := map[string]bool{}
-	for index, rawPlaceholder := range placeholders {
-		placeholder, ok := rawPlaceholder.(map[string]any)
+	for index, rawField := range fields {
+		field, ok := rawField.(map[string]any)
 		if !ok {
-			findings = append(findings, newPolicyFinding(policySet, rule, fmt.Sprintf("dcs:contractData item %d must be a placeholder object", index), "dcs:contractData", ""))
+			findings = append(findings, newPolicyFinding(policySet, rule, fmt.Sprintf("dcs:contractFields item %d must be a ContractField object", index), "dcs:contractFields", ""))
 			continue
 		}
-		fieldID, _ := placeholder["@id"].(string)
+		fieldID, _ := field["@id"].(string)
 		if strings.TrimSpace(fieldID) == "" {
-			findings = append(findings, newPolicyFinding(policySet, rule, fmt.Sprintf("dcs:contractData item %d requires @id", index), "dcs:contractData.@id", ""))
+			findings = append(findings, newPolicyFinding(policySet, rule, fmt.Sprintf("dcs:contractFields item %d requires @id", index), "dcs:contractFields.@id", ""))
 		} else {
 			fieldIDs[fieldID] = true
 		}
-		if strings.TrimSpace(stringMapValue(placeholder, "dcs:datatype")) == "" {
-			findings = append(findings, newPolicyFinding(policySet, rule, fmt.Sprintf("placeholder %q requires dcs:datatype", fieldID), "dcs:contractData.dcs:datatype", ""))
+		if strings.TrimSpace(stringMapValue(field, "dcs:datatype")) == "" {
+			findings = append(findings, newPolicyFinding(policySet, rule, fmt.Sprintf("field %q requires dcs:datatype", fieldID), "dcs:contractFields.dcs:datatype", ""))
 		}
-		if strings.TrimSpace(stringMapValue(placeholder, "dcs:label")) == "" {
-			findings = append(findings, newPolicyFinding(policySet, rule, fmt.Sprintf("placeholder %q requires dcs:label", fieldID), "dcs:contractData.dcs:label", ""))
+		if strings.TrimSpace(stringMapValue(field, "dcs:label")) == "" {
+			findings = append(findings, newPolicyFinding(policySet, rule, fmt.Sprintf("field %q requires dcs:label", fieldID), "dcs:contractFields.dcs:label", ""))
 		}
 	}
 	if len(fieldIDs) == 0 {
-		findings = append(findings, newPolicyFinding(policySet, rule, "dcs:contractData must declare at least one placeholder @id", "dcs:contractData.@id", ""))
+		findings = append(findings, newPolicyFinding(policySet, rule, "dcs:contractFields must declare at least one field @id", "dcs:contractFields.@id", ""))
 	}
 	return findings
 }
@@ -322,7 +364,13 @@ func auditPolicyOperandIntegrity(policySet *templatePolicySet, rule templatePoli
 	findings := []PolicyFinding{}
 	for _, policy := range policies {
 		policyID, _ := policy["@id"].(string)
-		constraints := policyConstraints(policy["odrl:constraint"])
+		// The leaves of a logical constraint and the constraints on the rule's
+		// duties are checked the same way as a direct constraint
+		// (ValidateContractClosed reads them the same way).
+		var constraints []map[string]any
+		for _, constraint := range append(policyConstraints(policy["odrl:constraint"]), dutyConstraints(policy["odrl:duty"])...) {
+			constraints = append(constraints, compactConstraintLeaves(constraint)...)
+		}
 		if len(constraints) == 0 {
 			findings = append(findings, newPolicyFinding(policySet, rule, fmt.Sprintf("policy %q requires odrl:constraint", policyID), "dcs:policies.odrl:constraint", ""))
 			continue
@@ -419,16 +467,29 @@ func auditFinishedTemplateHasClauseSemantics(policySet *templatePolicySet, rule 
 	structure, _ := topLevelValue(data, "documentStructure").(map[string]any)
 	blocks, _ := canonicalBlocks(structure)
 	fieldIDs := canonicalContractDataFieldIDs(data)
+	// A clause is also bound when the ODRL rule backed by its prose
+	// (dcs:prose) references a declared field.
+	ruleBound := map[string]bool{}
+	for _, rule := range collectODRLPolicyRules(topLevelValue(data, "policies")) {
+		prose, _ := rule["dcs:prose"].(map[string]any)
+		proseID, _ := prose["@id"].(string)
+		for _, ref := range collectClauseRefs(rule) {
+			if fieldIDs[ref] {
+				ruleBound[proseID] = true
+			}
+		}
+	}
 	for _, rawBlock := range blocks {
 		block, ok := rawBlock.(map[string]any)
 		if !ok || block["@type"] != "dcs:Clause" {
 			continue
 		}
-		if clauseHasContractDataBinding(block, fieldIDs) {
+		blockID, _ := block["@id"].(string)
+		if clauseHasContractDataBinding(block, fieldIDs) || ruleBound[blockID] {
 			return nil
 		}
 	}
-	return []PolicyFinding{newPolicyFinding(policySet, rule, "finished templates should contain at least one dcs:Clause with a placeholder bound to dcs:contractData", "dcs:documentStructure.dcs:blocks", "")}
+	return []PolicyFinding{newPolicyFinding(policySet, rule, "finished templates should contain at least one dcs:Clause with a field bound to dcs:contractFields", "dcs:documentStructure.dcs:blocks", "")}
 }
 
 func auditFinishedTemplateState(policySet *templatePolicySet, rule templatePolicyRule, metadata TemplatePolicyAuditMetadata) []PolicyFinding {
@@ -439,11 +500,14 @@ func auditFinishedTemplateState(policySet *templatePolicySet, rule templatePolic
 	return []PolicyFinding{newPolicyFinding(policySet, rule, fmt.Sprintf("template state %q is not one of the finished states: %s", metadata.State, strings.Join(states, ", ")), "state", "")}
 }
 
-func auditCanonicalDomainFields(policySet *templatePolicySet, rule templatePolicyRule, data documentData, ontology *domainOntology) []PolicyFinding {
+// auditCanonicalDomainFields accepts a field of the domain ontology and a
+// property of a shapes library the document declares (a data-object field,
+// ADR-23).
+func auditCanonicalDomainFields(policySet *templatePolicySet, rule templatePolicyRule, data documentData, ontology *domainOntology, libraryFields map[string]bool) []PolicyFinding {
 	findings := []PolicyFinding{}
 	forEachSemanticParameter(data, ontology, func(conditionID string, index int, param map[string]any) {
 		fieldIri, _ := param["fieldIri"].(string)
-		if _, ok := ontology.fields[fieldIri]; !ok {
+		if _, ok := ontology.fields[fieldIri]; !ok && !libraryFields[fieldIri] {
 			findings = append(findings, newPolicyFinding(policySet, rule, fmt.Sprintf("semantic condition %q uses unknown domain field %q", conditionID, fieldIri), fmt.Sprintf("semanticConditions.%s.parameters.%d", conditionID, index), fieldIri))
 		}
 	})
@@ -502,26 +566,42 @@ func auditMetadataComplete(policySet *templatePolicySet, rule templatePolicyRule
 	return findings
 }
 
-// forEachSemanticParameter visits each top-level placeholder. A placeholder is
-// self-contained: its identity for domain-field audits is its dcs:shape @id
-// (falling back to its own @id), and it carries its value constraint inline
-// (dcs:valueConstraint).
+// forEachSemanticParameter visits each top-level field. The identity of a
+// field for domain-field audits is its dcs:shape @id. Without dcs:shape it is
+// the data-object property that references the field (a negotiable leaf,
+// ADR-23), else the field's own @id. A field carries its value constraint
+// inline (dcs:valueConstraint).
 func forEachSemanticParameter(data documentData, _ *domainOntology, visit func(conditionID string, index int, param map[string]any)) {
-	placeholders, _ := topLevelValue(data, "contractData").([]any)
-	for index, rawPlaceholder := range placeholders {
-		placeholder, ok := rawPlaceholder.(map[string]any)
+	leafPaths := map[string]string{}
+	objects, _ := topLevelValue(data, "contractData").([]any)
+	for _, rawObject := range objects {
+		object, _ := rawObject.(map[string]any)
+		for path, value := range object {
+			if ref, ok := value.(map[string]any); ok && len(ref) == 1 && !strings.HasPrefix(path, "@") {
+				if id, _ := ref["@id"].(string); id != "" {
+					leafPaths[id] = path
+				}
+			}
+		}
+	}
+	contractFields, _ := topLevelValue(data, "contractFields").([]any)
+	for index, rawContractField := range contractFields {
+		field, ok := rawContractField.(map[string]any)
 		if !ok {
 			continue
 		}
-		fieldIRI, _ := placeholder["@id"].(string)
-		if shape, ok := placeholder["dcs:shape"].(map[string]any); ok {
+		fieldIRI, _ := field["@id"].(string)
+		if path, ok := leafPaths[fieldIRI]; ok {
+			fieldIRI = path
+		}
+		if shape, ok := field["dcs:shape"].(map[string]any); ok {
 			if shapeID, _ := shape["@id"].(string); shapeID != "" {
 				fieldIRI = shapeID
 			}
 		}
 		visit("", index, map[string]any{
 			"fieldIri":        fieldIRI,
-			"valueConstraint": placeholder["dcs:valueConstraint"],
+			"valueConstraint": field["dcs:valueConstraint"],
 		})
 	}
 }
@@ -544,13 +624,13 @@ func canonicalLayout(structure map[string]any) ([]any, bool) {
 
 func canonicalContractDataFieldIDs(data documentData) map[string]bool {
 	fieldIDs := map[string]bool{}
-	placeholders, _ := topLevelValue(data, "contractData").([]any)
-	for _, rawPlaceholder := range placeholders {
-		placeholder, ok := rawPlaceholder.(map[string]any)
+	fields, _ := topLevelValue(data, "contractFields").([]any)
+	for _, rawField := range fields {
+		field, ok := rawField.(map[string]any)
 		if !ok {
 			continue
 		}
-		fieldID, _ := placeholder["@id"].(string)
+		fieldID, _ := field["@id"].(string)
 		if strings.TrimSpace(fieldID) != "" {
 			fieldIDs[fieldID] = true
 		}

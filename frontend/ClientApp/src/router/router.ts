@@ -1,11 +1,17 @@
 import {
+  ArchiveBoxIcon,
   ArrowsRightLeftIcon,
+  BellAlertIcon,
   CheckCircleIcon,
   CircleStackIcon,
   ClipboardDocumentListIcon,
   DocumentTextIcon,
   EyeIcon,
+  KeyIcon,
+  LockClosedIcon,
+  LockOpenIcon,
   PencilSquareIcon,
+  ServerStackIcon,
   ShieldCheckIcon,
   ShieldExclamationIcon,
   Square3Stack3DIcon,
@@ -27,6 +33,13 @@ import { authenticationService } from '@/services/authentication-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useAuthTokenStore } from '@/stores/auth-token-store'
 import { useNavStore } from '@/stores/nav-store'
+import ContractTargetAdminView from '@/views/admin/ContractTargetAdminView.vue'
+import KeyInventoryAdminView from '@/views/admin/KeyInventoryAdminView.vue'
+import LockoutAdminView from '@/views/admin/LockoutAdminView.vue'
+import MachineIdentityAdminView from '@/views/admin/MachineIdentityAdminView.vue'
+import WebhookAdminView from '@/views/admin/WebhookAdminView.vue'
+import ArchiveDashboardView from '@/views/archive/ArchiveDashboardView.vue'
+import ArchiveDetailView from '@/views/archive/ArchiveDetailView.vue'
 import AuditView from '@/views/audit/AuditView.vue'
 import AuthSuccessView from '@/views/auth/AuthSuccessView.vue'
 import LoginView from '@/views/auth/LoginView.vue'
@@ -68,6 +81,10 @@ const ROUTES = {
   AUDIT: {
     LIST: 'audit.list',
   },
+  ARCHIVE: {
+    DETAIL: 'archive-detail',
+    DASHBOARD: 'archive.dashboard',
+  },
   AUTH: {
     SUCCESS: 'auth.success',
     PID_VERIFY: 'auth.pid_verify',
@@ -90,6 +107,13 @@ const ROUTES = {
   },
   NON_COMPLIANCE: {
     INVESTIGATION: 'non_compliance.investigation',
+  },
+  ADMIN: {
+    TARGETS: 'admin.targets',
+    WEBHOOKS: 'admin.webhooks',
+    SYSTEM_USERS: 'admin.system-users',
+    KEY_INVENTORY: 'admin.key-inventory',
+    LOCKOUTS: 'admin.lockouts',
   },
   SEMANTIC_HUB: {
     DASHBOARD: 'semantic_hub.dashboard',
@@ -136,7 +160,7 @@ const routes: RouteRecordRaw[] = [
       hideInSidebar: true,
       requiresAuth: true,
       title: 'DCS - New Template',
-      roles: ['TEMPLATE_CREATOR', 'TEMPLATE_REVIEWER', 'TEMPLATE_APPROVER', 'TEMPLATE_MANAGER'],
+      roles: ['TEMPLATE_CREATOR', 'TEMPLATE_MANAGER'],
     },
   },
   {
@@ -148,7 +172,7 @@ const routes: RouteRecordRaw[] = [
       hideInSidebar: true,
       requiresAuth: true,
       title: 'DCS - Edit Template',
-      roles: ['TEMPLATE_CREATOR', 'TEMPLATE_REVIEWER', 'TEMPLATE_APPROVER', 'TEMPLATE_MANAGER'],
+      roles: ['TEMPLATE_CREATOR', 'TEMPLATE_REVIEWER', 'TEMPLATE_MANAGER'],
     },
   },
   {
@@ -198,7 +222,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Review Tasks',
       order: 3.1,
-      roles: ['TEMPLATE_REVIEWER', 'CONTRACT_REVIEWER'],
+      roles: ['TEMPLATE_REVIEWER', 'TEMPLATE_MANAGER', 'CONTRACT_REVIEWER'],
     },
   },
   {
@@ -211,7 +235,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Approval Tasks',
       order: 3.2,
-      roles: ['TEMPLATE_APPROVER', 'CONTRACT_APPROVER'],
+      roles: ['TEMPLATE_APPROVER', 'TEMPLATE_MANAGER', 'CONTRACT_APPROVER'],
     },
   },
   {
@@ -263,7 +287,32 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Audit',
       order: 5,
-      roles: ['AUDITOR', 'ARCHIVE_MANAGER'],
+      roles: ['AUDITOR', 'COMPLIANCE_OFFICER', 'ARCHIVE_MANAGER'],
+    },
+  },
+  {
+    path: '/archive/detail',
+    name: ROUTES.ARCHIVE.DETAIL,
+    component: ArchiveDetailView,
+    meta: {
+      name: 'Archived contract',
+      hideInSidebar: true,
+      title: 'DCS - Archived contract',
+      requiresAuth: true,
+      roles: ['ARCHIVE_MANAGER', 'CONTRACT_OBSERVER', 'AUDITOR', 'COMPLIANCE_OFFICER'],
+    },
+  },
+  {
+    path: '/archive/dashboard',
+    name: ROUTES.ARCHIVE.DASHBOARD,
+    component: ArchiveDashboardView,
+    meta: {
+      name: 'Archive',
+      icon: ArchiveBoxIcon,
+      requiresAuth: true,
+      title: 'DCS - Archive Dashboard',
+      order: 6,
+      roles: ['AUDITOR', 'ARCHIVE_MANAGER', 'CONTRACT_OBSERVER', 'COMPLIANCE_OFFICER'],
     },
   },
   {
@@ -326,6 +375,9 @@ const routes: RouteRecordRaw[] = [
         'CONTRACT_APPROVER',
         'CONTRACT_MANAGER',
         'CONTRACT_OBSERVER',
+        // Read-only inspection with the stored evidence (DCS-IR-CWE-12).
+        'AUDITOR',
+        'COMPLIANCE_OFFICER',
       ],
     },
   },
@@ -395,7 +447,7 @@ const routes: RouteRecordRaw[] = [
       icon: PencilSquareIcon,
       requiresAuth: true,
       title: 'DCS - Signing',
-      order: 6,
+      order: 7,
       roles: ['CONTRACT_SIGNER', 'CONTRACT_MANAGER', 'CONTRACT_OBSERVER'],
     },
   },
@@ -408,7 +460,7 @@ const routes: RouteRecordRaw[] = [
       hideInSidebar: true,
       requiresAuth: true,
       title: 'DCS - Secure Contract Viewer',
-      roles: ['CONTRACT_SIGNER', 'CONTRACT_MANAGER'],
+      roles: ['CONTRACT_SIGNER', 'CONTRACT_MANAGER', 'CONTRACT_OBSERVER'],
     },
   },
   {
@@ -420,8 +472,73 @@ const routes: RouteRecordRaw[] = [
       icon: ShieldCheckIcon,
       requiresAuth: true,
       title: 'DCS - Signature Compliance Viewer',
-      order: 7,
+      order: 8,
       roles: ['AUDITOR', 'COMPLIANCE_OFFICER', 'CONTRACT_MANAGER'],
+    },
+  },
+  {
+    path: '/admin/targets',
+    name: ROUTES.ADMIN.TARGETS,
+    component: ContractTargetAdminView,
+    meta: {
+      name: 'Target Systems',
+      icon: ServerStackIcon,
+      requiresAuth: true,
+      title: 'DCS - Target Systems',
+      order: 11,
+      roles: ['SYSTEM_ADMINISTRATOR', 'INTEGRATION_MANAGER'],
+    },
+  },
+  {
+    path: '/admin/webhooks',
+    name: ROUTES.ADMIN.WEBHOOKS,
+    component: WebhookAdminView,
+    meta: {
+      name: 'Webhooks',
+      icon: BellAlertIcon,
+      requiresAuth: true,
+      title: 'DCS - Webhooks',
+      order: 11,
+      roles: ['SYSTEM_ADMINISTRATOR', 'INTEGRATION_MANAGER'],
+    },
+  },
+  {
+    path: '/admin/system-users',
+    name: ROUTES.ADMIN.SYSTEM_USERS,
+    component: MachineIdentityAdminView,
+    meta: {
+      name: 'System Users',
+      icon: KeyIcon,
+      requiresAuth: true,
+      title: 'DCS - System Users',
+      order: 12,
+      roles: ['SYSTEM_ADMINISTRATOR'],
+    },
+  },
+  {
+    path: '/admin/hsm-keys',
+    name: ROUTES.ADMIN.KEY_INVENTORY,
+    component: KeyInventoryAdminView,
+    meta: {
+      name: 'Key Inventory',
+      icon: LockClosedIcon,
+      requiresAuth: true,
+      title: 'DCS - Key Inventory',
+      order: 13,
+      roles: ['SYSTEM_ADMINISTRATOR'],
+    },
+  },
+  {
+    path: '/admin/lockouts',
+    name: ROUTES.ADMIN.LOCKOUTS,
+    component: LockoutAdminView,
+    meta: {
+      name: 'Lockouts',
+      icon: LockOpenIcon,
+      requiresAuth: true,
+      title: 'DCS - Lockouts',
+      order: 14,
+      roles: ['SYSTEM_ADMINISTRATOR'],
     },
   },
   {
@@ -433,8 +550,8 @@ const routes: RouteRecordRaw[] = [
       icon: ShieldExclamationIcon,
       requiresAuth: true,
       title: 'DCS - Non-Compliance Investigation',
-      order: 7,
-      roles: ['COMPLIANCE_OFFICER'],
+      order: 9,
+      roles: ['COMPLIANCE_OFFICER', 'AUDITOR'],
     },
   },
   {
@@ -446,7 +563,7 @@ const routes: RouteRecordRaw[] = [
       icon: CircleStackIcon,
       requiresAuth: true,
       title: 'DCS - Semantic Hub',
-      order: 8,
+      order: 10,
       roles: ['TEMPLATE_MANAGER'],
     },
   },
@@ -522,7 +639,7 @@ router.beforeEach((to) => {
   }
 })
 
-router.beforeEach((to) => {
+router.afterEach((to) => {
   const scrollStore = useScrollStore()
   if (to.matched.some((r) => r.path.includes(':'))) {
     scrollStore.addGutter()
@@ -531,7 +648,7 @@ router.beforeEach((to) => {
   }
 })
 
-router.beforeEach((_, from) => {
+router.afterEach((_, from) => {
   const navStore = useNavStore()
   navStore.previousRoute = from
 })

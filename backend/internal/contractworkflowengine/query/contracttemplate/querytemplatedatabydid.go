@@ -1,77 +1,22 @@
 package contracttemplate
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"net/url"
 	"strings"
-
-	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/validation"
-	"digital-contracting-service/internal/contractworkflowengine/db"
 )
-
-type GetTemplateDataByDIDQry struct {
-	DID string
-}
-
-type GetTemplateDataByDIDHandler struct {
-	DB     *sqlx.DB
-	CTRepo db.ContractTemplateRepo
-}
-
-func (h *GetTemplateDataByDIDHandler) Handle(ctx context.Context, qry GetTemplateDataByDIDQry) (*datatype.JSON, error) {
-	templateData, version, err := h.getTemplateData(ctx, qry)
-	if err != nil {
-		return nil, err
-	}
-	return ConvertTemplateDataToContractData(templateData, qry.DID, version)
-}
-
-func (h *GetTemplateDataByDIDHandler) getTemplateData(ctx context.Context, qry GetTemplateDataByDIDQry) (*datatype.JSON, int, error) {
-	templateData, version, err := h.getContractTemplateDataFromDB(ctx, qry.DID)
-	if err != nil {
-		return nil, 0, fmt.Errorf("could not read template data from DB: %w", err)
-	}
-
-	return templateData, version, nil
-}
-
-func (h *GetTemplateDataByDIDHandler) getContractTemplateDataFromDB(ctx context.Context, templateDID string) (*datatype.JSON, int, error) {
-	tx, err := h.DB.BeginTxx(ctx, nil)
-	if err != nil {
-		return nil, 0, fmt.Errorf("could not create transaction: %w", err)
-	}
-	defer func(tx *sqlx.Tx) {
-		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-			log.Printf("could not rollback transaction: %v", err)
-		}
-	}(tx)
-
-	templateData, err := h.CTRepo.ReadContractTemplateDataByID(ctx, tx, templateDID)
-	if err != nil {
-		return nil, 0, fmt.Errorf("could not read contract template data: %w", err)
-	}
-
-	err = tx.Commit()
-	if err != nil {
-		return nil, 0, fmt.Errorf("could not commit transaction: %w", err)
-	}
-	return templateData.TemplateData, templateData.TemplateVersion, nil
-}
 
 // ConvertTemplateDataToContractData derives a contract document from a
 // stored template document: @type becomes dcs:Contract, dcs:metadata's
 // @type becomes dcs:ContractMetadata, derivedFromTemplate provenance is
 // attached, and every party IRI the ODRL rules reference is materialized
-// as a typed dcs:CompanyParty node. Used by both the creation preview
-// (this package's query handler) and the create command.
+// as a typed dcs:CompanyParty node.
 func ConvertTemplateDataToContractData(raw *datatype.JSON, templateDID string, templateVersions ...int) (*datatype.JSON, error) {
 	if raw == nil || !raw.IsNotNullValue() {
 		return raw, nil
@@ -101,6 +46,7 @@ func ConvertTemplateDataToContractData(raw *datatype.JSON, templateDID string, t
 	}
 	templateDataMap["derivedFromTemplate"] = provenance
 	materializeRuleParties(templateDataMap)
+	populateFixedFieldValues(templateDataMap)
 
 	contractData, err := datatype.NewJSON(templateDataMap)
 	if err != nil {
@@ -140,6 +86,10 @@ func materializeRuleParties(doc map[string]interface{}) {
 				if !found || role == "" {
 					continue
 				}
+				role, err := url.PathUnescape(role)
+				if err != nil || role == "" {
+					continue
+				}
 				if _, seen := roles[iri]; !seen {
 					roles[iri] = role
 					order = append(order, iri)
@@ -170,4 +120,64 @@ func materializeRuleParties(doc map[string]interface{}) {
 		})
 	}
 	doc["dcs:parties"] = parties
+}
+
+// populateFixedFieldValues fills the contract terms that the template's SLA
+// rules fix (DCS-FR-TR-12): an obligation constraint "field odrl:eq literal"
+// gives that field its value. A field that already has a value keeps it.
+// Constraints under odrl:or or odrl:xone fix nothing and are not read.
+func populateFixedFieldValues(doc map[string]interface{}) {
+	policies, ok := doc["dcs:policies"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	fixed := map[string]interface{}{}
+	obligations, _ := policies["odrl:obligation"].([]interface{})
+	for _, rawRule := range obligations {
+		rule, ok := rawRule.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		constraints, isList := rule["odrl:constraint"].([]interface{})
+		if !isList {
+			constraints = []interface{}{rule["odrl:constraint"]}
+		}
+		for _, rawConstraint := range constraints {
+			constraint, ok := rawConstraint.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			operator, _ := constraint["odrl:operator"].(map[string]interface{})
+			left, _ := constraint["odrl:leftOperand"].(map[string]interface{})
+			field, _ := left["@id"].(string)
+			if operator["@id"] != "odrl:eq" || field == "" {
+				continue
+			}
+			right := constraint["odrl:rightOperand"]
+			if node, isNode := right.(map[string]interface{}); right == nil || (isNode && node["@value"] == nil) {
+				continue
+			}
+			fixed[field] = right
+		}
+	}
+	fields, _ := doc["dcs:contractFields"].([]interface{})
+	for _, rawField := range fields {
+		field, ok := rawField.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		id, _ := field["@id"].(string)
+		value, isFixed := fixed[id]
+		if _, hasValue := field["dcs:value"]; !isFixed || hasValue {
+			continue
+		}
+		if _, isNode := value.(map[string]interface{}); !isNode {
+			datatype, _ := field["dcs:datatype"].(string)
+			if datatype == "" {
+				datatype = "xsd:string"
+			}
+			value = map[string]interface{}{"@value": fmt.Sprint(value), "@type": datatype}
+		}
+		field["dcs:value"] = value
+	}
 }

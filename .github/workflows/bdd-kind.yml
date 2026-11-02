@@ -17,7 +17,13 @@ jobs:
       contents: read
       checks: write
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # The suite grew from 31 to 50 minutes when the mutual-settlement scenarios
+    # gained a full counterparty drive to APPROVED each, and 60 killed it
+    # mid-run with the diagnostic dump skipped — a suite that cannot finish
+    # reports nothing at all. Raised to leave headroom; the growth itself is
+    # worth reducing rather than absorbing indefinitely. The load test after
+    # the suite adds about 15 minutes (its capacity steps about 5 of them).
+    timeout-minutes: 100
     concurrency:
       group: bdd-kind-${{ github.ref }}
       cancel-in-progress: true
@@ -25,6 +31,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # The Federated Catalogue upgrade scenario installs the last
+          # Neo4j-based chart straight out of Git history; the default depth-1
+          # clone does not carry that commit's tree.
+          fetch-depth: 0
 
       # The kind node loads the heavy DSS demo bundle (~1-2GB) alongside the two
       # DCS images, pdf-core, and the Postgres/Keycloak/IPFS/ORCE/FC base images;
@@ -79,11 +90,17 @@ jobs:
         uses: crazy-max/ghaction-github-runtime@v3
 
       - name: Install kind
-        uses: helm/kind-action@v1.10.0
+        uses: helm/kind-action@v1.13.0
         with:
-          version: v0.23.0
+          # Only the tools: the Makefile creates the cluster from
+          # tests/bdd/kind-config.yaml, which pins the node image. The default
+          # CNI of kind v0.24 and later enforces NetworkPolicy.
+          version: v0.30.0
+          kubectl_version: v1.34.0
+          install_only: true
 
       - name: Run kind-backed BDD suite
+        id: bdd
         run: |
           set -euo pipefail
           make -C tests/bdd run_bdd_kind_ci \
@@ -91,8 +108,16 @@ jobs:
             DOCKER_IMAGE_REPOSITORY=digital-contracting-service \
             DOCKER_IMAGE_TAG=bdd \
             DOCKER_BUILD="docker buildx build --load" \
-            DCS_BUILD_CACHE="--cache-from type=gha,scope=dcs-image --cache-to type=gha,mode=max,scope=dcs-image" \
-            PDF_CORE_BUILD_CACHE="--cache-from type=gha,scope=pdf-core-image --cache-to type=gha,mode=max,scope=pdf-core-image"
+            DCS_BUILD_CACHE="--cache-from type=gha,scope=dcs-image-v2 --cache-to type=gha,mode=max,scope=dcs-image-v2" \
+            PDF_CORE_BUILD_CACHE="--cache-from type=gha,scope=pdf-core-image-v2 --cache-to type=gha,mode=max,scope=pdf-core-image-v2"
+
+      # NFR-PER-01/02: k6 against the same stack, with one and then two DCS
+      # replicas, then the capacity of each (tests/load/run_load.py). Also runs
+      # when scenarios failed, as long as the stack was deployed. Limits and
+      # load level: tests/load/dcs_load.js.
+      - name: Load test (k6)
+        if: ${{ !cancelled() && steps.bdd.outcome != 'skipped' }}
+        run: make -C tests/bdd run_load_kind_once KIND_CLUSTER_NAME=dcs-bdd
 
       - name: Save DSS image to cache
         if: always() && steps.dss-cache.outputs.cache-hit != 'true'
@@ -110,14 +135,49 @@ jobs:
           set -euo pipefail
           kubectl get pods -n dcs-bdd -o wide || true
           kubectl get events -n dcs-bdd --sort-by=.lastTimestamp || true
+          # Every container of every pod in every namespace (issuer releases,
+          # Traefik, hook jobs), with the previous run of a restarted one.
+          bash tests/bdd/scripts/dump_cluster_logs.sh || true
+          # The whole Traefik log with its access log, as a report file: the
+          # dump above keeps only its tail.
+          mkdir -p tests/bdd/.reports
+          kubectl logs -n kube-system deployment/traefik --tail=-1 > tests/bdd/.reports/traefik.log 2>&1 || true
           kubectl logs -n dcs-bdd -l app.kubernetes.io/component=backend \
             -c digital-contracting-service --tail=2000 --prefix || true
+          # The backend is not the only container in that pod. A sidecar that
+          # never becomes ready holds the whole rollout open, and naming one
+          # container here meant the one that failed was the one never logged.
+          kubectl logs -n dcs-bdd -l app.kubernetes.io/component=backend \
+            --all-containers --tail=200 --prefix || true
+          # "1/2 Running" does not say which container is unready.
+          kubectl get pods -n dcs-bdd -o 'custom-columns=POD:.metadata.name,CONTAINER:.status.containerStatuses[*].name,READY:.status.containerStatuses[*].ready,RESTARTS:.status.containerStatuses[*].restartCount' || true
           kubectl logs -n dcs-bdd -l app.kubernetes.io/component=backend \
             -c digital-contracting-service --tail=200 --prefix --previous || true
           kubectl logs -n dcs-bdd -l app.kubernetes.io/component=pdf-core --tail=100 --prefix || true
           kubectl logs -n dcs-bdd -l app.kubernetes.io/component=dss --tail=100 --prefix || true
           kubectl logs deployment/dcs-keycloak -n dcs-bdd --tail=200 || true
           kubectl logs -n dcs-bdd job/dcs-digital-contracting-service-hsm-provision --tail=100 || true
+          kubectl logs -n dcs-bdd job/dcs-digital-contracting-service-fc-realm-provision --tail=100 || true
+          # Grepped, not tailed: fc-service logs thousands of DEBUG lines
+          # over a full BDD run, so a plain --tail=N from the end reliably
+          # misses an early failure. WARN/ERROR (permission denials, auth
+          # failures) survive the whole run's volume this way instead.
+          kubectl logs -n dcs-bdd deployment/fc-service --tail=-1 | grep -E 'WARN|ERROR|extracted roles|Completed [45]' || true
+          # The IPFS node sits under every store, ship and audit anchor, so a
+          # node in trouble surfaces as timeouts three layers up while its own
+          # reason -- disk pressure, repo limit, a wedged GC -- goes uncaptured.
+          # The pin count and repo size are what distinguish a node that
+          # degrades as the run grows from one that was never healthy.
+          kubectl logs -n dcs-bdd deployment/dcs-ipfs --tail=400 --prefix || true
+          docker exec dcs-bdd-control-plane df -h / /var || true
+          for release in dcs dcs2; do
+            echo "--- ${release}-ipfs node state ---"
+            # The Kubo RPC API requires its bearer token (charts/ipfs, api.auth).
+            kubectl exec -n dcs-bdd "deployment/${release}-ipfs" -c ipfs -- \
+              sh -c 'ipfs --api-auth "bearer:$IPFS_API_TOKEN" pin ls --type=recursive 2>/dev/null | wc -l' || true
+            kubectl exec -n dcs-bdd "deployment/${release}-ipfs" -c ipfs -- \
+              sh -c 'ipfs --api-auth "bearer:$IPFS_API_TOKEN" repo stat' || true
+          done
 
       - name: Generate coverage XML and summary
         if: always()
@@ -164,11 +224,141 @@ jobs:
           set -euo pipefail
           make -C tests/bdd kind_delete KIND_CLUSTER_NAME=dcs-bdd || true
 
+  audit-isolated-ci-gate:
+    name: audit-isolated-ci-gate
+    permissions:
+      contents: read
+      checks: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: audit-isolated-ci-gate-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free up disk space
+        run: |
+          echo "Before:"; df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup /usr/share/swift || true
+          sudo docker image prune -af || true
+          echo "After:"; df -h /
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Cache audit BDD Python venv
+        uses: actions/cache@v4
+        with:
+          path: tests/bdd/.venv
+          key: audit-bdd-venv-py312-${{ hashFiles('testWallet/requirements.txt', 'tests/bdd/Makefile') }}
+          restore-keys: |
+            audit-bdd-venv-py312-
+
+      - name: Cache DSS demo image
+        id: audit-dss-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/audit-dss-image.tar
+          key: audit-dss-image-conectx-dss-demo-6.2.1
+      - name: Load cached DSS image
+        if: steps.audit-dss-cache.outputs.cache-hit == 'true'
+        run: docker load -i /tmp/audit-dss-image.tar
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Expose GitHub Actions cache to buildx
+        uses: crazy-max/ghaction-github-runtime@v3
+
+      - name: Install kind
+        uses: helm/kind-action@v1.13.0
+        with:
+          # Only the tools: the Makefile creates the cluster from
+          # tests/bdd/kind-config.yaml, which pins the node image. The default
+          # CNI of kind v0.24 and later enforces NetworkPolicy.
+          version: v0.30.0
+          kubectl_version: v1.34.0
+          install_only: true
+
+      - name: Run isolated audit BDD gate
+        run: |
+          set -euo pipefail
+          make -C tests/bdd run_bdd_audit_kind_ci \
+            KIND_CLUSTER_NAME=dcs-audit-bdd \
+            DOCKER_IMAGE_REPOSITORY=digital-contracting-service \
+            DOCKER_IMAGE_TAG=bdd \
+            DOCKER_BUILD="docker buildx build --load" \
+            DCS_BUILD_CACHE="--cache-from type=gha,scope=audit-dcs-image --cache-to type=gha,mode=max,scope=audit-dcs-image" \
+            PDF_CORE_BUILD_CACHE="--cache-from type=gha,scope=audit-pdf-core-image --cache-to type=gha,mode=max,scope=audit-pdf-core-image"
+
+      - name: Save DSS image to cache
+        if: always() && steps.audit-dss-cache.outputs.cache-hit != 'true'
+        run: docker save conectx/dss-demo:6.2.1 -o /tmp/audit-dss-image.tar || true
+
+      - name: Dump audit namespace info on failure
+        if: failure()
+        env:
+          KUBECONFIG: ${{ github.workspace }}/tests/bdd/.tmp/kind-kubeconfig
+        run: |
+          set -euo pipefail
+          kubectl get pods -n dcs-bdd -o wide || true
+          kubectl get events -n dcs-bdd --sort-by=.lastTimestamp || true
+          # Every container of every pod in every namespace (issuer releases,
+          # Traefik, hook jobs), with the previous run of a restarted one.
+          bash tests/bdd/scripts/dump_cluster_logs.sh || true
+          kubectl logs -n dcs-bdd -l app.kubernetes.io/component=backend \
+            -c digital-contracting-service --tail=2000 --prefix || true
+          kubectl logs -n dcs-bdd -l app.kubernetes.io/component=backend \
+            --all-containers --tail=200 --prefix || true
+          kubectl get pods -n dcs-bdd -o 'custom-columns=POD:.metadata.name,CONTAINER:.status.containerStatuses[*].name,READY:.status.containerStatuses[*].ready,RESTARTS:.status.containerStatuses[*].restartCount' || true
+          kubectl logs -n dcs-bdd -l app.kubernetes.io/component=pdf-core --tail=200 --prefix || true
+          kubectl logs -n dcs-bdd -l app.kubernetes.io/component=dss --tail=100 --prefix || true
+          kubectl logs deployment/dcs-keycloak -n dcs-bdd --tail=200 || true
+          kubectl logs -n dcs-bdd job/dcs-digital-contracting-service-hsm-provision --tail=100 || true
+          kubectl logs -n dcs-bdd job/dcs-digital-contracting-service-fc-realm-provision --tail=100 || true
+          kubectl logs -n dcs-bdd deployment/fc-service --tail=-1 | grep -E 'WARN|ERROR|extracted roles|Completed [45]' || true
+
+      - name: Publish audit BDD test report
+        if: always() && hashFiles('tests/bdd/.reports/junit/*.xml') != ''
+        uses: dorny/test-reporter@v1
+        with:
+          name: Audit Isolated BDD Test Results
+          path: tests/bdd/.reports/junit/*.xml
+          reporter: java-junit
+          fail-on-error: false
+          list-suites: all
+          list-tests: all
+
+      - name: Upload audit BDD reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-isolated-bdd-reports
+          path: tests/bdd/.reports/**
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Teardown audit kind cluster
+        if: always()
+        run: |
+          set -euo pipefail
+          make -C tests/bdd kind_delete KIND_CLUSTER_NAME=dcs-audit-bdd || true
+
   e2e-playwright:
     permissions:
       contents: read
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Sized so a bad day still finishes: the suite retries each failure once
+    # and a killed run writes no HTML report, which is exactly when the
+    # artifact is needed.
+    timeout-minutes: 80
     concurrency:
       group: e2e-playwright-${{ github.ref }}
       cancel-in-progress: true
@@ -241,9 +431,14 @@ jobs:
         uses: crazy-max/ghaction-github-runtime@v3
 
       - name: Install kind
-        uses: helm/kind-action@v1.10.0
+        uses: helm/kind-action@v1.13.0
         with:
-          version: v0.23.0
+          # Only the tools: the Makefile creates the cluster from
+          # tests/bdd/kind-config.yaml, which pins the node image. The default
+          # CNI of kind v0.24 and later enforces NetworkPolicy.
+          version: v0.30.0
+          kubectl_version: v1.34.0
+          install_only: true
 
       - name: Run Playwright E2E on its own kind stack
         run: |
@@ -253,8 +448,8 @@ jobs:
             DOCKER_IMAGE_REPOSITORY=digital-contracting-service \
             DOCKER_IMAGE_TAG=bdd \
             DOCKER_BUILD="docker buildx build --load" \
-            DCS_BUILD_CACHE="--cache-from type=gha,scope=dcs-image --cache-to type=gha,mode=max,scope=dcs-image" \
-            PDF_CORE_BUILD_CACHE="--cache-from type=gha,scope=pdf-core-image --cache-to type=gha,mode=max,scope=pdf-core-image"
+            DCS_BUILD_CACHE="--cache-from type=gha,scope=dcs-image-v2 --cache-to type=gha,mode=max,scope=dcs-image-v2" \
+            PDF_CORE_BUILD_CACHE="--cache-from type=gha,scope=pdf-core-image-v2 --cache-to type=gha,mode=max,scope=pdf-core-image-v2"
 
       - name: Save DSS image to cache
         if: always() && steps.dss-cache.outputs.cache-hit != 'true'
@@ -290,6 +485,9 @@ jobs:
           set -euo pipefail
           kubectl get pods -n dcs-bdd -o wide || true
           kubectl get events -n dcs-bdd --sort-by=.lastTimestamp || true
+          # Every container of every pod in every namespace (issuer releases,
+          # Traefik, hook jobs), with the previous run of a restarted one.
+          bash tests/bdd/scripts/dump_cluster_logs.sh || true
           # Per-deployment so both instances (dcs + dcs2) are captured whole and a
           # large tail keeps the export/regeneration diagnostics that fire near the
           # end of a run inside the window.
@@ -299,6 +497,8 @@ jobs:
           done
           kubectl logs -n dcs-bdd -l app.kubernetes.io/component=pdf-core --tail=400 --prefix || true
           kubectl logs deployment/dcs-keycloak -n dcs-bdd --tail=100 || true
+          kubectl logs -n dcs-bdd job/dcs-digital-contracting-service-fc-realm-provision --tail=100 || true
+          kubectl logs -n dcs-bdd deployment/fc-service --tail=-1 | grep -E 'WARN|ERROR|extracted roles|Completed [45]' || true
 
       - name: Teardown kind cluster
         if: always()

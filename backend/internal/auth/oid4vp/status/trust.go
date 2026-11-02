@@ -3,43 +3,71 @@ package status
 import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
-	"crypto/elliptic"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"net/url"
-	"os"
 	"strings"
+
+	"digital-contracting-service/internal/base/ecutil"
 )
 
 // TrustConfig maps issuer identifiers to trusted public keys (JWKS).
 // For XFSC signed status lists, look up the JWT iss claim—often the statuslist
 // tenant host URL signed by crypto-provider Vault transit, not the credential iss.
+//
+// This is a key-resolution view of the trust document, not a second reading of
+// it. It is built by projecting the issuers oid4vp.TrustConfig already parsed
+// (NewTrustConfig), so there is one parse and one answer to which issuers this
+// deployment trusts.
+//
+// The view is deliberately narrower than what it is projected from, and the
+// narrowing is not a scoping decision: nothing here consults the source
+// entry's purposes or organizations, because no purpose in the vocabulary
+// grants status-list signing. Any issuer with a usable bundled key can sign a
+// status list this deployment will honour. Adding that scope means adding the
+// purpose first, in policy/trust.rego, not filtering here.
 type TrustConfig struct {
-	VCTs    []string                    `json:"vcts"`
-	Issuers map[string]TrustIssuerEntry `json:"issuers"`
+	Issuers map[string]TrustIssuerEntry
+	// X5CRoots are the anchors an x5c-bearing status list's chain must verify
+	// against. An issuer that publishes its key by chain carries no bundled
+	// JWKS, so without these its status list resolves to no key at all.
+	X5CRoots *x509.CertPool
 }
 
 type TrustIssuerEntry struct {
-	JWKS TrustJWKS `json:"jwks"`
+	JWKS TrustJWKS
 }
 
 type TrustJWKS struct {
 	Keys []map[string]any `json:"keys"`
 }
 
-func LoadTrustConfig(path string) (*TrustConfig, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var cfg TrustConfig
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return nil, err
-	}
-	if len(cfg.Issuers) == 0 {
-		return nil, fmt.Errorf("trust config: issuers are required")
+// NewTrustConfig builds the key-resolution view from each issuer's raw "jwks"
+// object. An issuer whose key is resolved by certificate chain carries no
+// bundled JWKS and is absent from this view: its status list is verified from
+// the chain in the token's own x5c header against X5CRoots, not from here.
+//
+// An empty view is therefore a legitimate result, not an error: a deployment
+// whose status-list issuers all publish by certificate — which is what ADR-34
+// makes ours — has no bundled key to put in it. Whether the config as a whole
+// can resolve anything is decided where the anchors are also known; see
+// ConfigureStatusListVerification.
+func NewTrustConfig(issuerJWKS map[string]json.RawMessage) (*TrustConfig, error) {
+	cfg := TrustConfig{Issuers: map[string]TrustIssuerEntry{}}
+	for issuer, raw := range issuerJWKS {
+		if len(raw) == 0 {
+			continue
+		}
+		var jwks TrustJWKS
+		if err := json.Unmarshal(raw, &jwks); err != nil {
+			return nil, fmt.Errorf("trust config: issuer %q jwks: %w", issuer, err)
+		}
+		if len(jwks.Keys) == 0 {
+			continue
+		}
+		cfg.Issuers[issuer] = TrustIssuerEntry{JWKS: jwks}
 	}
 	return &cfg, nil
 }
@@ -146,15 +174,7 @@ func jwkToECDSAPublicKey(jwk map[string]any) (*ecdsa.PublicKey, error) {
 	}
 	xRaw, _ := jwk["x"].(string)
 	yRaw, _ := jwk["y"].(string)
-	x, err := decodeBase64URLInt(xRaw)
-	if err != nil {
-		return nil, err
-	}
-	y, err := decodeBase64URLInt(yRaw)
-	if err != nil {
-		return nil, err
-	}
-	return &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, nil
+	return ecutil.FromJWKCoords(strings.TrimSpace(xRaw), strings.TrimSpace(yRaw))
 }
 
 func jwkToEd25519PublicKey(jwk map[string]any) (ed25519.PublicKey, error) {
@@ -174,12 +194,4 @@ func jwkToEd25519PublicKey(jwk map[string]any) (ed25519.PublicKey, error) {
 	pub := make(ed25519.PublicKey, ed25519.PublicKeySize)
 	copy(pub, raw)
 	return pub, nil
-}
-
-func decodeBase64URLInt(s string) (*big.Int, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(s))
-	if err != nil {
-		return nil, err
-	}
-	return new(big.Int).SetBytes(raw), nil
 }

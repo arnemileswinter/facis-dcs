@@ -2,11 +2,15 @@ import { defineStore } from 'pinia'
 import { computed, type Ref, ref } from 'vue'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { TemplateState } from '@/types/contract-template-state'
+import { compareValues } from '@/utils/comparison'
 import type { Contract } from '@/models/contract/contract'
 import type { ContractApprovalTask } from '@/models/contract/contract-approval-task'
 import type { ContractNegotiationTask } from '@/models/contract/contract-negotiation-task'
 import type { ContractReviewTask } from '@/models/contract/contract-review-task'
-import type { PartialContractTemplate } from '@/models/contract-template'
+import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
+import type { ContractRetrieveRequest } from '@/models/requests/contract-request'
+
+export type ContractListQuery = Pick<ContractRetrieveRequest, 'state' | 'sort_by' | 'sort_order'>
 
 export const useContractsStore = defineStore('contracts', () => {
   const contracts: Ref<Contract[]> = ref([])
@@ -28,15 +32,15 @@ export const useContractsStore = defineStore('contracts', () => {
     ),
   )
   const approvedTemplates = computed(() =>
-    contractTemplates.value.filter(
-      (template) => template.state === TemplateState.registered || template.state === TemplateState.published,
-    ),
+    contractTemplates.value
+      .filter((template) => template.state === TemplateState.registered || template.state === TemplateState.published)
+      .sort((a, b) => compareValues(a, b, 'updated_at', 1)),
   )
 
   const findContractByDid = (did: string) => contracts.value.find((contract) => contract.did === did)
 
-  const fetchContracts = async (limit?: number, offset?: number) =>
-    await contractWorkflowService.retrieve({ limit, offset })
+  const fetchContracts = async (limit?: number, offset?: number, query?: ContractListQuery) =>
+    await contractWorkflowService.retrieve({ limit, offset, ...query })
 
   async function loadContracts() {
     loading.value = true
@@ -66,12 +70,13 @@ export const useContractsStore = defineStore('contracts', () => {
     }
   }
 
-  async function loadPaginatedContracts(currentPage: number, limit: number) {
+  // The state filter and the sort apply before the server cuts the page (DCS-IR-CWE-11).
+  async function loadPaginatedContracts(currentPage: number, limit: number, query?: ContractListQuery) {
     loading.value = true
     error.value = null
     try {
       const offset = currentPage
-      const paginatedResult = await fetchContracts(limit, offset)
+      const paginatedResult = await fetchContracts(limit, offset, query)
       paginatedContracts.value = paginatedResult.contracts
       negotiationTasks.value = paginatedResult.negotiation_tasks.map((task) => ({ ...task, type: 'contract' }))
       reviewTasks.value = paginatedResult.review_tasks.map((task) => ({ ...task, type: 'contract' }))

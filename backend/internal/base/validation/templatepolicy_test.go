@@ -35,27 +35,63 @@ func TestAuditTemplatePoliciesAcceptsCanonicalTemplateWithoutErrors(t *testing.T
 	}
 }
 
+// A clause is bound to contract data by a field placeholder in its prose or by
+// the ODRL rule its prose backs (dcs:prose).
 func TestAuditTemplatePoliciesFlagsCanonicalClauseWithoutContractDataBinding(t *testing.T) {
-	data := canonicalTemplateData(t)
-	var decoded map[string]any
-	require.NoError(t, json.Unmarshal(*data, &decoded))
-	structure := decoded["dcs:documentStructure"].(map[string]any)
-	blocks := structure["dcs:blocks"].(map[string]any)["@list"].([]any)
-	clause := blocks[0].(map[string]any)
-	content := clause["dcs:content"].(map[string]any)["@list"].([]any)
-	placeholder := content[1].(map[string]any)
-	placeholder["@id"] = "urn:uuid:missing-field"
-	raw, err := datatype.NewJSON(decoded)
-	require.NoError(t, err)
+	audit := func(ruleOperand string) []PolicyFinding {
+		t.Helper()
+		data := canonicalTemplateData(t)
+		var decoded map[string]any
+		require.NoError(t, json.Unmarshal(*data, &decoded))
+		structure := decoded["dcs:documentStructure"].(map[string]any)
+		clause := structure["dcs:blocks"].(map[string]any)["@list"].([]any)[0].(map[string]any)
+		clause["dcs:content"] = map[string]any{"@list": []any{"Provider country is agreed."}}
+		constraint := firstPolicyDuty(decoded)["odrl:constraint"].(map[string]any)
+		constraint["odrl:leftOperand"] = map[string]any{"@id": ruleOperand}
+		raw, err := datatype.NewJSON(decoded)
+		require.NoError(t, err)
+		findings, err := AuditTemplatePolicies(&raw, TemplatePolicyAuditMetadata{
+			DID:          "did:example:template",
+			TemplateType: "CONTRACT_TEMPLATE",
+			State:        "APPROVED",
+		})
+		require.NoError(t, err)
+		return findings
+	}
 
-	findings, err := AuditTemplatePolicies(&raw, TemplatePolicyAuditMetadata{
-		DID:          "did:example:template",
-		TemplateType: "CONTRACT_TEMPLATE",
-		State:        "APPROVED",
-	})
-	require.NoError(t, err)
+	require.True(t, hasFindingSeverity(audit("urn:uuid:missing-field"), "FACIS-TPL-CLAUSE-001", "error"))
+	require.NotContains(t, policyFindingRuleIDs(audit("urn:uuid:field-provider-country")), "FACIS-TPL-CLAUSE-001")
+}
 
-	require.True(t, hasFindingSeverity(findings, "FACIS-TPL-CLAUSE-001", "error"))
+// ADR-23: a field without dcs:shape that a data object references is
+// identified by the referencing property.
+func TestAuditTemplatePoliciesIdentifiesDataObjectLeafByItsProperty(t *testing.T) {
+	audit := func(path string) []PolicyFinding {
+		t.Helper()
+		data := canonicalTemplateData(t)
+		var decoded map[string]any
+		require.NoError(t, json.Unmarshal(*data, &decoded))
+		decoded["dcs:contractFields"] = append(decoded["dcs:contractFields"].([]any), map[string]any{
+			"@id": "urn:uuid:field-leaf", "@type": "dcs:ContractField", "dcs:label": "Leaf",
+			"dcs:datatype": "xsd:string", "dcs:required": true,
+		})
+		decoded["dcs:contractData"] = []any{map[string]any{
+			"@id": "urn:uuid:object-1", "@type": "https://example.org/legal#Contract",
+			path: map[string]any{"@id": "urn:uuid:field-leaf"},
+		}}
+		raw, err := datatype.NewJSON(decoded)
+		require.NoError(t, err)
+		findings, err := AuditTemplatePolicies(&raw, TemplatePolicyAuditMetadata{
+			DID:          "did:example:template",
+			TemplateType: "CONTRACT_TEMPLATE",
+			State:        "APPROVED",
+		})
+		require.NoError(t, err)
+		return findings
+	}
+
+	require.NotContains(t, policyFindingRuleIDs(audit("https://w3id.org/facis/dcs/taxonomy/v1#field-contract-payment-amount")), "FACIS-TPL-DOMAIN-001")
+	require.True(t, hasFindingSeverity(audit("https://example.org/legal#undeclared"), "FACIS-TPL-DOMAIN-001", "error"))
 }
 
 func TestAuditTemplatePoliciesFlagsPolicyOperandOutsideContractData(t *testing.T) {
@@ -82,9 +118,9 @@ func TestAuditTemplatePoliciesAcceptsRequiredDomainFields(t *testing.T) {
 	data := canonicalTemplateData(t)
 	var decoded map[string]any
 	require.NoError(t, json.Unmarshal(*data, &decoded))
-	decoded["dcs:contractData"] = append(decoded["dcs:contractData"].([]any),
-		canonicalRequirementField("jurisdiction"),
-		canonicalRequirementField("signature-level"),
+	decoded["dcs:contractFields"] = append(decoded["dcs:contractFields"].([]any),
+		canonicalContractField("jurisdiction"),
+		canonicalContractField("signature-level"),
 	)
 	raw, err := datatype.NewJSON(decoded)
 	require.NoError(t, err)
@@ -106,7 +142,7 @@ func TestAuditTemplatePoliciesDoesNotApplyCompletenessRulesToComponents(t *testi
 	data := canonicalTemplateData(t)
 	var decoded map[string]any
 	require.NoError(t, json.Unmarshal(*data, &decoded))
-	delete(decoded, "dcs:contractData")
+	delete(decoded, "dcs:contractFields")
 	delete(decoded, "dcs:policies")
 	structure := decoded["dcs:documentStructure"].(map[string]any)
 	delete(structure, "dcs:layout")
@@ -155,14 +191,14 @@ func TestAuditTemplatePoliciesFlagsComponentInternalPolicyReferences(t *testing.
 	require.False(t, hasFindingSeverity(findings, "FACIS-TPL-POLICY-001", "error"))
 }
 
-func canonicalRequirementField(id string) map[string]any {
+func canonicalContractField(id string) map[string]any {
 	ontologyIRIs := map[string]string{
 		"jurisdiction":    "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction",
 		"signature-level": "https://w3id.org/facis/dcs/taxonomy/v1#field-signature-requiredLevel",
 	}
 	return map[string]any{
 		"@id":          "urn:uuid:field-" + id,
-		"@type":        "dcs:Placeholder",
+		"@type":        "dcs:ContractField",
 		"dcs:label":    id,
 		"dcs:datatype": "xsd:string",
 		"dcs:shape":    map[string]any{"@id": ontologyIRIs[id]},

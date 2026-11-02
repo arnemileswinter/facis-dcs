@@ -1,13 +1,19 @@
 import type { DcsTemplateData } from '../dcs-jsonld'
+import type { TemplateComplianceStatus, TemplateLevel } from '@/models/contract-template/contract-template'
 import type { ContractTemplateActionFlag } from '@/types/contract-template-action-flag'
 import type { ContractTemplateState } from '@/types/contract-template-state'
+import type { PartyType } from '@/types/party-type'
 import type { TemplateType } from '@/types/template-type'
 
 export interface ContractTemplateCreateRequest {
+  party_type: PartyType
+  jurisdiction?: string
+  template_level?: TemplateLevel
+  required_templates?: string[]
+  industry?: string
   template_type: TemplateType
   name?: string
   description?: string
-  document_number?: string | null
   /** The template data of the contract template */
   template_data?: DcsTemplateData
 }
@@ -26,9 +32,13 @@ export interface ContractTemplateSubmitRequest {
 }
 
 export interface ContractTemplateUpdateRequest {
+  party_type?: PartyType
+  jurisdiction?: string
+  template_level?: TemplateLevel
+  required_templates?: string[]
+  industry?: string
   did: string
   updated_at: string
-  document_number?: string
   name?: string
   description?: string
   /** The template data of the contract template */
@@ -36,10 +46,13 @@ export interface ContractTemplateUpdateRequest {
 }
 
 export interface ContractTemplateUpdateManageRequest {
+  party_type?: PartyType
+  jurisdiction?: string
+  template_level?: TemplateLevel
+  required_templates?: string[]
+  industry?: string
   did: string
-  state?: ContractTemplateState
   updated_at: string
-  document_number?: string
   template_type?: TemplateType
   name?: string
   description?: string
@@ -48,15 +61,21 @@ export interface ContractTemplateUpdateManageRequest {
 }
 
 export interface ContractTemplateSearchRequest {
+  party_type?: PartyType
+  jurisdiction?: string
+  industry?: string
+  compliance_status?: TemplateComplianceStatus
   offset?: number
   limit?: number
   did?: string
-  document_number?: string
   version?: number
   template_type?: TemplateType
   state?: ContractTemplateState
   name?: string
   description?: string
+  created_by?: string
+  created_from?: string
+  created_to?: string
   filter?: string
 }
 
@@ -89,6 +108,8 @@ export interface ContractTemplateVerifyRequest {
 export interface ContractTemplateArchiveRequest {
   did: string
   updated_at: string
+  /** DCS-IR-TR-07: why the template is deprecated or deleted */
+  justification: string
 }
 
 export interface ContractTemplateRegisterRequest {
@@ -98,7 +119,8 @@ export interface ContractTemplateRegisterRequest {
 
 export interface ContractTemplateAuditRequest {
   did: string
-  updated_at: string
+  updated_at?: string
+  justification: string
 }
 
 export interface ContractTemplatePublishRequest {

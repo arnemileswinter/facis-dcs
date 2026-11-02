@@ -1,4 +1,4 @@
-export type TemplateEditorTabId = 'details' | 'clauses' | 'builder' | 'meta' | 'audit'
+export type TemplateEditorTabId = 'details' | 'clauses' | 'builder' | 'data' | 'meta' | 'audit'
 export interface AddBlockModalContext {
   parentBlockId: string
   /** Index in the parent's children array where the new block will be inserted */
@@ -30,6 +30,7 @@ interface TemplateEditorUiState {
     { id: 'details'; label: string },
     { id: 'clauses'; label: string },
     { id: 'builder'; label: string },
+    { id: 'data'; label: string },
     { id: 'meta'; label: string },
     { id: 'audit'; label: string },
   ]

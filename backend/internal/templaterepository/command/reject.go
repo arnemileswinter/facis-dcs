@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/datatype/userrole"
 
 	"digital-contracting-service/internal/base/datatype/componenttype"
@@ -55,11 +57,16 @@ func (h *Rejecter) Handle(ctx context.Context, cmd RejectCmd) error {
 
 	// Optimistic concurrency (see command package doc / ADR-0007).
 	if cmd.UpdatedAt.Unix() < processData.ContentUpdatedAt.Unix() {
-		return errors.New("contract template was updated elsewhere, please reload")
+		return fmt.Errorf("contract template %w, please reload", base.ErrUpdatedElsewhere)
 	}
 
 	if processData.State != contracttemplatestate.Reviewed.String() {
-		return errors.New("invalid contract template state")
+		return fmt.Errorf("%w: %s cannot be rejected", ErrInvalidTemplateState, processData.State)
+	}
+
+	// DCS-IR-TR-05: a rejection states its reason.
+	if strings.TrimSpace(cmd.Reason) == "" {
+		return fmt.Errorf("%w: a rejection requires a reason", ErrInvalidRequest)
 	}
 
 	exist, err := h.ATRepo.IsValidApprover(ctx, tx, cmd.DID, cmd.RejectedBy)
@@ -68,7 +75,7 @@ func (h *Rejecter) Handle(ctx context.Context, cmd RejectCmd) error {
 	}
 
 	if !exist {
-		return errors.New("invalid user")
+		return fmt.Errorf("%w: invalid user", ErrInvalidRequest)
 	}
 
 	err = h.ATRepo.UpdateState(ctx, tx, cmd.DID, cmd.RejectedBy, approvaltaskstate.Rejected.String())
@@ -76,20 +83,19 @@ func (h *Rejecter) Handle(ctx context.Context, cmd RejectCmd) error {
 		return fmt.Errorf("could not update approval task state: %w", err)
 	}
 
-	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, contracttemplatestate.Rejected.String())
+	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contracttemplatestate.Rejected.String())
 	if err != nil {
 		return fmt.Errorf("could not update current template state: %w", err)
 	}
 
 	evt := templateevents.RejectEvent{
-		DID:            cmd.DID,
-		DocumentNumber: processData.DocumentNumber,
-		Version:        processData.Version,
-		RejectedBy:     cmd.RejectedBy,
-		Reason:         cmd.Reason,
-		OccurredAt:     time.Now().UTC(),
-		HolderDID:      cmd.HolderDID,
-		UserRoles:      cmd.UserRoles,
+		DID:        cmd.DID,
+		Version:    processData.Version,
+		RejectedBy: cmd.RejectedBy,
+		Reason:     cmd.Reason,
+		OccurredAt: time.Now().UTC(),
+		HolderDID:  cmd.HolderDID,
+		UserRoles:  cmd.UserRoles,
 	}
 	err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
 	if err != nil {

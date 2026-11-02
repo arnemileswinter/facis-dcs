@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -18,42 +19,33 @@ import (
 // identical to the current embedded one and no VC attachment is present.
 var ErrNoChanges = errors.New("no changes: payloads are semantically identical")
 
-// DiffNQuads returns the N-Quads present in newPayload but not oldPayload (added)
-// and those present in oldPayload but not newPayload (removed).
-func DiffNQuads(oldPayload, newPayload []byte) (added, removed []string, err error) {
-	oldNQuads, err := NormalizePayload(oldPayload)
-	if err != nil {
-		return nil, nil, fmt.Errorf("normalize old payload: %w", err)
-	}
-	newNQuads, err := NormalizePayload(newPayload)
-	if err != nil {
-		return nil, nil, fmt.Errorf("normalize new payload: %w", err)
-	}
-	oldSet := nquadsToSet(oldNQuads)
-	newSet := nquadsToSet(newNQuads)
-	for q := range newSet {
-		if !oldSet[q] {
-			added = append(added, q)
-		}
-	}
-	for q := range oldSet {
-		if !newSet[q] {
-			removed = append(removed, q)
-		}
-	}
-	sort.Strings(added)
-	sort.Strings(removed)
-	return added, removed, nil
-}
+// lifecycleVCFileName is the attachment filename under which a contract's
+// current lifecycle credential is embedded.
+const lifecycleVCFileName = "contract-lifecycle-vc.json"
 
-func nquadsToSet(nquads []byte) map[string]bool {
-	set := make(map[string]bool)
-	for _, line := range strings.Split(string(nquads), "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			set[line] = true
-		}
+// lifecycleStatusFromVC returns the lifecycle state an incremental update
+// records in its dcs.lifecycle assertion: the state asserted by the credential
+// the same update attaches. That credential is what the caller knows and what
+// the eventual PAdES signature commits to, so it is what the provenance chain
+// must say — hardcoding "amended" on every hop left a signed contract's chain
+// reading draft -> amended -> amended while the credential beside it said
+// "active", so the artifact and /pdf/verify's DB-derived lifecycle_status could
+// disagree with nothing able to notice (ADR-13 requires the federation state to
+// be derivable from the artifact alone).
+//
+// A hop that attaches no credential, or one naming no status, records no
+// lifecycle event: it is a content amendment, and "amended" is the whole truth
+// about it.
+func lifecycleStatusFromVC(vcBytes []byte) string {
+	var vc struct {
+		CredentialSubject struct {
+			Status string `json:"status"`
+		} `json:"credentialSubject"`
 	}
-	return set
+	if err := json.Unmarshal(vcBytes, &vc); err != nil || vc.CredentialSubject.Status == "" {
+		return lifecycleStatusAmended
+	}
+	return vc.CredentialSubject.Status
 }
 
 var pdfTrailerSizeRE = regexp.MustCompile(`/Size (\d+)`)
@@ -83,15 +75,15 @@ func currentRootObjID(pdf []byte) (int, bool) {
 	return id, true
 }
 
-// isPAdESSigned reports whether pdf already carries a PAdES signature: a
-// signature value dictionary (/Type /Sig) with a /ByteRange. A C2PA lifecycle
-// update over such a PDF must be provenance-only — re-rendering the pages or
-// re-stamping the AcroForm signature field would drop the signed field's /V and
-// invalidate the signature (DCS-OR-C2PA-010).
-// IsPAdESSigned reports whether pdf carries a PAdES signature. Exported for the
-// service layer's offline-tamper check on the plain re-render verify path.
+// IsPAdESSigned reports whether pdf carries a PAdES signature: a signature
+// value dictionary (/Type /Sig) with a /ByteRange. Exported for the service
+// layer's offline-tamper check on the plain re-render verify path.
 func IsPAdESSigned(pdf []byte) bool { return isPAdESSigned(pdf) }
 
+// isPAdESSigned: a C2PA lifecycle update over a signed PDF must be
+// provenance-only — re-rendering the pages or re-stamping the AcroForm
+// signature field would drop the signed field's /V and invalidate the
+// signature (DCS-OR-C2PA-010).
 func isPAdESSigned(pdf []byte) bool {
 	if !bytes.Contains(pdf, []byte("/ByteRange")) {
 		return false
@@ -130,18 +122,23 @@ func findTrailerMaxObjID(pdf []byte) (int, error) {
 	return size - 1, nil
 }
 
-// parseCurrentPagesKids returns the page object IDs from the most recent Pages object (obj 2).
+// parseCurrentPagesKids returns the page object IDs of the page tree the
+// document's current Catalog points at.
+//
+// The tree is FOUND, not assumed to be object 2: an appended revision may
+// supersede the Catalog to name a different /Pages while leaving object 2
+// untouched, and a checker reading object 2 then compares pages a reader never
+// renders.
 func parseCurrentPagesKids(pdf []byte) ([]int, error) {
-	pos := findLastObjectHeaderOffset(pdf, 2)
-	if pos < 0 {
-		return nil, fmt.Errorf("Pages object (2 0 obj) not found")
+	pagesID, err := currentPagesObjID(pdf)
+	if err != nil {
+		return nil, err
 	}
-	end := bytes.Index(pdf[pos:], []byte("endobj"))
-	if end < 0 {
-		return nil, fmt.Errorf("Pages object end not found")
+	start, end, ok := lastObjectBody(pdf, pagesID)
+	if !ok {
+		return nil, fmt.Errorf("pages object (%d) not found", pagesID)
 	}
-	objBytes := pdf[pos : pos+end]
-	kidsMatch := pdfKidsRE.Find(objBytes)
+	kidsMatch := pdfKidsRE.Find(pdf[start:end])
 	if kidsMatch == nil {
 		return nil, fmt.Errorf("/Kids not found in Pages object")
 	}
@@ -162,7 +159,7 @@ func parseCurrentPagesKids(pdf []byte) ([]int, error) {
 // The original PDF bytes are preserved unchanged as a prefix so existing
 // C2PA hard-binding signatures remain verifiable over the original byte range.
 func UpdatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, compiledAt time.Time) ([]byte, error) {
-	return updatePDF(ctx, oldPDF, newPayload, nil, "", compiledAt)
+	return updatePDF(ctx, oldPDF, newPayload, nil, "", compiledAt, false)
 }
 
 // UpdatePDFWithVC appends a PDF incremental update that replaces visible page
@@ -179,7 +176,7 @@ func UpdatePDFWithVC(ctx context.Context, oldPDF []byte, newPayload []byte, vcBy
 	if len(vcBytes) == 0 {
 		return UpdatePDF(ctx, oldPDF, newPayload, compiledAt)
 	}
-	return updatePDF(ctx, oldPDF, newPayload, vcBytes, "", compiledAt)
+	return updatePDF(ctx, oldPDF, newPayload, vcBytes, "", compiledAt, false)
 }
 
 // UpdatePDFWithOptions is the full-control entry point used by the DCS backend.
@@ -188,7 +185,24 @@ func UpdatePDFWithVC(ctx context.Context, oldPDF []byte, newPayload []byte, vcBy
 // remote_manifests field (DCS-OR-C2PA-008 AC3). When remoteManifestURL is empty
 // the output is identical to UpdatePDF / UpdatePDFWithVC.
 func UpdatePDFWithOptions(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []byte, remoteManifestURL string, compiledAt time.Time) ([]byte, error) {
-	return updatePDF(ctx, oldPDF, newPayload, vcBytes, remoteManifestURL, compiledAt)
+	return updatePDF(ctx, oldPDF, newPayload, vcBytes, remoteManifestURL, compiledAt, false)
+}
+
+// ReanchorProvenance appends a provenance-only C2PA manifest whose hard
+// binding covers the document's current bytes, without changing its payload.
+//
+// A PAdES signature is applied after the lifecycle manifest so that the
+// signature commits to the provenance (ADR-26). That leaves the manifest's
+// whole-file binding covering less than the file it now lives in, and no
+// amendment can fix it: the payload has not changed, and the amendment path
+// refuses an unchanged document. This appends, so the signature's byte range
+// is untouched and the signature keeps verifying in external tools.
+func ReanchorProvenance(ctx context.Context, oldPDF []byte, remoteManifestURL string, compiledAt time.Time) ([]byte, error) {
+	payload, err := ExtractLatestEmbeddedJSONLD(oldPDF)
+	if err != nil {
+		return nil, fmt.Errorf("extract embedded payload to re-anchor: %w", err)
+	}
+	return updatePDF(ctx, oldPDF, payload, nil, remoteManifestURL, compiledAt, true)
 }
 
 // ExtractManifestStore returns the raw JUMBF C2PA manifest store bytes
@@ -197,9 +211,16 @@ func ExtractManifestStore(pdf []byte) ([]byte, error) {
 	return extractEmbeddedStreamByFileSpecName(pdf, "content_credential.c2pa")
 }
 
-// updatePDF is the shared implementation used by UpdatePDF and UpdatePDFWithVC.
-// The "no changes" guard is bypassed when vcBytes is non-nil.
-func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []byte, remoteManifestURL string, compiledAt time.Time) ([]byte, error) {
+// ExtractRemoteManifestURL returns the remote C2PA manifest URL that the PDF's
+// XMP dcterms:provenance property references, or "" when there is none
+// (DCS-OR-C2PA-008). The reference stays in the PDF when the embedded manifest
+// is removed, so a verifier can use it to get the manifest.
+func ExtractRemoteManifestURL(pdf []byte) string { return extractRemoteManifestURLFromXMP(pdf) }
+
+// updatePDF is the shared implementation behind all Update*/Reanchor entry
+// points. The "no changes" guard is bypassed when vcBytes is non-nil or the
+// call is a re-anchor.
+func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []byte, remoteManifestURL string, compiledAt time.Time, reanchor bool) ([]byte, error) {
 	oldPayload, err := ExtractEmbeddedJSONLD(oldPDF)
 	if err != nil {
 		return nil, fmt.Errorf("extract embedded JSON-LD: %w", err)
@@ -213,7 +234,9 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 	oldHashHex := hex.EncodeToString(oldHash[:])
 	newHashHex := hex.EncodeToString(newHash[:])
 
-	if oldHashHex == newHashHex && len(vcBytes) == 0 {
+	// A re-anchor deliberately carries an unchanged payload; every other caller
+	// gets the no-changes guard.
+	if oldHashHex == newHashHex && len(vcBytes) == 0 && !reanchor {
 		return nil, ErrNoChanges
 	}
 
@@ -301,7 +324,7 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 	// requires membership in the document /AF array and /EmbeddedFiles tree.
 	var patchedCatalog []byte
 	if vcBytes != nil {
-		patchedCatalog, err = catalogWithVCAssociated(oldPDF, rootObjID, vcSpecObjID)
+		patchedCatalog, err = catalogWithAssociatedFile(oldPDF, rootObjID, vcSpecObjID, lifecycleVCFileName)
 		if err != nil {
 			return nil, fmt.Errorf("associate lifecycle VC in catalog: %w", err)
 		}
@@ -319,7 +342,7 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 	var result []byte
 
 	for range 6 {
-		updatedC2PA, err := renderVerificationManifestStore(ctx, originalC2PA, updateManifestLabelFromHash(manifestHashHex), manifestDoc.ContractID, manifestHashHex, hardBindingHash, exclusions, compiledAt, remoteManifestURL)
+		updatedC2PA, err := renderVerificationManifestStore(ctx, originalC2PA, updateManifestLabel(hardBindingHash), manifestDoc.ContractID, manifestHashHex, lifecycleStatusFromVC(vcBytes), hardBindingHash, exclusions, compiledAt, remoteManifestURL)
 		if err != nil {
 			return nil, fmt.Errorf("render update manifest: %w", err)
 		}
@@ -355,6 +378,58 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 	return result, nil
 }
 
+// catalogWithAssociatedFile reads the document catalog (objID) from pdf and
+// returns its dictionary bytes with the filespec specObjID listed as the
+// associated file called fileName: appended to the /AF array and resolvable
+// under fileName in the /EmbeddedFiles name tree, which is what ISO 19005-3
+// clause 6.8 requires of an attachment carrying /AFRelationship. Returns the
+// dict without the object header/trailer, to be re-emitted as a superseded
+// object.
+//
+// A document accumulates one filespec per attachment: a contract is amended
+// under its "draft" lifecycle credential, then stamped "active" under a fresh
+// one just before signing. /AF grows — every revision's attachment stays
+// reachable — but a name tree holds exactly one entry per name, so that entry
+// must be re-pointed at the current filespec. Leaving the first one in place is
+// what made every reader that resolves an attachment BY NAME (pypdf, Acrobat's
+// attachment panel, a wallet) report "draft" for a signed contract; only the
+// backend was spared, because ExtractEmbeddedVC scans for the last filespec
+// instead of asking the name tree.
+func catalogWithAssociatedFile(pdf []byte, objID, specObjID int, fileName string) ([]byte, error) {
+	start, end, ok := lastObjectBody(pdf, objID)
+	if !ok {
+		return nil, fmt.Errorf("catalog object %d not found", objID)
+	}
+	dict := append([]byte(nil), pdf[start:end]...)
+	ref := []byte(fmt.Sprintf("%d 0 R", specObjID))
+	if af := catalogAFRE.FindSubmatchIndex(dict); af != nil && !bytes.Contains(dict[af[2]:af[3]], ref) {
+		dict = catalogAFRE.ReplaceAll(dict, []byte("/AF [${1} "+string(ref)+"]"))
+	}
+	ef := catalogEFRE.FindSubmatchIndex(dict)
+	if ef == nil {
+		return dict, nil
+	}
+	names := dict[ef[4]:ef[5]]
+	entry := []byte("(" + fileName + ") " + string(ref))
+	if existing := nameTreeEntryRE(fileName).FindIndex(names); existing != nil {
+		names = append(append(append([]byte(nil), names[:existing[0]]...), entry...), names[existing[1]:]...)
+	} else {
+		names = append(append(append([]byte(nil), names...), ' '), entry...)
+	}
+	return append(dict[:ef[4]:ef[4]], append(names, dict[ef[5]:]...)...), nil
+}
+
+// nameTreeEntryRE matches one /EmbeddedFiles name-tree entry — the key string
+// followed by the filespec reference it resolves to.
+func nameTreeEntryRE(fileName string) *regexp.Regexp {
+	return regexp.MustCompile(regexp.QuoteMeta("("+fileName+")") + `\s*\d+ 0 R`)
+}
+
+var (
+	catalogAFRE = regexp.MustCompile(`/AF \[([^\]]*)\]`)
+	catalogEFRE = regexp.MustCompile(`(/EmbeddedFiles << /Names \[)([^\]]*)(\])`)
+)
+
 // buildUpdateAppendixBytes constructs the raw bytes of the PDF incremental
 // update section. It supersedes:
 //   - obj 2  (Pages)        — updated /Kids list pointing to new page objects
@@ -365,37 +440,6 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 // appended with IDs beyond the existing maximum so originals are unreachable
 // via the updated xref chain but their bytes remain intact for signature
 // verification.
-// catalogWithVCAssociated reads the document catalog (objID) from pdf and returns
-// its dictionary bytes with the lifecycle-VC filespec (vcSpecObjID) added to the
-// /AF array and the /EmbeddedFiles name tree, so the attached VC is a properly
-// listed associated file (ISO 19005-3 clause 6.8). Returns the dict without the
-// object header/trailer, to be re-emitted as a superseded object.
-func catalogWithVCAssociated(pdf []byte, objID, vcSpecObjID int) ([]byte, error) {
-	off := findLastObjectHeaderOffset(pdf, objID)
-	if off < 0 {
-		return nil, fmt.Errorf("catalog object %d not found", objID)
-	}
-	start := off + len(fmt.Sprintf("%d 0 obj\n", objID))
-	end := bytes.Index(pdf[start:], []byte("\nendobj"))
-	if end < 0 {
-		return nil, fmt.Errorf("catalog object %d end not found", objID)
-	}
-	dict := append([]byte(nil), pdf[start:start+end]...)
-	vcRef := []byte(fmt.Sprintf("%d 0 R", vcSpecObjID))
-	if af := catalogAFRE.FindSubmatchIndex(dict); af != nil && !bytes.Contains(dict[af[2]:af[3]], vcRef) {
-		dict = catalogAFRE.ReplaceAll(dict, []byte("/AF [${1} "+string(vcRef)+"]"))
-	}
-	if ef := catalogEFRE.FindSubmatchIndex(dict); ef != nil && !bytes.Contains(dict[ef[4]:ef[5]], []byte("contract-lifecycle-vc.json")) {
-		dict = catalogEFRE.ReplaceAll(dict, []byte("${1}${2} (contract-lifecycle-vc.json) "+string(vcRef)+"${3}"))
-	}
-	return dict, nil
-}
-
-var (
-	catalogAFRE = regexp.MustCompile(`/AF \[([^\]]*)\]`)
-	catalogEFRE = regexp.MustCompile(`(/EmbeddedFiles << /Names \[)([^\]]*)(\])`)
-)
-
 func buildUpdateAppendixBytes(
 	baseLen, prevStartXref, oldSize int,
 	fileID string,
@@ -424,18 +468,18 @@ func buildUpdateAppendixBytes(
 	for _, page := range newPages {
 		entries = append(entries, objEntry{page.ContentID, baseLen + buf.Len()})
 		content := renderContentStream(page)
-		buf.WriteString(fmt.Sprintf("%d 0 obj\n", page.ContentID))
+		fmt.Fprintf(&buf, "%d 0 obj\n", page.ContentID)
 		buf.Write(streamObject([]byte(content), fmt.Sprintf("<< /Length %d >>", len(content))))
 		buf.WriteString("\nendobj\n")
 
 		entries = append(entries, objEntry{page.ObjectID, baseLen + buf.Len()})
-		buf.WriteString(fmt.Sprintf("%d 0 obj\n", page.ObjectID))
+		fmt.Fprintf(&buf, "%d 0 obj\n", page.ObjectID)
 		buf.WriteString(renderPageObject(page, fontObjID, pagesObjID))
 		buf.WriteString("\nendobj\n")
 
 		for _, annotation := range page.Annotations {
 			entries = append(entries, objEntry{annotation.ObjectID, baseLen + buf.Len()})
-			buf.WriteString(fmt.Sprintf("%d 0 obj\n", annotation.ObjectID))
+			fmt.Fprintf(&buf, "%d 0 obj\n", annotation.ObjectID)
 			buf.WriteString(renderAnnotationObject(annotation, newPages))
 			buf.WriteString("\nendobj\n")
 		}
@@ -447,7 +491,7 @@ func buildUpdateAppendixBytes(
 		for _, sigField := range page.SigFields {
 			appearance := renderSigFieldAppearanceStream(sigField)
 			entries = append(entries, objEntry{sigField.AppearanceObjectID, baseLen + buf.Len()})
-			buf.WriteString(fmt.Sprintf("%d 0 obj\n", sigField.AppearanceObjectID))
+			fmt.Fprintf(&buf, "%d 0 obj\n", sigField.AppearanceObjectID)
 			buf.Write(streamObject([]byte(appearance), fmt.Sprintf(
 				"<< /Type /XObject /Subtype /Form /BBox [0 0 %.2f %.2f] /Resources << /Font << /F1 %d 0 R >> >> /Length %d >>",
 				sigField.Rect[2]-sigField.Rect[0], sigField.Rect[3]-sigField.Rect[1],
@@ -456,7 +500,7 @@ func buildUpdateAppendixBytes(
 			buf.WriteString("\nendobj\n")
 
 			entries = append(entries, objEntry{sigField.WidgetObjectID, baseLen + buf.Len()})
-			buf.WriteString(fmt.Sprintf("%d 0 obj\n", sigField.WidgetObjectID))
+			fmt.Fprintf(&buf, "%d 0 obj\n", sigField.WidgetObjectID)
 			buf.WriteString(renderSigFieldWidgetObject(sigField, page.ObjectID, sigField.AppearanceObjectID))
 			buf.WriteString("\nendobj\n")
 		}
@@ -473,13 +517,13 @@ func buildUpdateAppendixBytes(
 	}
 	if len(sigFieldRefs) > 0 {
 		entries = append(entries, objEntry{acroFormID, baseLen + buf.Len()})
-		buf.WriteString(fmt.Sprintf("%d 0 obj\n<< /Fields [%s] /SigFlags 3 /DA (/F1 10 Tf 0 g) >>\nendobj\n",
-			acroFormID, strings.Join(sigFieldRefs, " ")))
+		fmt.Fprintf(&buf, "%d 0 obj\n<< /Fields [%s] /SigFlags 3 /DA (/F1 10 Tf 0 g) >>\nendobj\n",
+			acroFormID, strings.Join(sigFieldRefs, " "))
 	}
 
 	// Supersede obj 11: updated embedded JSON-LD.
 	entries = append(entries, objEntry{embFileID, baseLen + buf.Len()})
-	buf.WriteString(fmt.Sprintf("%d 0 obj\n", embFileID))
+	fmt.Fprintf(&buf, "%d 0 obj\n", embFileID)
 	buf.Write(streamObject(newEmbeddedPayload, fmt.Sprintf(
 		"<< /Type /EmbeddedFile /Subtype /application#2Fld+json /Length %d /Params << /Size %d /CheckSum <%s> >> >>",
 		len(newEmbeddedPayload), len(newEmbeddedPayload), newPayloadHash[:32],
@@ -494,23 +538,23 @@ func buildUpdateAppendixBytes(
 		newKids[i] = fmt.Sprintf("%d 0 R", p.ObjectID)
 	}
 	entries = append(entries, objEntry{pagesObjID, baseLen + buf.Len()})
-	buf.WriteString(fmt.Sprintf("%d 0 obj\n<< /Type /Pages /Kids [%s] /Count %d >>\nendobj\n",
-		pagesObjID, strings.Join(newKids, " "), len(newPages)))
+	fmt.Fprintf(&buf, "%d 0 obj\n<< /Type /Pages /Kids [%s] /Count %d >>\nendobj\n",
+		pagesObjID, strings.Join(newKids, " "), len(newPages))
 
 	// Append VC embedded-file and filespec objects when a credential is supplied.
 	// The EmbeddedFile stream is written before the Filespec so that ExtractVC
 	// (which scans backwards from the filename marker) finds the correct stream.
 	if len(vcBytes) > 0 {
 		entries = append(entries, objEntry{vcFileObjID, baseLen + buf.Len()})
-		buf.WriteString(fmt.Sprintf("%d 0 obj\n", vcFileObjID))
+		fmt.Fprintf(&buf, "%d 0 obj\n", vcFileObjID)
 		buf.Write(streamObject(vcBytes, fmt.Sprintf(
 			"<< /Type /EmbeddedFile /Subtype /application#2Fjson /Length %d >>", len(vcBytes))))
 		buf.WriteString("\nendobj\n")
 
 		entries = append(entries, objEntry{vcSpecObjID, baseLen + buf.Len()})
-		buf.WriteString(fmt.Sprintf(
+		fmt.Fprintf(&buf,
 			"%d 0 obj\n<< /Type /Filespec /F (contract-lifecycle-vc.json) /UF (contract-lifecycle-vc.json) /AFRelationship /Supplement /EF << /F %d 0 R >> >>\nendobj\n",
-			vcSpecObjID, vcFileObjID))
+			vcSpecObjID, vcFileObjID)
 	}
 
 	// Supersede obj 13 (XMP Metadata) when a remote manifest URL is supplied,
@@ -520,7 +564,7 @@ func buildUpdateAppendixBytes(
 	if remoteManifestURL != "" {
 		updatedXMP := renderXMPMetadata(remoteManifestURL)
 		entries = append(entries, objEntry{metadataObjID, baseLen + buf.Len()})
-		buf.WriteString(fmt.Sprintf("%d 0 obj\n", metadataObjID))
+		fmt.Fprintf(&buf, "%d 0 obj\n", metadataObjID)
 		buf.Write(streamObject(updatedXMP, fmt.Sprintf(
 			"<< /Type /Metadata /Subtype /XML /Length %d >>", len(updatedXMP))))
 		buf.WriteString("\nendobj\n")
@@ -528,7 +572,7 @@ func buildUpdateAppendixBytes(
 
 	// Supersede obj 9: updated C2PA manifest — written last so stream offset stabilises.
 	entries = append(entries, objEntry{c2paObjID, baseLen + buf.Len()})
-	buf.WriteString(fmt.Sprintf("%d 0 obj\n", c2paObjID))
+	fmt.Fprintf(&buf, "%d 0 obj\n", c2paObjID)
 	buf.Write(streamObject(updatedC2PA, fmt.Sprintf(
 		"<< /Type /EmbeddedFile /Subtype /application#2Fc2pa /Length %d >>", len(updatedC2PA))))
 	buf.WriteString("\nendobj\n")
@@ -536,7 +580,7 @@ func buildUpdateAppendixBytes(
 	// Write xref with contiguous subsections.
 	if len(patchedCatalog) > 0 {
 		entries = append(entries, objEntry{rootObjID, baseLen + buf.Len()})
-		buf.WriteString(fmt.Sprintf("%d 0 obj\n", rootObjID))
+		fmt.Fprintf(&buf, "%d 0 obj\n", rootObjID)
 		buf.Write(patchedCatalog)
 		buf.WriteString("\nendobj\n")
 	}
@@ -550,9 +594,9 @@ func buildUpdateAppendixBytes(
 		for j < len(entries) && entries[j].id == entries[j-1].id+1 {
 			j++
 		}
-		buf.WriteString(fmt.Sprintf("%d %d\n", entries[i].id, j-i))
+		fmt.Fprintf(&buf, "%d %d\n", entries[i].id, j-i)
 		for k := i; k < j; k++ {
-			buf.WriteString(fmt.Sprintf("%010d 00000 n \n", entries[k].offset))
+			fmt.Fprintf(&buf, "%010d 00000 n \n", entries[k].offset)
 		}
 		i = j
 	}
@@ -574,10 +618,10 @@ func buildUpdateAppendixBytes(
 	if fileID != "" {
 		idEntry = " /ID " + fileID
 	}
-	buf.WriteString(fmt.Sprintf(
+	fmt.Fprintf(&buf,
 		"trailer\n<< /Size %d /Root 1 0 R /Prev %d%s >>\nstartxref\n%d\n%%%%EOF\n",
 		newSize, prevStartXref, idEntry, xrefStart,
-	))
+	)
 	return buf.Bytes()
 }
 
@@ -611,15 +655,15 @@ func buildSignedUpdateAppendixBytes(
 	// Lifecycle VC attachment (a provenance event), appended as new objects.
 	if len(vcBytes) > 0 {
 		entries = append(entries, objEntry{vcFileObjID, baseLen + buf.Len()})
-		buf.WriteString(fmt.Sprintf("%d 0 obj\n", vcFileObjID))
+		fmt.Fprintf(&buf, "%d 0 obj\n", vcFileObjID)
 		buf.Write(streamObject(vcBytes, fmt.Sprintf(
 			"<< /Type /EmbeddedFile /Subtype /application#2Fjson /Length %d >>", len(vcBytes))))
 		buf.WriteString("\nendobj\n")
 
 		entries = append(entries, objEntry{vcSpecObjID, baseLen + buf.Len()})
-		buf.WriteString(fmt.Sprintf(
+		fmt.Fprintf(&buf,
 			"%d 0 obj\n<< /Type /Filespec /F (contract-lifecycle-vc.json) /UF (contract-lifecycle-vc.json) /AFRelationship /Supplement /EF << /F %d 0 R >> >>\nendobj\n",
-			vcSpecObjID, vcFileObjID))
+			vcSpecObjID, vcFileObjID)
 	}
 
 	// Supersede obj 13 (XMP Metadata) when a remote manifest URL is supplied —
@@ -627,7 +671,7 @@ func buildSignedUpdateAppendixBytes(
 	if remoteManifestURL != "" {
 		updatedXMP := renderXMPMetadata(remoteManifestURL)
 		entries = append(entries, objEntry{metadataObjID, baseLen + buf.Len()})
-		buf.WriteString(fmt.Sprintf("%d 0 obj\n", metadataObjID))
+		fmt.Fprintf(&buf, "%d 0 obj\n", metadataObjID)
 		buf.Write(streamObject(updatedXMP, fmt.Sprintf(
 			"<< /Type /Metadata /Subtype /XML /Length %d >>", len(updatedXMP))))
 		buf.WriteString("\nendobj\n")
@@ -640,7 +684,7 @@ func buildSignedUpdateAppendixBytes(
 	// beyond the sealed range). Content-changing amends of a signed PDF are a
 	// first-class "amended" lifecycle transition, not a frozen provenance-only one.
 	entries = append(entries, objEntry{embFileID, baseLen + buf.Len()})
-	buf.WriteString(fmt.Sprintf("%d 0 obj\n", embFileID))
+	fmt.Fprintf(&buf, "%d 0 obj\n", embFileID)
 	buf.Write(streamObject(newEmbeddedPayload, fmt.Sprintf(
 		"<< /Type /EmbeddedFile /Subtype /application#2Fld+json /Length %d /Params << /Size %d /CheckSum <%s> >> >>",
 		len(newEmbeddedPayload), len(newEmbeddedPayload), newPayloadHash[:32],
@@ -651,14 +695,14 @@ func buildSignedUpdateAppendixBytes(
 	// stabilises across the hard-binding hash iterations. The catalog reaches it
 	// unchanged via the content_credential.c2pa filespec's /EF reference.
 	entries = append(entries, objEntry{c2paObjID, baseLen + buf.Len()})
-	buf.WriteString(fmt.Sprintf("%d 0 obj\n", c2paObjID))
+	fmt.Fprintf(&buf, "%d 0 obj\n", c2paObjID)
 	buf.Write(streamObject(updatedC2PA, fmt.Sprintf(
 		"<< /Type /EmbeddedFile /Subtype /application#2Fc2pa /Length %d >>", len(updatedC2PA))))
 	buf.WriteString("\nendobj\n")
 
 	if len(patchedCatalog) > 0 {
 		entries = append(entries, objEntry{rootObjID, baseLen + buf.Len()})
-		buf.WriteString(fmt.Sprintf("%d 0 obj\n", rootObjID))
+		fmt.Fprintf(&buf, "%d 0 obj\n", rootObjID)
 		buf.Write(patchedCatalog)
 		buf.WriteString("\nendobj\n")
 	}
@@ -672,9 +716,9 @@ func buildSignedUpdateAppendixBytes(
 		for j < len(entries) && entries[j].id == entries[j-1].id+1 {
 			j++
 		}
-		buf.WriteString(fmt.Sprintf("%d %d\n", entries[i].id, j-i))
+		fmt.Fprintf(&buf, "%d %d\n", entries[i].id, j-i)
 		for k := i; k < j; k++ {
-			buf.WriteString(fmt.Sprintf("%010d 00000 n \n", entries[k].offset))
+			fmt.Fprintf(&buf, "%010d 00000 n \n", entries[k].offset)
 		}
 		i = j
 	}
@@ -694,10 +738,10 @@ func buildSignedUpdateAppendixBytes(
 	if fileID != "" {
 		idEntry = " /ID " + fileID
 	}
-	buf.WriteString(fmt.Sprintf(
+	fmt.Fprintf(&buf,
 		"trailer\n<< /Size %d /Root %d 0 R /Prev %d%s >>\nstartxref\n%d\n%%%%EOF\n",
 		newSize, rootObjID, prevStartXref, idEntry, xrefStart,
-	))
+	)
 	return buf.Bytes()
 }
 
@@ -724,22 +768,12 @@ func ExtractEmbeddedVC(pdf []byte) ([]byte, bool, error) {
 	if err != nil {
 		return nil, false, fmt.Errorf("contract-lifecycle-vc.json object id invalid: %w", err)
 	}
-	// Use LastIndex so the most recent definition wins (incremental update semantics).
-	objMarker := []byte(fmt.Sprintf("%d 0 obj", objID))
-	objPos := bytes.LastIndex(pdf, objMarker)
-	if objPos < 0 {
-		return nil, false, fmt.Errorf("contract-lifecycle-vc.json object %d not found", objID)
+	// The most recent definition wins (incremental update semantics).
+	streamStart, streamEnd, ok := lastObjectStreamData(pdf, objID)
+	if !ok {
+		return nil, false, fmt.Errorf("contract-lifecycle-vc.json stream not found in object %d", objID)
 	}
-	streamStart := bytes.Index(pdf[objPos:], []byte("stream\n"))
-	if streamStart < 0 {
-		return nil, false, fmt.Errorf("contract-lifecycle-vc.json stream start not found")
-	}
-	streamStart += objPos + len("stream\n")
-	streamEnd := bytes.Index(pdf[streamStart:], []byte("\nendstream"))
-	if streamEnd < 0 {
-		return nil, false, fmt.Errorf("contract-lifecycle-vc.json stream end not found")
-	}
-	return append([]byte(nil), pdf[streamStart:streamStart+streamEnd]...), true, nil
+	return append([]byte(nil), pdf[streamStart:streamEnd]...), true, nil
 }
 
 // incrementalUpdateMarker is the comment written as the very first line of
@@ -789,35 +823,59 @@ func incrementalUpdateMarkerOffsets(pdf []byte) []int {
 // where boundary[i] is the PDF prefix ending right after the i-th update's
 // appendix (boundary[N] == the full pdf). All hops together prove the current
 // visible state is reproducible, end to end, from its embedded payloads.
-func VerifyIncrementalUpdate(ctx context.Context, pdf []byte) error {
+//
+// The returned bytes are the deterministic reproduction the verdict was reached
+// on: the replay of the last hop when every hop held, and the replay of the hop
+// that diverged when one did not. A caller that must show WHY it decided as it
+// did (e.g. by digesting both sides) gets the evidence rather than having to
+// recompute it; nil is returned only when the chain failed before any
+// reproduction could be produced.
+func VerifyIncrementalUpdate(ctx context.Context, pdf []byte) ([]byte, error) {
 	offsets := incrementalUpdateMarkerOffsets(pdf)
 	if len(offsets) == 0 {
-		return fmt.Errorf("no incremental update marker found")
+		return nil, fmt.Errorf("no incremental update marker found")
 	}
 
 	boundary := pdf[:offsets[0]]
+	var reproduced []byte
 
 	oldPayload, err := ExtractEmbeddedJSONLD(boundary)
 	if err != nil {
-		return fmt.Errorf("extract old payload from original prefix: %w", err)
+		return nil, fmt.Errorf("extract old payload from original prefix: %w", err)
 	}
 	originalC2PA, err := extractEmbeddedStreamByFileSpecName(boundary, "content_credential.c2pa")
 	if err != nil {
-		return fmt.Errorf("extract original C2PA: %w", err)
+		return nil, fmt.Errorf("extract original C2PA: %w", err)
 	}
 	originalCompiledAt, err := extractLifecycleEffectiveAt(originalC2PA, 0)
 	if err != nil {
-		return fmt.Errorf("extract original lifecycle timestamp: %w", err)
+		return nil, fmt.Errorf("extract original lifecycle timestamp: %w", err)
 	}
-	freshOriginal, err := CompilePDF(ctx, oldPayload, originalCompiledAt)
+	// The asserting instance's DID is carried by the manifest, not the payload,
+	// so a verifier that never saw it must read it back off the document for the
+	// recompilation to reproduce the stored bytes — as with the timestamp above.
+	originalAuthority, err := extractLifecycleAuthority(originalC2PA, 0)
 	if err != nil {
-		return fmt.Errorf("recompile original payload: %w", err)
+		return nil, fmt.Errorf("extract original lifecycle authority: %w", err)
+	}
+	// Same reasoning as the authority above, applied to the signing leaf: the
+	// x5chain sits in the signed COSE headers, and this process's configured
+	// chain is its own instance's. Substituting it could never reproduce a
+	// document compiled by a federation peer.
+	originalChain, err := extractManifestX5Chain(originalC2PA, 0)
+	if err != nil {
+		return nil, fmt.Errorf("extract original signing chain: %w", err)
+	}
+	originalCtx := WithSigningChain(WithLifecycleAuthority(ctx, originalAuthority), originalChain)
+	freshOriginal, err := CompilePDF(originalCtx, oldPayload, originalCompiledAt)
+	if err != nil {
+		return nil, fmt.Errorf("recompile original payload: %w", err)
 	}
 	// boundary is the compiled PDF possibly followed by append-only PAdES
 	// signature updates. PAdES appends bytes after %%EOF without altering the
 	// preceding bytes, so the compiled output must be a byte-for-byte prefix.
 	if !bytes.HasPrefix(ZeroCOSESignatures(boundary), ZeroCOSESignatures(freshOriginal)) {
-		return fmt.Errorf("original PDF prefix does not match deterministic recompilation from its embedded payload")
+		return freshOriginal, fmt.Errorf("original PDF prefix does not match deterministic recompilation from its embedded payload")
 	}
 
 	for hop := 1; hop <= len(offsets); hop++ {
@@ -828,16 +886,25 @@ func VerifyIncrementalUpdate(ctx context.Context, pdf []byte) error {
 
 		newPayload, err := ExtractLatestEmbeddedJSONLD(hopEnd)
 		if err != nil {
-			return fmt.Errorf("extract payload for update %d: %w", hop, err)
+			return nil, fmt.Errorf("extract payload for update %d: %w", hop, err)
 		}
 		hopC2PA, err := extractEmbeddedStreamByFileSpecName(hopEnd, "content_credential.c2pa")
 		if err != nil {
-			return fmt.Errorf("extract C2PA for update %d: %w", hop, err)
+			return nil, fmt.Errorf("extract C2PA for update %d: %w", hop, err)
 		}
 		updateCompiledAt, err := extractLifecycleEffectiveAt(hopC2PA, hop)
 		if err != nil {
-			return fmt.Errorf("extract lifecycle timestamp for update %d: %w", hop, err)
+			return nil, fmt.Errorf("extract lifecycle timestamp for update %d: %w", hop, err)
 		}
+		hopAuthority, err := extractLifecycleAuthority(hopC2PA, hop)
+		if err != nil {
+			return nil, fmt.Errorf("extract lifecycle authority for update %d: %w", hop, err)
+		}
+		hopChain, err := extractManifestX5Chain(hopC2PA, hop)
+		if err != nil {
+			return nil, fmt.Errorf("extract signing chain for update %d: %w", hop, err)
+		}
+		hopCtx := WithSigningChain(WithLifecycleAuthority(ctx, hopAuthority), hopChain)
 
 		// Re-apply this hop's amendment to the bytes preceding it (which may
 		// themselves embed a PAdES signature or signing-evidence attachment —
@@ -849,20 +916,68 @@ func VerifyIncrementalUpdate(ctx context.Context, pdf []byte) error {
 		// written by a later hop.
 		embeddedVC, vcPresent, _ := ExtractEmbeddedVC(hopEnd)
 		remoteManifestURL := extractRemoteManifestURLFromXMP(hopEnd)
+
+		// Which kind of revision this hop is decides how it must be replayed.
+		// ExtractEmbeddedVC sees the latest VC in hopEnd, which for a hop that
+		// added none is the one an EARLIER hop wrote — so "this hop carries a
+		// VC" means the attachment differs from the preceding bytes', not merely
+		// that one is present.
+		prevVC, prevVCPresent, _ := ExtractEmbeddedVC(boundary)
+		hopAddedVC := vcPresent && len(embeddedVC) > 0 &&
+			(!prevVCPresent || !bytes.Equal(prevVC, embeddedVC))
+
+		// With no new VC and an unchanged payload the hop is a re-anchor
+		// (ADR-26): provenance appended over a signature so the binding covers
+		// the signed bytes. Replaying that as an amendment hits the no-changes
+		// guard and fails to reproduce it.
+		prevPayload, prevErr := ExtractLatestEmbeddedJSONLD(boundary)
+		reanchorHop := !hopAddedVC && prevErr == nil && bytes.Equal(prevPayload, newPayload)
+
 		var freshUpdated []byte
-		if vcPresent && len(embeddedVC) > 0 {
-			freshUpdated, err = UpdatePDFWithOptions(ctx, boundary, newPayload, embeddedVC, remoteManifestURL, updateCompiledAt)
-		} else {
-			freshUpdated, err = UpdatePDFWithOptions(ctx, boundary, newPayload, nil, remoteManifestURL, updateCompiledAt)
+		switch {
+		case hopAddedVC:
+			freshUpdated, err = UpdatePDFWithOptions(hopCtx, boundary, newPayload, embeddedVC, remoteManifestURL, updateCompiledAt)
+		case reanchorHop:
+			freshUpdated, err = updatePDF(hopCtx, boundary, newPayload, nil, remoteManifestURL, updateCompiledAt, true)
+		default:
+			freshUpdated, err = UpdatePDFWithOptions(hopCtx, boundary, newPayload, nil, remoteManifestURL, updateCompiledAt)
 		}
 		if err != nil {
-			return fmt.Errorf("re-apply update %d: %w", hop, err)
+			return nil, fmt.Errorf("re-apply update %d: %w", hop, err)
 		}
 		if !bytes.HasPrefix(ZeroCOSESignatures(hopEnd), ZeroCOSESignatures(freshUpdated)) {
-			return fmt.Errorf("amended PDF does not match deterministic re-application of update %d", hop)
+			return freshUpdated, fmt.Errorf("amended PDF does not match deterministic re-application of update %d", hop)
 		}
 
 		boundary = hopEnd
+		reproduced = freshUpdated
 	}
-	return nil
+	// Each replay above is a prefix check, so it says nothing about bytes after
+	// the last DCS revision. The last manifest's hard binding covers the whole
+	// file, so it is what rejects a revision appended after it.
+	if err := VerifyHardBinding(pdf); err != nil {
+		return reproduced, err
+	}
+	return reproduced, nil
+}
+
+// pdfPagesRefRE matches a Catalog's /Pages reference.
+var pdfPagesRefRE = regexp.MustCompile(`/Pages\s+(\d+)\s+0\s+R`)
+
+// currentPagesObjID resolves the page tree through the document's current
+// Catalog, falling back to the conventional object 2 only when no Catalog
+// declares one.
+func currentPagesObjID(pdf []byte) (int, error) {
+	catalogID, ok := currentRootObjID(pdf)
+	if ok {
+		if start, end, found := lastObjectBody(pdf, catalogID); found {
+			if m := pdfPagesRefRE.FindSubmatch(pdf[start:end]); m != nil {
+				id, convErr := strconv.Atoi(string(m[1]))
+				if convErr == nil {
+					return id, nil
+				}
+			}
+		}
+	}
+	return 2, nil
 }

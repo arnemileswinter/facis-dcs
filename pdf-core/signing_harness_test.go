@@ -32,25 +32,59 @@ func setupTestSigning() error {
 		return err
 	}
 	testMainC2PASigner = key
-	tmpl := &x509.Certificate{
+
+	// The chain must satisfy the C2PA certificate profile, or every manifest the
+	// suite compiles is one c2patool rejects with signingCredential.invalid: a
+	// CA-issued (not self-signed) leaf, an organizationName in the subject, and
+	// an accepted extended key usage. This mirrors scripts/c2pa-cert-provision.sh.
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return err
+	}
+	caTmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "DCS-PDF-CORE test c2pa signer"},
+		Subject:               pkix.Name{Organization: []string{"FACIS DCS"}, CommonName: "DCS-PDF-CORE test c2pa CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, caKey.Public(), caKey)
+	if err != nil {
+		return err
+	}
+	caCert, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		return err
+	}
+
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(2),
+		Subject:               pkix.Name{Organization: []string{"FACIS DCS"}, CommonName: "DCS-PDF-CORE test c2pa signer"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(24 * time.Hour),
 		BasicConstraintsValid: true,
 		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageEmailProtection},
 	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, caCert, key.Public(), caKey)
 	if err != nil {
 		return err
 	}
 	chainPath := filepath.Join(dir, "x5chain.pem")
-	if err := os.WriteFile(chainPath, certPEM(der), 0o644); err != nil {
+	if err := os.WriteFile(chainPath, append(certPEM(der), certPEM(caDER)...), 0o600); err != nil {
 		return err
 	}
-	_ = os.Setenv("DCS_PDF_CORE_C2PA_X5CHAIN_PEM_FILE", chainPath)
+	// pdf-core reads no chain from its environment: the suite sends this one on
+	// every request, as the DCS backend sends its own.
+	testMainX5ChainPEM = append(certPEM(der), certPEM(caDER)...)
 	return nil
 }
+
+// testMainX5ChainPEM is the chain the suite signs under, sent on every request
+// that renders a manifest.
+var testMainX5ChainPEM []byte
 
 // signSigStructure signs one COSE Sig_structure with the test key, as the DCS
 // backend signs a prepare step's captured Sig_structures before /c2pa/embed.
@@ -88,13 +122,13 @@ func deterministicES256(priv *ecdsa.PrivateKey, message []byte) []byte {
 
 func signRFC6979(priv *ecdsa.PrivateKey, hash []byte) (*big.Int, *big.Int) {
 	n := priv.Curve.Params().N
-	d := priv.D
+	d := priv.D //nolint:staticcheck // the RFC 6979 test signer needs the raw scalar
 	e := hashToInt(hash, priv.Curve)
 	for k := rfc6979Nonce(n, d, hash); ; k = k.Add(k, big.NewInt(1)) {
 		if k.Sign() <= 0 || k.Cmp(n) >= 0 {
 			continue
 		}
-		rx, _ := priv.Curve.ScalarBaseMult(k.Bytes())
+		rx, _ := priv.Curve.ScalarBaseMult(k.Bytes()) //nolint:staticcheck // the RFC 6979 test signer needs the nonce point
 		r := new(big.Int).Mod(rx, n)
 		if r.Sign() == 0 {
 			continue

@@ -2,6 +2,8 @@ package design
 
 import (
 	. "goa.design/goa/v3/dsl"
+
+	"digital-contracting-service/internal/templaterepository/datatype/partytype"
 )
 
 var ContractCreateRequest = Type("ContractCreateRequest", func() {
@@ -55,6 +57,25 @@ var ContractUpdateResponse = Type("ContractUpdateResponse", func() {
 	Required("did")
 })
 
+var ContractBlockAnnotation = Type("ContractBlockAnnotation", func() {
+	Description("One block-level review annotation: targets a layout block @id")
+	Attribute("block_id", String, "dcs:documentStructure layout / block @id")
+	Attribute("comment", String, "Reviewer annotation text")
+	Required("block_id", "comment")
+})
+
+var ContractReviewFinding = Type("ContractReviewFinding", func() {
+	Description("One reviewer decision on a contract: forward to approval or return to negotiation, with the reviewer's comments and block annotations")
+	Attribute("submitted_by", String, "Organization of the reviewer")
+	Attribute("holder_did", String, "Holder DID of the reviewer")
+	Attribute("occurred_at", String, "Time of the decision, RFC3339")
+	Attribute("contract_version", Int, "Contract version the decision applies to")
+	Attribute("decision", String, "APPROVAL or REJECT")
+	Attribute("comments", ArrayOf(String), "Reviewer comments")
+	Attribute("annotations", ArrayOf(ContractBlockAnnotation), "Reviewer annotations on document blocks")
+	Required("submitted_by", "occurred_at", "contract_version", "comments", "annotations")
+})
+
 var ContractSubmitRequest = Type("ContractSubmitRequest", func() {
 	Description("Contract submit request")
 
@@ -66,6 +87,7 @@ var ContractSubmitRequest = Type("ContractSubmitRequest", func() {
 
 	Attribute("forward_to", String, "Action flag: approval | reject")
 	Attribute("comments", ArrayOf(String), "Optional comments")
+	Attribute("annotations", ArrayOf(ContractBlockAnnotation), "Optional block-level review annotations")
 	Attribute("contract_data", Any, "Optional updated contract data to persist atomically before submit validation")
 
 	Required("did", "updated_at")
@@ -132,6 +154,7 @@ var ContractHistoryRetrieveByIDRequest = Type("ContractHistoryRetrieveByIDReques
 })
 
 var ContractHistoryRetrieveByIDResponse = Type("ContractHistoryRetrieveByIDResponse", func() {
+	Attribute("id", String, "Identifier of this history entry; several entries can share one contract_version")
 	Attribute("did", String, "DID of the contract")
 	Attribute("contract_version", Int, "The version of the contract")
 	Attribute("state", String, "Current state of the contract")
@@ -148,6 +171,8 @@ var ContractHistoryRetrieveByIDResponse = Type("ContractHistoryRetrieveByIDRespo
 	Attribute("exp_notice_period", Int, "The notice period before contract expiration (in days)")
 	Attribute("responsible", Any, "Responsible for this contract, including the creator, approvers, reviewers, and negotiators")
 	Attribute("contract_data", Any, "The data of that contract")
+	Attribute("modified_by", String, "Identifier of the actor whose save replaced this version. Absent on versions recorded before the actor was stored")
+	Attribute("modified_at", String, "The timestamp of the save that replaced this version")
 
 	Required("did", "state", "created_by", "created_at", "updated_at", "contract_version", "template_did", "template_version")
 })
@@ -161,6 +186,13 @@ var ContractRetrieveRequest = Type("ContractRetrieveRequest", func() {
 	Attribute("limit", Int, "Page size of results")
 
 	Attribute("parent_did", String, "Full-scope hierarchy filter: return only contracts whose dcs:parentContract references this DID (DCS-FR-CWE-29)")
+	Attribute("state", ArrayOf(String), "Return only contracts in one of these lifecycle states (DCS-IR-CWE-11)")
+	Attribute("sort_by", String, "Sort key applied before the page is cut (DCS-IR-CWE-11). Default created_at", func() {
+		Enum("created_at", "updated_at", "state", "name")
+	})
+	Attribute("sort_order", String, "Sort direction. Default desc", func() {
+		Enum("asc", "desc")
+	})
 })
 
 var ContractItem = Type("ContractItem", func() {
@@ -178,13 +210,19 @@ var ContractItem = Type("ContractItem", func() {
 	Attribute("exp_date", String, "The timestamp when the contract expired")
 	Attribute("exp_policy", String, "The policy what should happen if the contract is expired")
 	Attribute("exp_notice_period", Int, "The notice period before contract expiration (in days)")
+	Attribute("target_id", String, "Registered target system this contract deploys to (ADR-25); absent when none is designated")
+	Attribute("target_name", String, "Name of that target system, so the destination is readable without a second lookup")
 	Attribute("responsible", Any, "Responsible for this contract, including the creator, approvers, reviewers, and negotiators")
 	Attribute("latest_template_did", String, "The DID of the latest template for this contract")
 	Attribute("template_is_deprecated", Boolean, "Whether the template is deprecated")
 	Attribute("parent_contract_did", String, "The DID of the parent contract, if this is a sub-contract")
+	Attribute("renews_contract_did", String, "The DID of the contract this contract renews (DCS-FR-CWE-29)")
 	Attribute("evidence", Any, "Archive evidence blob (only populated for archived contracts), including a deployment sub-object with correlation_id/payload_hash/receipt_hash/tsa_token/activated_at (DCS-FR-SM-10, DCS-FR-SM-12)")
 	Attribute("archive_summary", String, "Archive annotation summary (only populated for archived contracts; DCS-FR-CSA-11)")
 	Attribute("archive_tags", ArrayOf(String), "Archive annotation tags (only populated for archived contracts; DCS-FR-CSA-11)")
+	Attribute("termination_reason", String, "Recorded termination reason (only populated for terminated archived contracts; DCS-FR-CSA-16)")
+	Attribute("terminated_at", String, "Effective date of the termination, RFC3339 (only populated for terminated archived contracts; DCS-FR-CSA-16)")
+	Attribute("termination_role", String, "Role that initiated the termination, or Counterparty for a termination a counterparty instance notified (only populated for terminated archived contracts; DCS-FR-CSA-16)")
 
 	Required("did", "state", "created_by", "created_at", "updated_at", "contract_version", "template_did", "template_version")
 })
@@ -249,6 +287,13 @@ var ContractNegotiationDecisionItem = Type("ContractNegotiationDecisionItem", fu
 	Required("negotiator")
 })
 
+var ContractNegotiationSupersessionItem = Type("ContractNegotiationSupersessionItem", func() {
+	Attribute("superseded_by", String, "id of the later accepted change request whose values the merge kept instead")
+	Attribute("fields", ArrayOf(String), "Change request fields whose values did not reach the merged contract version")
+
+	Required("superseded_by", "fields")
+})
+
 var ContractNegotiationItem = Type("ContractNegotiationItem", func() {
 	Attribute("id", String, "id of the negotiation")
 	Attribute("change_request", Any, "Change request")
@@ -257,6 +302,7 @@ var ContractNegotiationItem = Type("ContractNegotiationItem", func() {
 	Attribute("contract_version", Int, "Version of the contract for that the negotiation is")
 
 	Attribute("negotiation_decisions", ArrayOf(ContractNegotiationDecisionItem), "List with decisions for that negotiation")
+	Attribute("superseded", ArrayOf(ContractNegotiationSupersessionItem), "Set when this change request was accepted but a later accepted request overwrote it, so the merged contract version does not carry its content (last-accepted-wins). Absent when nothing of it was discarded.")
 
 	Required("id", "change_request", "created_by", "created_at", "negotiation_decisions", "contract_version")
 })
@@ -287,21 +333,31 @@ var ContractRetrieveByIDResponse = Type("ContractRetrieveByIDResponse", func() {
 
 	Attribute("negotiations", ArrayOf(ContractNegotiationItem), "List with negotiations for that contract")
 
-	Attribute("kpis", ArrayOf(ContractDeploymentKPIItem), "KPI values reported via deployment callback for this contract (DCS-FR-CWE-31, DCS-FR-CWE-09)")
-	Attribute("kpi_violations", ArrayOf(String), "Metric names whose latest reported value violates its contractual SLA threshold (DCS-FR-CWE-09)")
+	Attribute("pending_negotiation_sync", Boolean, "True when this instance still has outbound Proposals or Decisions for the contract that the peer has not acknowledged")
+
+	Attribute("settlement_ready", Boolean, "True when this instance holds its own settlement and matching peer settlements for every remote party signature slot (Approve/Sign precondition); true for contracts with no remote party slots")
+	Attribute("settlement_ready_detail", String, "When settlement_ready is false, a short reason suitable for a UI warning")
+
+	Attribute("kpis", ArrayOf(ContractDeploymentKPIItem), "KPI values reported via deployment callback for this contract, each carrying the verdict the target system reached (DCS-FR-CWE-31, DCS-FR-CWE-09, ADR-33)")
+
+	Attribute("target_id", String, "Registered target system this contract deploys to (ADR-25); absent when none is designated yet")
+	Attribute("target_name", String, "Name of that target system, so the destination is readable without a second lookup")
 
 	Required("did", "state", "created_by", "created_at", "updated_at", "contract_data", "negotiations", "contract_version", "template_did", "template_version")
 })
 
 var ContractDeploymentKPIItem = Type("ContractDeploymentKPIItem", func() {
-	Description("A single KPI value reported via the deployment callback (DCS-FR-CWE-09, DCS-FR-CWE-31)")
+	Description("A single KPI observation reported via the deployment callback, with the verdict the target system reached on it (DCS-FR-CWE-09, DCS-FR-CWE-31, ADR-33)")
 
 	Attribute("metric", String, "KPI metric name")
 	Attribute("value", String, "Reported KPI value")
 	Attribute("observed_at", String, "When the KPI was reported")
-	Attribute("violation", Boolean, "Whether this KPI value violates its contractual SLA threshold")
+	Attribute("verdict", String, "What the target system concluded: satisfied, violated, or not_evaluated. A report that carried no verdict is recorded as not_evaluated, never as satisfied", func() {
+		Enum("satisfied", "violated", "not_evaluated")
+	})
+	Attribute("rule", String, "@id of the ODRL rule the verdict concerns, as it travels in the deployment envelope's odrl:policy; absent when the target named none")
 
-	Required("metric", "value", "observed_at")
+	Required("metric", "value", "observed_at", "verdict")
 })
 
 var ContractReviewRequest = Type("ContractReviewRequest", func() {
@@ -332,12 +388,16 @@ var ContractSearchRequest = Type("ContractSearchRequest", func() {
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
 	Attribute("contract_version", Int, "The version number of the contract")
-	Attribute("state", String, "The state of the contract")
+	Attribute("state", ArrayOf(String), "Return only contracts in one of these lifecycle states (DCS-IR-CWE-11)")
 	Attribute("name", String, "The name of the contract")
 	Attribute("description", String, "A description for that contract")
 	Attribute("contract_data", String, "Search value for full text search in contract data")
 
 	Attribute("parent_did", String, "Full-scope hierarchy filter: return only contracts whose dcs:parentContract references this DID (DCS-FR-CWE-29)")
+	Attribute("valid_until", String, "Return only contracts whose validity period ends at or before the specified date and time)")
+	Attribute("party", String, "Return only contracts naming this party DID as creator or counterparty (DCS-IR-CWE-07)")
+	Attribute("template_did", String, "Return only contracts created from this template (DCS-IR-CWE-07)")
+	Attribute("jurisdiction", String, "Return only contracts whose jurisdiction field contains this text (DCS-FR-CWE-13)")
 })
 
 var ContractSearchResponse = Type("ContractSearchResponse", func() {
@@ -374,7 +434,7 @@ var ContractNegotiationRequest = Type("ContractNegotiationRequest", func() {
 	Attribute("updated_at", String, "The timestamp when the contract was updated")
 
 	Attribute("negotiated_by", String, "The name of the negotiator")
-	Attribute("change_request", Any, "The change request for the negotiation")
+	Attribute("change_request", Any, "A free-text note (JSON string) or an object with name, description, contract_data, start_date and exp_date (RFC 3339), exp_notice_period and exp_policy; any other value is refused with 400")
 
 	Required("did", "negotiated_by", "change_request", "updated_at")
 })
@@ -383,6 +443,59 @@ var ContractNegotiationResponse = Type("ContractNegotiationResponse", func() {
 	Description("Result for creating a contract negotiation")
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
+
+	Required("did")
+})
+
+var ContractOfferAcceptRequest = Type("ContractOfferAcceptRequest", func() {
+	Description("Accept an inbound offer as-is, with no change request (OFFERED -> NEGOTIATION). Distinct from ContractNegotiationRespondRequest, which decides one already-proposed change request.")
+
+	Token("token", String, "JWT token")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+
+	Attribute("updated_at", String, "The timestamp when the contract was updated")
+
+	Attribute("accepted_by", String, "The name of the accepting negotiator")
+
+	Required("did", "updated_at", "accepted_by")
+})
+
+var ContractOfferAcceptResponse = Type("ContractOfferAcceptResponse", func() {
+	Description("Result for accepting an offer")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+
+	Required("did")
+})
+
+var ContractNegotiationDraftSaveRequest = Type("ContractNegotiationDraftSaveRequest", func() {
+	Description("Save (upsert) the calling party's negotiation draft for a contract")
+
+	Token("token", String, "JWT token")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("change_request", Any, "The staged change request, same shape as the negotiate payload")
+
+	Required("did", "change_request")
+})
+
+var ContractNegotiationDraftRetrieveRequest = Type("ContractNegotiationDraftRetrieveRequest", func() {
+	Description("Retrieve the calling party's negotiation draft for a contract")
+
+	Token("token", String, "JWT token")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+
+	Required("did")
+})
+
+var ContractNegotiationDraftResponse = Type("ContractNegotiationDraftResponse", func() {
+	Description("The calling party's negotiation draft; change_request is absent when no draft is stored")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("change_request", Any, "The staged change request, if a draft exists")
+	Attribute("updated_at", String, "When the draft was last saved")
 
 	Required("did")
 })
@@ -396,7 +509,7 @@ var ContractNegotiationRespondRequest = Type("ContractNegotiationRespondRequest"
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
 
-	Attribute("action_flag", String, "Decision for that negotiation (ACCEPTING | REJECTING)")
+	Attribute("action_flag", String, "Decision for that negotiation (ACCEPTING | REJECTING | WITHDRAWING)")
 	Attribute("rejection_reason", String, "The reason for that rejection")
 
 	Required("id", "did", "action_flag")
@@ -418,6 +531,8 @@ var ContractApproveRequest = Type("ContractApproveRequest", func() {
 	Attribute("did", String, "Decentralized Identifier of the contract")
 
 	Attribute("updated_at", String, "The timestamp when the contract was updated")
+
+	Attribute("decision_notes", ArrayOf(String), "Approver comments recorded with the decision (DCS-FR-CWE-15)")
 
 	Required("did", "updated_at")
 })
@@ -453,22 +568,32 @@ var ContractRejectResponse = Type("ContractRejectResponse", func() {
 })
 
 var ContractStoreRequest = Type("ContractStoreRequest", func() {
-	Description("Contract store evidence request")
-
 	Token("token", String, "JWT token")
-
-	Attribute("did", String, "Decentralized Identifier of the contract")
-	Attribute("updated_at", String, "Updated at")
-
-	Required("did", "updated_at")
+	Attribute("did", String)
+	Attribute("updated_at", String)
+	Attribute("content", Bytes)
+	Attribute("filename", String)
+	Attribute("description", String)
+	Attribute("media_type", String)
+	Required("did", "updated_at", "content", "filename", "description")
 })
-
 var ContractStoreResponse = Type("ContractStoreResponse", func() {
-	Description("Result for store evidence")
-
-	Attribute("did", String, "Decentralized Identifier of the contract")
-
-	Required("did")
+	Attribute("did", String)
+	Attribute("evidence_id", String)
+	Required("did", "evidence_id")
+})
+var ContractEvidence = Type("ContractEvidence", func() {
+	Attribute("evidence_id", String)
+	Attribute("did", String)
+	Attribute("contract_version", Int)
+	Attribute("recorded_by", String)
+	Attribute("recorded_at", String)
+	Attribute("filename", String)
+	Attribute("description", String)
+	Attribute("media_type", String)
+	Attribute("sha256", String)
+	Attribute("content", Bytes)
+	Required("evidence_id", "did", "contract_version", "recorded_by", "recorded_at", "filename", "description", "media_type", "sha256")
 })
 
 var ContractTerminateRequest = Type("ContractTerminateRequest", func() {
@@ -477,7 +602,9 @@ var ContractTerminateRequest = Type("ContractTerminateRequest", func() {
 	Token("token", String, "JWT token")
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
-	Attribute("reason", String, "Reason for terminating contract")
+	Attribute("reason", String, "Reason for terminating contract", func() {
+		MinLength(1)
+	})
 	Attribute("updated_at", String, "Updated at")
 
 	Required("did", "reason", "updated_at")
@@ -491,16 +618,71 @@ var ContractTerminateResponse = Type("ContractTerminateResponse", func() {
 	Required("did")
 })
 
+var ContractChangeEvent = Type("ContractChangeEvent", func() {
+	Description("A change to a contract the caller may read (DCS-FR-CWE-24, DCS-FR-CSA-23). It names the contract and the event only; the client fetches the changed contract itself.")
+
+	Attribute("did", String, "Decentralized Identifier of the changed contract")
+	Attribute("event_type", String, "The audit event that changed the contract")
+
+	Required("did", "event_type")
+})
+
+var ContractEventsRequest = Type("ContractEventsRequest", func() {
+	Description("Open the stream of contract changes")
+
+	Token("token", String, "JWT token")
+})
+
+var ContractAttentionRequest = Type("ContractAttentionRequest", func() {
+	Description("List the contracts that need attention")
+
+	Token("token", String, "JWT token")
+})
+
+var ContractAttentionItem = Type("ContractAttentionItem", func() {
+	Description("A contract that needs its owner's attention (DCS-FR-CSA-23)")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("name", String, "Contract name")
+	Attribute("state", String, "Current contract state")
+	Attribute("reason", String, "Why the contract needs attention", func() {
+		Enum("renewal_due", "expired", "terminated")
+	})
+	Attribute("exp_date", String, "Expiration date (RFC3339)")
+	Attribute("terminated_at", String, "Effective date of the termination (RFC3339)")
+
+	Required("did", "state", "reason")
+})
+
+var ContractCataloguePublishRequest = Type("ContractCataloguePublishRequest", func() {
+	Description("Register an approved, signed or active contract in the Federated Catalogue (DCS-IR-CWE-10). The catalogue entry carries the contract metadata only: identifier, name, state, version, template and validity period. It carries no contract content and no party.")
+
+	Token("token", String, "JWT token")
+
+	Attribute("did", String, "Decentralized Identifier of the contract to register")
+
+	Required("did")
+})
+
+var ContractCataloguePublishResponse = Type("ContractCataloguePublishResponse", func() {
+	Description("Result for registering a contract in the Federated Catalogue")
+
+	Attribute("did", String, "Decentralized Identifier of the registered contract")
+	Attribute("asset_hash", String, "Federated Catalogue asset hash of the catalogue entry")
+
+	Required("did", "asset_hash")
+})
+
 var ContractRenewRequest = Type("ContractRenewRequest", func() {
-	Description("Contract renew request: create a new linked contract instance from an existing one (DCS-FR-CWE-11/22, DCS-FR-CSA-15). The original contract is not mutated; the new instance starts in DRAFT carrying the original's template reference, metadata, and responsible parties, plus a dcs:renewsContract reference back to the original's DID and version.")
+	Description("Contract renew request: create a new linked contract instance from an existing one (DCS-FR-CWE-11/22, DCS-FR-CSA-15). The original contract is not mutated; the new instance starts in DRAFT carrying the original's template reference, metadata, and responsible parties, plus a dcs:renewsContract reference back to the original's DID, version and signatures: the signed PDF, which holds every signature, and the signatory and Power of Attorney the original's document records. The new instance carries no signature and needs fresh signatures.")
 
 	Token("token", String, "JWT token")
 
 	Attribute("did", String, "Decentralized Identifier of the contract to renew")
 	Attribute("updated_at", String, "The caller's view of the original contract's last update timestamp (optimistic concurrency guard)")
 
-	Attribute("new_start_date", String, "Optional start date for the new renewal term; defaults to the original's start date if omitted")
-	Attribute("new_exp_date", String, "Optional expiry date for the new renewal term; defaults to the original's expiry date if omitted")
+	Attribute("new_start_date", String, "Optional start date for the new renewal term; at least one day in the future. Defaults to the original's expiry date, or tomorrow if that is earlier; empty if the original has no expiry date")
+	Attribute("new_exp_date", String, "Optional expiry date for the new renewal term; at least one day in the future and after the start date. Defaults to the start date plus the original's term length; empty without either of the original's start and expiry dates.")
 	Attribute("new_exp_policy", String, "Optional expiry policy for the new renewal term; defaults to the original's expiry policy if omitted")
 	Attribute("new_exp_notice_period", Int, "Optional notice period (in days) for the new renewal term; defaults to the original's notice period if omitted")
 
@@ -523,8 +705,9 @@ var ContractAuditRequest = Type("ContractAuditRequest", func() {
 	Token("token", String, "JWT token")
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("justification", String, "Required audit justification", func() { Pattern(`\S`) })
 
-	Required("did")
+	Required("did", "justification")
 })
 
 var ContractAuditResponse = Type("ContractAuditResponse", func() {
@@ -541,6 +724,18 @@ var ContractAuditResponse = Type("ContractAuditResponse", func() {
 	Required("id", "component", "event_type", "event_data", "created_at")
 })
 
+var ContractLifecycleEvent = Type("ContractLifecycleEvent", func() {
+	Description("One lifecycle transition of a contract, taken from the audit trail without the event body")
+
+	Attribute("event_type", String, "Type of the lifecycle event")
+	Attribute("actor", String, "Participant that performed the transition; absent for system transitions and erased entries")
+	Attribute("occurred_at", String, "When the transition occurred (RFC 3339)")
+	Attribute("previous_state", String, "Contract state before the transition, if the event records it")
+	Attribute("new_state", String, "Contract state after the transition, if the event records it")
+
+	Required("event_type", "occurred_at")
+})
+
 var ApprovedContractTemplateRetrieveRequest = Type("ApprovedContractTemplateRetrieveRequest", func() {
 	Description("Approved contract template retrieve request")
 
@@ -549,10 +744,10 @@ var ApprovedContractTemplateRetrieveRequest = Type("ApprovedContractTemplateRetr
 
 var ApprovedContractTemplateRetrieveResponse = Type("ApprovedContractTemplateRetrieveResponse", func() {
 	Attribute("did", String, "DID of the contract template")
-	Attribute("document_number", String, "Document number")
 	Attribute("version", Int, "Version")
 	Attribute("state", String, "State")
 	Attribute("template_type", String, "The type of the template")
+	Attribute("party_type", String, "Party classification", func() { Enum(partytype.SingleParty.String(), partytype.MultiParty.String()) })
 	Attribute("name", String, "Name")
 	Attribute("description", String, "Description")
 	Attribute("created_by", String, "Created by")
@@ -560,7 +755,7 @@ var ApprovedContractTemplateRetrieveResponse = Type("ApprovedContractTemplateRet
 	Attribute("updated_at", String, "Updated at")
 	Attribute("responsible", Any, "Responsible for this contract template, including the creator, approver and reviewers")
 
-	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "version")
+	Required("did", "state", "template_type", "party_type", "created_by", "created_at", "updated_at", "version")
 })
 
 var ContractDeployRequest = Type("ContractDeployRequest", func() {
@@ -570,6 +765,7 @@ var ContractDeployRequest = Type("ContractDeployRequest", func() {
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
 	Attribute("updated_at", String, "The timestamp when the contract was updated")
+	Attribute("target_id", String, "Optional: dispatch to this registered target instead of the one the contract designates (ADR-25). A re-dispatch may be directed elsewhere; the contract's own designation is unchanged.")
 
 	Required("did", "updated_at")
 })
@@ -583,8 +779,182 @@ var ContractDeployResponse = Type("ContractDeployResponse", func() {
 	Attribute("timestamp", String, "When the deployment was dispatched")
 	Attribute("correlation_id", String, "Correlation ID for matching the target's later ack/status/KPI callbacks")
 	Attribute("payload", Any, "The machine-readable JSON-LD payload sent to the contract target, including the odrl:Set policy")
+	Attribute("target_id", String, "Registered target system the contract was dispatched to (ADR-25)")
+	Attribute("target_name", String, "Name of that target system, as configured")
 
 	Required("did", "contract_version", "content_hash", "timestamp", "correlation_id", "payload")
+})
+
+// ---- Contract target registry (ADR-25, UC-09-01 system configuration) -------
+
+var ContractTarget = Type("ContractTarget", func() {
+	Description("A configured Contract Target System deployments may be dispatched to (DCS-IR-SI-05)")
+
+	Attribute("id", String, "Identifier of the registered target")
+	Attribute("name", String, "Operator-facing name, unique within this deployment")
+	Attribute("url", String, "Endpoint the deployment payload is POSTed to")
+	Attribute("description", String, "What this system is, for whoever picks it")
+	Attribute("enabled", Boolean, "Disabled targets stay referenceable so a contract naming one keeps a readable destination, but dispatch to them is refused")
+	Attribute("created_at", String, "When the target was registered")
+	Attribute("updated_at", String, "When the target was last changed")
+	Attribute("oauth_client_id", String, "The OAuth2 client this target authenticates its callbacks as. Absent until a credential is issued (ADR-27)")
+	Attribute("secret_issued_at", String, "When the current secret was issued. The secret itself is not stored and cannot be read back")
+
+	Required("id", "name", "url", "enabled")
+})
+
+// ---- Machine credentials (ADR-27) -------------------------------------------
+
+var MachineCredential = Type("MachineCredential", func() {
+	Description("A freshly issued machine credential. The secret is returned by this response and by no other: Hydra keeps only a hash of it, so it cannot be read back and must be rotated if lost")
+
+	Attribute("client_id", String, "OAuth2 client id to authenticate as")
+	Attribute("client_secret", String, "The secret, shown this once")
+	Attribute("token_url", String, "Token endpoint to present it to, with grant_type=client_credentials")
+	Attribute("issued_at", String, "When it was issued")
+
+	Required("client_id", "client_secret")
+})
+
+var MachineIdentity = Type("MachineIdentity", func() {
+	Description("A registered non-human caller: an SRS Table 5 System User reaching DCS over its API (ADR-27)")
+
+	Attribute("id", String, "Identifier of the registered identity")
+	Attribute("name", String, "Operator-facing name, unique within this deployment")
+	Attribute("oauth_client_id", String, "The OAuth2 client it authenticates as")
+	Attribute("participant_did", String, "Identity its actions are attributed to in the audit trail")
+	Attribute("roles", ArrayOf(String), "What it may do. Read from here by client_id and never from the token, so a caller cannot widen its own reach")
+	Attribute("description", String, "What this integration is, for whoever inherits it")
+	Attribute("enabled", Boolean, "A disabled identity is refused at once, without waiting for its secret to expire")
+	Attribute("secret_issued_at", String, "When the current secret was issued")
+	Attribute("created_at", String, "When it was registered")
+	Attribute("updated_at", String, "When it was last changed")
+
+	Required("id", "name", "oauth_client_id", "participant_did", "roles", "enabled")
+})
+
+var MachineIdentityListRequest = Type("MachineIdentityListRequest", func() {
+	Description("List the registered machine identities")
+	Token("token", String, "JWT token")
+})
+
+var MachineIdentityListResponse = Type("MachineIdentityListResponse", func() {
+	Description("The registered machine identities")
+	Attribute("identities", ArrayOf(MachineIdentity), "Registered identities")
+	Required("identities")
+})
+
+var MachineIdentityCreateRequest = Type("MachineIdentityCreateRequest", func() {
+	Description("Register a machine identity and issue its first credential")
+	Token("token", String, "JWT token")
+
+	Attribute("name", String, "Operator-facing name, unique within this deployment")
+	Attribute("participant_did", String, "Identity its actions are attributed to")
+	Attribute("roles", ArrayOf(String), "What it may do")
+	Attribute("description", String, "What this integration is")
+
+	Required("name", "participant_did", "roles")
+})
+
+var MachineIdentityCreateResponse = Type("MachineIdentityCreateResponse", func() {
+	Description("The registered identity together with its one-time credential")
+
+	Attribute("identity", MachineIdentity, "The registered identity")
+	Attribute("credential", MachineCredential, "Its secret, shown this once")
+
+	Required("identity", "credential")
+})
+
+var MachineIdentityUpdateRequest = Type("MachineIdentityUpdateRequest", func() {
+	Description("Change a registered machine identity. The credential is untouched: rotate it separately")
+	Token("token", String, "JWT token")
+
+	Attribute("id", String, "Identifier of the registered identity")
+	Attribute("name", String, "Operator-facing name")
+	Attribute("participant_did", String, "Identity its actions are attributed to")
+	Attribute("roles", ArrayOf(String), "What it may do")
+	Attribute("description", String, "What this integration is")
+	Attribute("enabled", Boolean, "Whether it may call at all")
+
+	Required("id", "name", "participant_did", "roles", "enabled")
+})
+
+var MachineIdentityDeleteRequest = Type("MachineIdentityDeleteRequest", func() {
+	Description("Remove a machine identity and the OAuth2 client behind it, so the credential cannot outlive the entry")
+	Token("token", String, "JWT token")
+
+	Attribute("id", String, "Identifier of the registered identity")
+	Required("id")
+})
+
+var MachineIdentityRotateRequest = Type("MachineIdentityRotateRequest", func() {
+	Description("Issue a new secret for a registered identity. The previous one stops working immediately")
+	Token("token", String, "JWT token")
+
+	Attribute("id", String, "Identifier of the registered identity")
+	Required("id")
+})
+
+var ContractTargetRotateRequest = Type("ContractTargetRotateRequest", func() {
+	Description("Issue a new callback credential for a registered target. The previous one stops working immediately")
+	Token("token", String, "JWT token")
+
+	Attribute("id", String, "Identifier of the registered target")
+	Required("id")
+})
+
+var ContractTargetListRequest = Type("ContractTargetListRequest", func() {
+	Description("List the registered Contract Target Systems")
+	Token("token", String, "JWT token")
+})
+
+var ContractTargetCreateRequest = Type("ContractTargetCreateRequest", func() {
+	Description("Register a Contract Target System")
+
+	Token("token", String, "JWT token")
+
+	Attribute("name", String, "Operator-facing name, unique within this deployment")
+	Attribute("url", String, "Endpoint the deployment payload is POSTed to")
+	Attribute("description", String, "What this system is, for whoever picks it")
+	Attribute("enabled", Boolean, "Whether deployments may be dispatched to it")
+
+	Required("name", "url")
+})
+
+var ContractTargetUpdateRequest = Type("ContractTargetUpdateRequest", func() {
+	Description("Change a registered Contract Target System")
+
+	Token("token", String, "JWT token")
+
+	Attribute("id", String, "Identifier of the registered target")
+	Attribute("name", String, "Operator-facing name, unique within this deployment")
+	Attribute("url", String, "Endpoint the deployment payload is POSTed to")
+	Attribute("description", String, "What this system is, for whoever picks it")
+	Attribute("enabled", Boolean, "Whether deployments may be dispatched to it")
+
+	Required("id", "name", "url")
+})
+
+var ContractTargetDeleteRequest = Type("ContractTargetDeleteRequest", func() {
+	Description("Remove a registered Contract Target System")
+
+	Token("token", String, "JWT token")
+
+	Attribute("id", String, "Identifier of the registered target")
+
+	Required("id")
+})
+
+var ContractTargetDesignateRequest = Type("ContractTargetDesignateRequest", func() {
+	Description("Designate the target system a contract deploys to (ADR-25)")
+
+	Token("token", String, "JWT token")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("updated_at", String, "The timestamp when the contract was updated")
+	Attribute("target_id", String, "Registered target to designate, or empty to clear the designation")
+
+	Required("did", "updated_at")
 })
 
 var ContractDeploymentReceiptPayload = Type("ContractDeploymentReceiptPayload", func() {
@@ -596,16 +966,20 @@ var ContractDeploymentReceiptPayload = Type("ContractDeploymentReceiptPayload", 
 })
 
 var ContractDeploymentKPIReport = Type("ContractDeploymentKPIReport", func() {
-	Description("A single KPI value report carried in a deployment callback")
+	Description("A single KPI report carried in a deployment callback: what the target system observed, and what it concluded from it (ADR-33)")
 
 	Attribute("metric", String, "KPI metric name")
 	Attribute("value", String, "Reported KPI value")
+	Attribute("verdict", String, "What the target system concluded about the rule it names: satisfied, violated, or not_evaluated. Absent is recorded as not_evaluated", func() {
+		Enum("satisfied", "violated", "not_evaluated")
+	})
+	Attribute("rule", String, "@id of the ODRL rule this verdict concerns, verbatim from the odrl:policy the deployment carried")
 })
 
 var ContractDeploymentCallbackRequest = Type("ContractDeploymentCallbackRequest", func() {
-	Description("Contract Target System -> DCS deployment callback: ack/status update and/or KPI report, authenticated via a shared-secret header (not a JWT)")
+	Description("Contract Target System -> DCS deployment callback: ack/status update and/or KPI report, authenticated as the target's own OAuth2 client (ADR-27)")
 
-	Attribute("callback_secret", String, "Shared secret proving the caller is the configured contract target")
+	Token("token", String, "JWT token issued to the target system")
 	Attribute("did", String, "Decentralized Identifier of the contract")
 	Attribute("correlation_id", String, "Correlation ID from the original deployment")
 	Attribute("status", String, "Deployment status (e.g. ACKNOWLEDGED)")
@@ -631,8 +1005,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("create", func() {
 		Description("initiate a new contract draft from an approved template.")
 		Meta("dcs:requirements", "DCS-IR-CWE-01", "DCS-IR-CWE-02")
-		Meta("dcs:cwe:components", "Contract Assembling")
-		Meta("dcs:ui", "Contract Creation")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -655,8 +1027,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 	Method("update", func() {
 		Description("update contract draft before submitting.")
-		Meta("dcs:cwe:components", "Contract Assembling")
-		Meta("dcs:ui", "Contract Creation")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -669,7 +1039,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			PUT("/contract/update")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -681,9 +1055,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Description("Overloaded state transition whose effect depends on the contract's current state: DRAFT/REJECTED -> NEGOTIATION; NEGOTIATION -> SUBMITTED once all negotiators have accepted (or stays in NEGOTIATION with contract_version+1 if accepted change requests still need merging); SUBMITTED -> REVIEWED or back to NEGOTIATION depending on action_flag; REVIEWED -> SUBMITTED (re-review). Requires updated_at for optimistic concurrency and is forwarded to the contract's origin peer if the local node is not the origin.")
 		Description(`With action flag { forwardTo: "approval" | "reject" } and optional comments. Allows a resubmission path with reviewer/approver comments.`)
 		Meta("dcs:requirements", "DCS-IR-CWE-01", "DCS-IR-CWE-03", "DCS-IR-CWE-06", "DCS-IR-CWE-09")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:downstream:sm:component", "Signer Authorization & PoA application")
-		Meta("dcs:ui", "Contract Creation", "Contract Review", "Contract Approval")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -705,7 +1076,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/submit")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -714,10 +1089,8 @@ var _ = Service("ContractWorkflowEngine", func() {
 	})
 
 	Method("offer", func() {
-		Description("Transmit a draft contract to the counterparty for the first time (DRAFT -> OFFERED, SRS 2.2.6). Triggers the DCS-to-DCS PostSync broadcast. Requires updated_at for optimistic concurrency and is forwarded to the contract's origin peer if the local node is not the origin.")
+		Description("Transmit a draft contract to the counterparty for the first time (DRAFT -> OFFERED, SRS 2.2.6). The OFFER event makes the DCS-to-DCS synchronizer ship the contract PDF to every counterparty peer (ADR-13). Requires updated_at for optimistic concurrency and is forwarded to the contract's origin peer if the local node is not the origin.")
 		Meta("dcs:requirements", "DCS-IR-CWE-01")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:ui", "Contract Creation")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -730,7 +1103,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/offer")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -741,8 +1118,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("withdraw", func() {
 		Description("Initiator retracts a contract before it has been approved (allowed from OFFERED, NEGOTIATION, SUBMITTED, REVIEWED — never once APPROVED). Requires updated_at for optimistic concurrency and is forwarded to the contract's origin peer if the local node is not the origin.")
 		Meta("dcs:requirements", "DCS-IR-CWE-01")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:ui", "Contract Creation")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -755,7 +1130,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/withdraw")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -766,8 +1145,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("negotiate", func() {
 		Description("propose changes.")
 		Meta("dcs:requirements", "DCS-IR-CWE-03")
-		Meta("dcs:cwe:components", "Contract Assembling", "Contract Versioning")
-		Meta("dcs:ui", "Contract Negotiation")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -788,7 +1165,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/negotiate")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -796,11 +1177,142 @@ var _ = Service("ContractWorkflowEngine", func() {
 		})
 	})
 
+	Method("accept_offer", func() {
+		Description("Accept an inbound offer as-is, with no change request: mints this instance's negotiation task for the offer's current round and moves the contract OFFERED -> NEGOTIATION. Only the counterparty may call it — the origin is refused. Not to be confused with respond (action_flag ACCEPTING), which decides one already-proposed change request.")
+		Meta("dcs:requirements", "DCS-IR-CWE-03", "DCS-FR-CWE-18")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Creator")
+			Scope("Sys. Contract Creator")
+			Scope("Contract Negotiator")
+			// The Responder drives its inbound contracts as Contract Manager
+			// (SRS §4); per-contract authorization is the counterparty gate in
+			// command/acceptoffer.go, not local RBAC.
+			Scope("Contract Manager")
+		})
+
+		Payload(ContractOfferAcceptRequest)
+		Result(ContractOfferAcceptResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
+			POST("/contract/accept-offer")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	// SRS §3.1.1 Contract Negotiation UI lists "Save draft" among its controls,
+	// distinct from "Propose change": a negotiator stages modifications and
+	// proposes them later. Drafts are party-scoped — stored per (contract,
+	// party), shared by the party's authorized negotiators, never replicated
+	// to the peer, never part of the negotiation audit trail; proposing
+	// (POST /contract/negotiate) or discarding deletes them.
+	Method("save_negotiation_draft", func() {
+		Description("save (upsert) the calling party's staged change request for a contract in negotiation; it is shared among this party's authorized negotiators and not transmitted to the counterparty until proposed.")
+		Meta("dcs:requirements", "DCS-IR-CWE-03")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Creator")
+			Scope("Sys. Contract Creator")
+			Scope("Contract Negotiator")
+			Scope("Contract Reviewer")
+			Scope("Sys. Contract Reviewer")
+			Scope("Contract Manager")
+		})
+
+		Payload(ContractNegotiationDraftSaveRequest)
+		Result(ContractNegotiationDraftResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
+			PUT("/contract/negotiation_draft")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("retrieve_negotiation_draft", func() {
+		Description("retrieve the calling party's staged change request for a contract; change_request is absent when no draft is stored.")
+		Meta("dcs:requirements", "DCS-IR-CWE-03")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Creator")
+			Scope("Sys. Contract Creator")
+			Scope("Contract Negotiator")
+			Scope("Contract Reviewer")
+			Scope("Sys. Contract Reviewer")
+			Scope("Contract Manager")
+		})
+
+		Payload(ContractNegotiationDraftRetrieveRequest)
+		Result(ContractNegotiationDraftResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
+			GET("/contract/negotiation_draft/{did}")
+			Param("did")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("delete_negotiation_draft", func() {
+		Description("discard the calling party's staged change request for a contract.")
+		Meta("dcs:requirements", "DCS-IR-CWE-03")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Creator")
+			Scope("Sys. Contract Creator")
+			Scope("Contract Negotiator")
+			Scope("Contract Reviewer")
+			Scope("Sys. Contract Reviewer")
+			Scope("Contract Manager")
+		})
+
+		Payload(ContractNegotiationDraftRetrieveRequest)
+		Result(ContractNegotiationDraftResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
+			DELETE("/contract/negotiation_draft/{did}")
+			Param("did")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
 	Method("respond", func() {
-		Description("Accept or reject a specific negotiation change request (action_flag: ACCEPTING | REJECTING). Forwarded to the contract's origin peer if the local node is not the origin. Unlike most other state-mutating contract endpoints, this one does not require updated_at and is therefore not covered by the optimistic-concurrency timestamp check.")
+		Description("Accept, reject, or withdraw a specific negotiation change request (action_flag: ACCEPTING | REJECTING | WITHDRAWING). WITHDRAWING is only for the proposal author and only while no counterparty has accepted it. Forwarded to the contract's origin peer if the local node is not the origin. Unlike most other state-mutating contract endpoints, this one does not require updated_at and is therefore not covered by the optimistic-concurrency timestamp check.")
 		Meta("dcs:requirements", "DCS-IR-CWE-03", "DCS-IR-CWE-05", "DCS-IR-CWE-06")
-		Meta("dcs:cwe:components", "Contract Versioning")
-		Meta("dcs:ui", "Contract Creator", "Contract Review")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -820,7 +1332,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/respond")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -831,8 +1347,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("review", func() {
 		Description("Record that the contract's latest draft was opened for review. This does not return contract data (use retrieve_by_id for that) — it only logs a review-tracking event into the audit trail, as a write side effect behind a GET request.")
 		Meta("dcs:requirements", "DCS-IR-CWE-04")
-		Meta("dcs:cwe:components", "Contract Versioning")
-		Meta("dcs:ui", "Contract Negotiation", "Contract Review")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -848,7 +1362,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/contract/review")
 			Param("did")
 
@@ -861,8 +1379,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	// GET /contract/retrieve
 	Method("retrieve", func() {
 		Description("fetch contracts and their review, approval, and negotiation tasks")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:ui", "Contract Negotiation", "Contract Review", "Contract Approval", "Contract Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -888,6 +1404,9 @@ var _ = Service("ContractWorkflowEngine", func() {
 			Param("offset")
 			Param("limit")
 			Param("parent_did")
+			Param("state")
+			Param("sort_by")
+			Param("sort_order")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
@@ -896,9 +1415,8 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 	// GET /contract/kpis/{did}
 	Method("kpi_observations", func() {
-		Description("The KPI values reported for a deployed contract as a JSON-LD observation set: dcs:KPIObservation nodes anchored to the Semantic Hub context, machine-readable alongside the human-facing kpis field of retrieve (DCS-FR-CWE-09/-31).")
+		Description("The KPI reports of a deployed contract as a JSON-LD observation set: dcs:KPIObservation nodes anchored to the Semantic Hub context, each carrying the target system's verdict and the ODRL rule it names, machine-readable alongside the human-facing kpis field of retrieve (DCS-FR-CWE-09/-31, ADR-33).")
 		Meta("dcs:requirements", "DCS-FR-CWE-09", "DCS-FR-CWE-31")
-		Meta("dcs:ui", "Contract Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -919,7 +1437,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/contract/kpis/{did}")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -966,12 +1488,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 	// GET /contract/retrieve/{did}
 	Method("retrieve_by_id", func() {
 		Description("fetch submitted contract. fetch reviewed contract. fetch contract(s).")
-		Meta("dcs:requirements", "DCS-IR-CWE-05", "DCS-IR-CWE-08", "DCS-IR-CWE-11", "DCS-IR-CWE-13")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:downstream:sm:component", "Signer Authorization & PoA application")
-		Meta("dcs:ui", "Contract Negotiation", "Contract Review", "Contract Approval", "Contract Management Dashboard")
+		Meta("dcs:requirements", "DCS-IR-CWE-05", "DCS-IR-CWE-08", "DCS-IR-CWE-11", "DCS-IR-CWE-13", "DCS-FR-CSA-24", "DCS-IR-CWE-12")
 
 		Security(JWTAuth, func() {
+			Scope("Auditor")
+			Scope("Compliance Officer")
 			Scope("Contract Creator")
 			Scope("Sys. Contract Creator")
 			Scope("Contract Negotiator")
@@ -1005,7 +1526,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	// GET /contract/history/{did}
 	Method("retrieve_history_by_id", func() {
 		Description("fetch history of a contract")
-		Meta("dcs:cwe:components", "")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -1026,7 +1546,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/contract/history/{did}")
 			Param("did")
 
@@ -1038,9 +1562,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 	Method("search", func() {
 		Description("locate contracts by data or state. filter/search across lifecycle states.")
-		Meta("dcs:requirements", "DCS-IR-CWE-07", "DCS-IR-CWE-11")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:ui", "Contract Review", "Contract Management Dashboard")
+		Meta("dcs:requirements", "DCS-IR-CWE-07", "DCS-IR-CWE-11", "DCS-FR-CWE-13")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -1052,6 +1574,9 @@ var _ = Service("ContractWorkflowEngine", func() {
 			Scope("Sys. Contract Approver")
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
+			// The contract list renders its search box for every role that can
+			// open it, and search returns a strict subset of retrieve's fields.
+			Scope("Contract Observer")
 		})
 
 		Payload(ContractSearchRequest)
@@ -1072,6 +1597,10 @@ var _ = Service("ContractWorkflowEngine", func() {
 			Param("description")
 			Param("contract_data")
 			Param("parent_did")
+			Param("valid_until")
+			Param("party")
+			Param("template_did")
+			Param("jurisdiction")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
@@ -1081,9 +1610,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("approve", func() {
 		Description("approve and forward contract.")
 		Meta("dcs:requirements", "DCS-IR-CWE-09", "DCS-IR-CWE-10")
-		Meta("dcs:cwe:components", "Contract Deployment for Service Provisioning")
-		Meta("dcs:downstream:sm:component", "Signer Authorization & PoA application")
-		Meta("dcs:ui", "Contract Approval")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Approver")
@@ -1096,7 +1622,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/approve")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1107,9 +1637,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("reject", func() {
 		Description("reject with explanation.")
 		Meta("dcs:requirements", "DCS-IR-CWE-09")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:downstream:sm:component", "Signer Authorization & PoA application")
-		Meta("dcs:ui", "Contract Approval")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Approver")
@@ -1122,7 +1649,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/reject")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1132,13 +1663,13 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 	Method("store", func() {
 		Description("store evidence.")
-		Meta("dcs:requirements", "DCS-IR-CWE-12")
-		Meta("dcs:cwe:components", "Contract Performance Tracking")
-		Meta("dcs:ui", "Contract Management Dashboard")
+		Meta("dcs:requirements", "DCS-IR-CWE-12", "DCS-IR-CWE-02")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
+			// Evidence is populated when the contract is created (DCS-IR-CWE-02).
+			Scope("Contract Creator")
 		})
 
 		Payload(ContractStoreRequest)
@@ -1146,24 +1677,78 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
+		Error("conflict", ErrorResult)
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
 			POST("/contract/store")
 			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
+			Response("conflict", StatusConflict)
+		})
+	})
+
+	Method("list_evidence", func() {
+		Security(JWTAuth, func() {
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+			// Evidence is populated when the contract is created (DCS-IR-CWE-02).
+			Scope("Contract Creator")
+			Scope("Auditor")
+			Scope("Compliance Officer")
+		})
+		Payload(func() { Token("token", String); Attribute("did", String); Required("did") })
+		Result(ArrayOf(ContractEvidence))
+		Error("internal_error", ErrorResult)
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			GET("/contract/{did}/evidence")
+			Response("internal_error", StatusInternalServerError)
+			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
+		})
+	})
+	Method("retrieve_evidence", func() {
+		Security(JWTAuth, func() {
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+			Scope("Contract Creator")
+			Scope("Auditor")
+			Scope("Compliance Officer")
+		})
+		Payload(func() {
+			Token("token", String)
+			Attribute("did", String)
+			Attribute("evidence_id", String)
+			Required("did", "evidence_id")
+		})
+		Result(ContractEvidence)
+		Error("internal_error", ErrorResult)
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			GET("/contract/{did}/evidence/{evidence_id}")
+			Response("internal_error", StatusInternalServerError)
+			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 		})
 	})
 
 	Method("terminate", func() {
-		Description("terminate a contract.")
-		Meta("dcs:requirements", "DCS-IR-CWE-12")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:ui", "Contract Management Dashboard")
+		Description("terminate a contract. The Archive Manager terminates archived contracts from the archive dashboard (DCS-IR-CSA-03); the contract state machine is the policy that permits it.")
+		Meta("dcs:requirements", "DCS-IR-CWE-12", "DCS-IR-CSA-03")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
+			Scope("Archive Manager")
 		})
 
 		Payload(ContractTerminateRequest)
@@ -1172,7 +1757,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/terminate")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1183,8 +1772,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("renew", func() {
 		Description("renew a contract: create a new linked contract instance from an existing one, retaining references to the original's DID, version, and signatures (DCS-FR-CWE-11/22, DCS-FR-CSA-15).")
 		Meta("dcs:requirements", "DCS-FR-CWE-11", "DCS-FR-CWE-22", "DCS-FR-CSA-15")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:ui", "Contract Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
@@ -1197,8 +1784,102 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/renew")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("events", func() {
+		Description("stream server-sent events that name each contract the caller may read when it changes, for live dashboard updates (DCS-FR-CWE-24, DCS-FR-CSA-23). Read events are not streamed.")
+		Meta("dcs:requirements", "DCS-FR-CWE-24", "DCS-FR-CSA-23")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Creator")
+			Scope("Sys. Contract Creator")
+			Scope("Contract Negotiator")
+			Scope("Contract Reviewer")
+			Scope("Sys. Contract Reviewer")
+			Scope("Contract Approver")
+			Scope("Sys. Contract Approver")
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+			Scope("Contract Observer")
+			Scope("Archive Manager")
+			Scope("Auditor")
+		})
+
+		Payload(ContractEventsRequest)
+		StreamingResult(ContractChangeEvent)
+
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/contract/events")
+			ServerSentEvents()
+			Response(StatusOK)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("attention", func() {
+		Description("list the contracts the caller may read that need attention: the notice period before expiry has started, or the contract expired or was terminated in the last 30 days (DCS-FR-CSA-23). The list is computed from the contract data on each call.")
+		Meta("dcs:requirements", "DCS-FR-CSA-23", "DCS-FR-CWE-22")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Creator")
+			Scope("Sys. Contract Creator")
+			Scope("Contract Negotiator")
+			Scope("Contract Reviewer")
+			Scope("Sys. Contract Reviewer")
+			Scope("Contract Approver")
+			Scope("Sys. Contract Approver")
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+			Scope("Contract Observer")
+		})
+
+		Payload(ContractAttentionRequest)
+		Result(ArrayOfRequired(ContractAttentionItem))
+
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/contract/attention")
+			Response(StatusOK)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("publish_catalogue", func() {
+		Description("register an approved, signed or active contract in the Federated Catalogue with its metadata (DCS-IR-CWE-10). The approver chooses catalogue availability with this explicit action.")
+		Meta("dcs:requirements", "DCS-IR-CWE-10")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Approver")
+			Scope("Sys. Contract Approver")
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+		})
+
+		Payload(ContractCataloguePublishRequest)
+		Result(ContractCataloguePublishResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
+			POST("/contract/catalogue/publish")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
@@ -1208,11 +1889,12 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("audit", func() {
 		Description("retrieve the audit trail (event log and policy trail) for a contract.")
 		Meta("dcs:requirements", "DCS-IR-CWE-12", "DCS-IR-CWE-13")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:ui", "Contract Management Dashboard")
 
+		// No machine role: an audit trail is read by the audit roles and the
+		// manager of the contract (DCS-NFR-BR-05, least privilege).
 		Security(JWTAuth, func() {
 			Scope("Auditor")
+			Scope("Contract Manager")
 			Scope("Compliance Officer")
 		})
 
@@ -1222,10 +1904,79 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
 			POST("/contract/audit")
 			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("lifecycle", func() {
+		Description("retrieve the lifecycle transitions of a contract with actor and timestamp, for every caller that may read the contract.")
+		Meta("dcs:requirements", "DCS-FR-CWE-27")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Creator")
+			Scope("Sys. Contract Creator")
+			Scope("Contract Negotiator")
+			Scope("Contract Reviewer")
+			Scope("Sys. Contract Reviewer")
+			Scope("Contract Approver")
+			Scope("Sys. Contract Approver")
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+			Scope("Contract Observer")
+		})
+
+		Payload(func() { Token("token", String); Attribute("did", String); Required("did") })
+		Result(ArrayOf(ContractLifecycleEvent))
+
+		Error("internal_error", ErrorResult, "Internal server error")
+		Error("forbidden", ErrorResult, "Caller is not an authorized party of this contract")
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			GET("/contract/lifecycle/{did}")
+			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	// GET /contract/review-findings/{did}
+	Method("review_findings", func() {
+		Description("retrieve the reviewer decisions on a contract with their comments and block annotations, newest first, for every caller that may read the contract.")
+		Meta("dcs:requirements", "DCS-IR-CWE-08", "DCS-FR-CWE-25")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Creator")
+			Scope("Sys. Contract Creator")
+			Scope("Contract Negotiator")
+			Scope("Contract Reviewer")
+			Scope("Sys. Contract Reviewer")
+			Scope("Contract Approver")
+			Scope("Sys. Contract Approver")
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+			Scope("Contract Observer")
+		})
+
+		Payload(func() { Token("token", String); Attribute("did", String); Required("did") })
+		Result(ArrayOf(ContractReviewFinding))
+
+		Error("internal_error", ErrorResult, "Internal server error")
+		Error("forbidden", ErrorResult, "Caller is not an authorized party of this contract")
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			GET("/contract/review-findings/{did}")
+			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})
@@ -1255,8 +2006,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("deploy", func() {
 		Description("Deploy a SIGNED contract to the configured Contract Target System (UC-05-01).")
 		Meta("dcs:requirements", "DCS-FR-SM-12")
-		Meta("dcs:cwe:components", "Contract Deployment for Service Provisioning")
-		Meta("dcs:ui", "Contract Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
@@ -1269,7 +2018,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/deploy")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1277,22 +2030,272 @@ var _ = Service("ContractWorkflowEngine", func() {
 		})
 	})
 
-	Method("deploymentCallback", func() {
-		Description("Accept a deployment ack/status update and/or KPI report from the configured Contract Target System, authenticated by a shared-secret header (DCS-IR-SI-05).")
+	// ---- Contract target registry (ADR-25) ---------------------------------
+
+	Method("listContractTargets", func() {
+		Description("List the registered Contract Target Systems a contract may be deployed to (ADR-25).")
 		Meta("dcs:requirements", "DCS-IR-SI-05")
 
-		NoSecurity()
+		// Readable by whoever has to pick one, writable only by the roles that
+		// configure integrations.
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+			Scope("Integration Manager")
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+		})
+
+		Payload(ContractTargetListRequest)
+		Result(ArrayOf(ContractTarget))
+
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/contract/targets")
+			Response(StatusOK)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("createContractTarget", func() {
+		Description("Register a Contract Target System (UC-09-01 system configuration).")
+		Meta("dcs:requirements", "DCS-IR-SI-05")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+			Scope("Integration Manager")
+		})
+
+		Payload(ContractTargetCreateRequest)
+		Result(ContractTarget)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			POST("/contract/targets")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("updateContractTarget", func() {
+		Description("Change a registered Contract Target System (UC-09-01 system configuration).")
+		Meta("dcs:requirements", "DCS-IR-SI-05")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+			Scope("Integration Manager")
+		})
+
+		Payload(ContractTargetUpdateRequest)
+		Result(ContractTarget)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			PUT("/contract/targets")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("deleteContractTarget", func() {
+		Description("Remove a registered Contract Target System. Refused while a contract still designates it, so no contract is left undeployable with no record of where it was meant to go.")
+		Meta("dcs:requirements", "DCS-IR-SI-05")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+			Scope("Integration Manager")
+		})
+
+		Payload(ContractTargetDeleteRequest)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			DELETE("/contract/targets")
+			Response(StatusNoContent)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("designateContractTarget", func() {
+		Description("Designate the target system a contract deploys to (ADR-25). The automatic trigger on signing completion has no human present to choose one, so the destination belongs to the contract.")
+		Meta("dcs:requirements", "DCS-FR-SM-12", "DCS-IR-SI-05")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+		})
+
+		Payload(ContractTargetDesignateRequest)
+		Result(ContractRetrieveByIDResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
+			POST("/contract/target/designate")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("rotateContractTargetSecret", func() {
+		Description("Issue a new callback credential for a registered Contract Target System. The secret is returned once and the previous one stops working immediately (ADR-27).")
+		Meta("dcs:requirements", "DCS-IR-SI-05")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+			Scope("Integration Manager")
+		})
+
+		Payload(ContractTargetRotateRequest)
+		Result(MachineCredential)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			POST("/contract/targets/{id}/credential")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("listMachineIdentities", func() {
+		Description("List the registered machine identities: the SRS Table 5 System Users that reach DCS over its API (ADR-27).")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+		})
+
+		Payload(MachineIdentityListRequest)
+		Result(MachineIdentityListResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/machine-identities")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("createMachineIdentity", func() {
+		Description("Register a machine identity and issue its first credential. The secret is returned once and cannot be read back (ADR-27).")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+		})
+
+		Payload(MachineIdentityCreateRequest)
+		Result(MachineIdentityCreateResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			POST("/machine-identities")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("updateMachineIdentity", func() {
+		Description("Change a registered machine identity. Disabling one refuses its calls at once, without waiting for the secret to expire (ADR-27).")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+		})
+
+		Payload(MachineIdentityUpdateRequest)
+		Result(MachineIdentity)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			PUT("/machine-identities/{id}")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("deleteMachineIdentity", func() {
+		Description("Remove a machine identity and the OAuth2 client behind it, so no credential outlives the entry that justified it (ADR-27).")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+		})
+
+		Payload(MachineIdentityDeleteRequest)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			DELETE("/machine-identities/{id}")
+			Response(StatusNoContent)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("rotateMachineIdentitySecret", func() {
+		Description("Issue a new secret for a registered machine identity. It is returned once and the previous one stops working immediately (ADR-27).")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+		})
+
+		Payload(MachineIdentityRotateRequest)
+		Result(MachineCredential)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			POST("/machine-identities/{id}/credential")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("deploymentCallback", func() {
+		Description("Accept a deployment ack/status update and/or KPI report from the Contract Target System the deployment was dispatched to, authenticated as that target's own OAuth2 client (DCS-IR-SI-05, ADR-27).")
+		Meta("dcs:requirements", "DCS-IR-SI-05")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Target System")
+		})
 
 		Payload(ContractDeploymentCallbackRequest)
 		Result(ContractDeploymentCallbackResponse)
 
 		Error("bad_request", ErrorResult, "Bad request")
-		Error("unauthorized", ErrorResult, "Missing or invalid shared secret")
+		Error("unauthorized", ErrorResult, "Not the target system this deployment was dispatched to")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
 			POST("/contract/deployment/callback")
-			Header("callback_secret:X-Deployment-Callback-Secret")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("unauthorized", StatusUnauthorized)

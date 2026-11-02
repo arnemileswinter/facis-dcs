@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
-import type { Page } from '@playwright/test'
 import { type DcsRole, expect, test } from './dcs-test'
 import { buildApprovedContract, gotoAs, signApprovedContractViaViewer } from './lifecycle-helpers'
+import type { Page } from '@playwright/test'
 
 /**
  * Signature Compliance Viewer (DCS-FR-SM-05/-07/-08, DCS-FR-SM-18/-21/-26).
@@ -34,7 +34,7 @@ async function openViewer(page: Page, loginAs: LoginAs, role: DcsRole, contractD
 }
 
 test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({ page, loginAs }) => {
-  test.setTimeout(600_000)
+  test.setTimeout(120_000)
   page.setDefaultTimeout(15_000)
 
   // Reach SIGNED via the same proven lifecycle the other specs use — derive a
@@ -55,10 +55,27 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
 
     // The DSS report (ETSI EN 319 102-1) — signer identity, signature level,
     // timestamp — is exactly the metadata FR-SM-26 requires.
-    await expect(page.getByText('EU DSS Validation (ETSI EN 319 102-1)')).toBeVisible()
-    await expect(page.getByText('Signer identity:')).toBeVisible()
-    await expect(page.getByText('Signature level:')).toBeVisible()
-    await expect(page.getByText('Timestamp:')).toBeVisible()
+    // DSS also surfaces IR-SM-05 trust-anchor / timestamp validation via
+    // indication / signing_time (no separate API booleans).
+    const dss = page.getByTestId('dss-validation')
+    await expect(dss.getByText('EU DSS Validation — PDF Signature')).toBeVisible()
+    await expect(dss.getByRole('heading', { name: 'Certificate & Signature Details' })).toBeVisible()
+    await expect(dss.getByText('Sub-indication')).toBeVisible()
+    await expect(dss.getByText('Signer identity')).toBeVisible()
+    await expect(dss.getByText('Signature format')).toBeVisible()
+    await expect(dss.getByText('Signing time')).toBeVisible()
+
+    const chain = page.getByTestId('credential-chain')
+    await expect(
+      chain.getByRole('heading', { name: 'Signing Credentials & Authorization — Local Signature Record' }),
+    ).toBeVisible()
+    await expect(chain.getByText('Signer & Authorization')).toBeVisible()
+    await expect(chain.getByText('Signer', { exact: true })).toBeVisible()
+    await expect(chain.getByText('Organization')).toBeVisible()
+    await expect(chain.getByText('Authorized Roles')).toBeVisible()
+    await expect(chain.getByText('Signed at', { exact: true })).toBeVisible()
+    await expect(chain.getByTestId('credential-chain-timestamp')).toBeVisible()
+    await expect(chain.getByText('Summary credential issuer')).toBeVisible()
 
     // The cryptographic-integrity findings section renders with pass/fail rows.
     await expect(page.getByRole('heading', { name: 'Cryptographic Integrity' })).toBeVisible()
@@ -71,6 +88,7 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
   })
 
   await test.step('compliance checks tab flags signature level + credential status', async () => {
+    // DCS-IR-SM-07
     await page.getByRole('tab', { name: 'Compliance Checks' }).click()
 
     const checked = page.waitForResponse(
@@ -79,21 +97,78 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
     await page.getByRole('button', { name: 'Run Compliance', exact: true }).click()
     await checked
 
-    // FR-SM-21: signature level (AES) and credential status (ACTIVE) per signature.
+    // PACM-07 partial: party/clause segmented report panel.
+    const reportPanel = page.getByTestId('compliance-report-panel')
+    await expect(reportPanel.getByRole('heading', { name: 'Compliance Report' })).toBeVisible()
+    await expect(reportPanel.getByTestId('report-tab-party')).toBeVisible()
+    await expect(reportPanel.getByTestId('report-tab-clauses')).toBeVisible()
+    const partySection = reportPanel.getByTestId('party-compliance-section').first()
+    await expect(partySection).toBeVisible()
+    await expect(partySection.getByText('Signature status', { exact: true })).toBeVisible()
+    await expect(partySection.getByText('Signer', { exact: true })).toBeVisible()
+    await expect(partySection.getByText('Signing level', { exact: true })).toBeVisible()
+    await expect(partySection.getByText('Authorized role', { exact: true })).toBeVisible()
+    await expect(partySection.getByText('Signed at', { exact: true })).toBeVisible()
+    await expect(partySection.getByText('Non-conformance', { exact: true })).toBeVisible()
+    await reportPanel.getByTestId('report-tab-clauses').click()
+    await expect(reportPanel.getByTestId('clause-compliance-report')).toBeVisible()
+    // Wait for live clause-report projection (PACM-07 coverage-aware statuses).
+    await expect(reportPanel.getByText('Assessment run').first()).toBeVisible({ timeout: 15_000 })
+    await expect(reportPanel.getByText('Applicable checks').first()).toBeVisible()
+    await expect(reportPanel.getByText('Status').first()).toBeVisible()
+    await reportPanel.getByTestId('report-tab-party').click()
+
+    // FR-SM-21: signature level (AES) and the live status of the presented credential per signature.
     await expect(page.locator('.badge').filter({ hasText: 'AES' }).first()).toBeVisible()
-    await expect(page.locator('.badge').filter({ hasText: 'ACTIVE' }).first()).toBeVisible()
+    await expect(page.getByRole('cell', { name: 'VALID', exact: true }).first()).toBeVisible()
+  })
+
+  await test.step('compliance table surfaces the level-aware fields ADR-20 added (SM-01/SM-26)', async () => {
+    // The signatures table is populated from /signature/view (already loaded
+    // by openViewer above), independent of the "Run Compliance" POST above —
+    // these columns render as soon as the viewer opens.
+    const row = page
+      .getByRole('row')
+      .filter({ has: page.locator('td') })
+      .first()
+    await expect(row).toBeVisible()
+
+    // Achieved level (this contract has no declared requirement, so it
+    // defaults to AES): the achieved-level badge from the pre-existing column.
+    await expect(row.locator('td').nth(1).locator('.badge')).toHaveText('AES')
+    // Required level: same default, AES.
+    await expect(row.locator('td').nth(2).locator('.badge')).toHaveText('AES')
+    // Level compliance: achieved (AES) meets required (AES) -> PASS.
+    await expect(row.locator('td').nth(3).locator('.badge')).toHaveText('PASS')
+    await expect(row.locator('td').nth(3).locator('.badge')).toHaveClass(/badge-success/)
+    // Qualification: N/A for an AES (non-QES) signature.
+    await expect(row.locator('td').nth(4)).toContainText('N/A (AES)')
+    // Certificate subject: non-empty — the signatory's own certificate, not
+    // a DCS/org key (ADR-20 sole-control evidence, DCS-FR-SM-26).
+    const certCell = row.locator('td').nth(5)
+    await expect(certCell).not.toHaveText('—')
+    await expect(certCell).not.toHaveText('')
   })
 
   await test.step('export compliance report as JSON and PDF', async () => {
+    // DCS-IR-SM-08
     const jsonDownload = page.waitForEvent('download')
     await page.getByRole('button', { name: 'Export JSON' }).click()
-    const jsonPath = (await (await jsonDownload).path())!
+    const jsonPath = await (await jsonDownload).path()
     const report = JSON.parse(readFileSync(jsonPath, 'utf-8')) as {
       contract_did: string
       signatures: unknown[]
+      parties?: unknown[]
+      report_scope?: string
+      contract_findings?: unknown[]
     }
     expect(report.contract_did).toBe(contractDid)
     expect(report.signatures.length).toBeGreaterThan(0)
+    expect(report.report_scope).toMatch(/current DCS instance/i)
+    expect(Array.isArray(report.parties)).toBe(true)
+    expect(report.parties!.length).toBeGreaterThan(0)
+    expect(Array.isArray(report.contract_findings)).toBe(true)
+    expect(report).toHaveProperty('clauses')
 
     // PDF export opens a print window (dependency-free, browser "Save as PDF").
     const popup = page.waitForEvent('popup')
@@ -111,6 +186,9 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
       { timeout: 90_000 },
     )
     await page.getByRole('button', { name: 'Load Audit Report', exact: true }).click()
+    const confirmation = page.getByRole('dialog', { name: 'Confirmation' })
+    await confirmation.getByPlaceholder('Audit justification').fill('Signature compliance review')
+    await confirmation.getByRole('button', { name: 'Submit' }).click()
     const resp = await audited
     // The audit trail lives only in IPFS and intermittently loses a just-written
     // entry ("DataIdentifier not found") — tolerate that one infra flake, stay
@@ -127,6 +205,7 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
 
   // ---- Revocation (destructive — last) ----
   await test.step('revocation tab revokes the signature', async () => {
+    // DCS-IR-SM-06
     await openViewer(page, loginAs, 'Contract Manager', contractDid)
     await page.getByRole('tab', { name: 'Revocation' }).click()
 
@@ -136,7 +215,23 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
       (r) => r.url().includes('/signature/revoke') && r.request().method() === 'POST' && r.ok(),
     )
     await sigRow.getByRole('button', { name: 'Revoke', exact: true }).click()
+    const confirmation = page.getByRole('dialog', { name: 'Confirmation' })
+    await confirmation.getByPlaceholder('Reason for revocation').fill('Superseded during compliance review')
+    await confirmation.getByRole('button', { name: 'Submit' }).click()
     await revoked
     await expect(page.locator('.badge').filter({ hasText: 'REVOKED' }).first()).toBeVisible()
+  })
+
+  await test.step('the contract PDF still exports after revocation — revocation is not erasure', async () => {
+    // DCS-NFR-BR-06 voids the agreement; the content keys stay live (only an
+    // archive deletion shreds them, ADR-28) — the revoked contract's PDF must
+    // remain readable to authorized users.
+    await gotoAs(page, loginAs, 'Contract Manager', `/ui/contracts/view/${contractDid}`)
+    const exported = page.waitForResponse((r) => r.url().includes(`/pdf/export/contract/${contractDid}`) && r.ok(), {
+      timeout: 120_000,
+    })
+    await page.getByRole('button', { name: 'Export PDF' }).click()
+    await exported
+    await expect(page.getByText('Content erased. Encryption keys destroyed.')).toHaveCount(0)
   })
 })

@@ -9,6 +9,7 @@
 @UC-02 @DCS-FR-TR-09
 Feature: Per-version template provenance credentials
 
+  @DCS-FR-TR-08
   Scenario: A registered template carries a signed provenance credential naming its actor trail
     Given I am authenticated with roles: "Template Manager"
     And template "Provenance Credential Template" is in "Registered" status

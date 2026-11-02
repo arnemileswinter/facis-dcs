@@ -22,34 +22,18 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      initContainers:
-        # Block startup until the hsm-provision post-install hook has published
-        # the C2PA x5chain cert secret. pdf-core embeds this cert in the COSE
-        # protected header, so it must never start without it — but the env
-        # secretKeyRef alone CreateContainerConfigError/BackOff crash-looped the
-        # pod while it raced the hook, and under runner load that churn closed
-        # peer browser sessions mid-negotiation. Waiting here (like the backend's
-        # wait-for-hsm-token) turns the race into a clean Init wait. Uses the
-        # backend image for a shell; the cert is read via an optional volume.
-        - name: wait-for-x5chain
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command:
-            - /bin/sh
-            - -c
-            - |
-              until [ -s /x5chain/{{ include "digital-contracting-service.pdfCoreX5ChainSecretKey" . }} ]; do
-                echo "Waiting for C2PA x5chain cert secret..."
-                sleep 3
-              done
-              echo "C2PA x5chain cert is ready."
-          volumeMounts:
-            - name: x5chain-cert
-              mountPath: /x5chain
+      {{- with .Values.pdfCore.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: pdf-core
-          image: "{{ .Values.pdfCore.image.repository }}:{{ .Values.pdfCore.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.pdfCore.image.repository }}:{{ .Values.pdfCore.image.tag | default .Chart.AppVersion }}{{ with .Values.pdfCore.image.digest }}@{{ . }}{{ end }}"
           imagePullPolicy: {{ .Values.pdfCore.image.pullPolicy }}
+          {{- with .Values.pdfCore.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.pdfCore.service.port }}
@@ -59,18 +43,15 @@ spec:
               value: {{ printf "0.0.0.0:%v" .Values.pdfCore.service.port | quote }}
             - name: DCS_PDF_CORE_ONTOLOGY_BASE_URL
               value: {{ .Values.pdfCore.ontologyBaseURL | default (include "digital-contracting-service.pdfCoreURL" .) | quote }}
-            # pdf-core holds no key material: it prepares the COSE Sig_structures,
-            # the DCS backend signs them with the PKCS#11 dcs-c2pa key, and pdf-core
-            # embeds the returned signatures (DCS-IR-HI-01). It embeds this x5chain
-            # (public cert) in the COSE protected header. optional so the pod
-            # schedules; the wait-for-x5chain initContainer guarantees the secret
-            # exists before this container starts, so the ref always resolves.
-            - name: DCS_PDF_CORE_C2PA_X5CHAIN_PEM
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "digital-contracting-service.pdfCoreX5ChainSecretName" . }}
-                  key: {{ include "digital-contracting-service.pdfCoreX5ChainSecretKey" . | quote }}
-                  optional: true
+            # pdf-core holds no key material and no certificate: it prepares the
+            # COSE Sig_structures, the DCS backend signs them with the PKCS#11
+            # dcs-c2pa key (DCS-IR-HI-01) and sends the matching certificate
+            # chain on every request in the X-DCS-C2PA-X5Chain header, and
+            # pdf-core embeds the returned signatures and that chain.
+          {{- with .Values.pdfCore.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           readinessProbe:
             httpGet:
               path: /swagger.json
@@ -83,9 +64,9 @@ spec:
               port: http
             initialDelaySeconds: 10
             periodSeconds: 15
+        {{- if .Values.global.internalTLS.enabled }}
+        {{- include "digital-contracting-service.internalTLSProxy" (dict "root" . "upstreamPort" .Values.pdfCore.service.port) | nindent 8 }}
       volumes:
-        - name: x5chain-cert
-          secret:
-            secretName: {{ include "digital-contracting-service.pdfCoreX5ChainSecretName" . }}
-            optional: true
+        {{- include "digital-contracting-service.internalTLSVolume" . | nindent 8 }}
+        {{- end }}
 {{- end }}

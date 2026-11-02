@@ -6,12 +6,12 @@
     },
     "@id": "did:web:localhost:template:d8927dd7-5026-459d-a66e-4b6706d07d54",
     "@type": "dcs:ContractTemplate",
-    "dcs:contractData": [
+    "dcs:contractFields": [
         {
             "@id": "did:web:localhost:template:d8927dd7-5026-459d-a66e-4b6706d07d54#field-contract.jurisdiction",
-            "@type": "dcs:Placeholder",
+            "@type": "dcs:ContractField",
             "dcs:label": "Contract Jurisdiction",
-            "dcs:datatype": "xsd:string",
+            "dcs:datatype": "xsd:string", "dcs:required": true,
             "dcs:shape": {
                 "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction"
             },
@@ -19,9 +19,9 @@
         },
         {
             "@id": "did:web:localhost:template:d8927dd7-5026-459d-a66e-4b6706d07d54#field-contract.disputeResolution.method",
-            "@type": "dcs:Placeholder",
+            "@type": "dcs:ContractField",
             "dcs:label": "Dispute Resolution Method",
-            "dcs:datatype": "xsd:string",
+            "dcs:datatype": "xsd:string", "dcs:required": true,
             "dcs:shape": {
                 "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-disputeResolution-method"
             },
@@ -29,9 +29,9 @@
         },
         {
             "@id": "did:web:localhost:template:d8927dd7-5026-459d-a66e-4b6706d07d54#field-contract.disputeResolution.venue",
-            "@type": "dcs:Placeholder",
+            "@type": "dcs:ContractField",
             "dcs:label": "Dispute Venue",
-            "dcs:datatype": "xsd:string",
+            "dcs:datatype": "xsd:string", "dcs:required": true,
             "dcs:shape": {
                 "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-disputeResolution-venue"
             },
@@ -39,9 +39,9 @@
         },
         {
             "@id": "did:web:localhost:template:d8927dd7-5026-459d-a66e-4b6706d07d54#field-contract.governingLaw",
-            "@type": "dcs:Placeholder",
+            "@type": "dcs:ContractField",
             "dcs:label": "Governing Law",
-            "dcs:datatype": "xsd:string",
+            "dcs:datatype": "xsd:string", "dcs:required": true,
             "dcs:shape": {
                 "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-governingLaw"
             },

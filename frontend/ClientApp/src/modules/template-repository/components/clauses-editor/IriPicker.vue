@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
 
 /**
  * Picks an ODRL term that is an IRI reference — an action, a party
@@ -25,8 +25,9 @@ const props = withDefaults(
     options?: IriOption[]
     groups?: IriGroup[]
     placeholder?: string
+    allowCustom?: boolean
   }>(),
-  { options: () => [], groups: () => [], placeholder: 'https://…  (custom IRI)' },
+  { options: () => [], groups: () => [], placeholder: 'https://…  (custom IRI)', allowCustom: true },
 )
 const emit = defineEmits<{ 'update:modelValue': [string] }>()
 
@@ -38,8 +39,13 @@ const knownValues = computed(() => {
   return values
 })
 
-const custom = ref(!!props.modelValue && !knownValues.value.has(props.modelValue))
-const selectValue = computed(() => (custom.value ? CUSTOM : props.modelValue))
+const custom = ref(props.allowCustom && !!props.modelValue && !knownValues.value.has(props.modelValue))
+const selectValue = computed(() => {
+  if (props.allowCustom && custom.value) return CUSTOM
+  return knownValues.value.has(props.modelValue) ? props.modelValue : ''
+})
+
+const selectValueId = useId()
 
 function onSelect(event: Event) {
   const value = (event.target as HTMLSelectElement).value
@@ -51,25 +57,24 @@ function onSelect(event: Event) {
   emit('update:modelValue', value)
 }
 
-watch(
-  () => props.modelValue,
-  (value) => {
-    if (value && !knownValues.value.has(value)) custom.value = true
-  },
-)
+watch([() => props.modelValue, () => props.allowCustom, knownValues], ([value, allowCustom]) => {
+  custom.value = !!allowCustom && !!value && !knownValues.value.has(String(value))
+})
 </script>
 
 <template>
   <div class="flex flex-col gap-1">
-    <select :value="selectValue" class="select-bordered select select-sm" @change="onSelect">
+    <select :id="selectValueId" :value="selectValue" class="select-bordered select select-sm" @change="onSelect">
+      <option value="" disabled>Select…</option>
       <option v-for="o in options" :key="o.value" :value="o.value">{{ o.label }}</option>
       <optgroup v-for="g in groups" :key="g.label" :label="g.label">
         <option v-for="o in g.options" :key="o.value" :value="o.value">{{ o.label }}</option>
       </optgroup>
-      <option :value="CUSTOM">✎ Custom IRI…</option>
+      <option v-if="allowCustom" :value="CUSTOM">✎ Custom IRI…</option>
     </select>
     <input
-      v-if="custom"
+      v-if="allowCustom && custom"
+      :id="`${selectValueId}-custom`"
       :value="modelValue"
       type="text"
       :placeholder="placeholder"

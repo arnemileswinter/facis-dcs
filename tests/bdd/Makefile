@@ -1,10 +1,9 @@
 SHELL := /bin/bash -eu -o pipefail
 
 PYTHON ?= python3
-# Unter WSL gegen /mnt/c liegt das Repo auf dem 9P-Dateisystem — ein venv dort
-# macht jeden Python-Import 5-20x langsamer. Default daher: venv im nativen
-# ext4-Home der Distro. Explizites VENV_PATH=... überschreibt weiterhin;
-# außerhalb von WSL (CI-Runner, macOS) bleibt der bisherige Default .venv.
+# Under WSL with the repo on /mnt/c (9P file system), a venv there makes every
+# Python import 5-20x slower. On WSL the default venv is in the native ext4 home.
+# An explicit VENV_PATH=... wins. Outside WSL (CI runners, macOS) the default is .venv.
 ifneq ($(wildcard /proc/sys/fs/binfmt_misc/WSLInterop),)
 VENV_PATH ?= $(HOME)/.dcs-bdd-venv
 endif
@@ -21,6 +20,10 @@ ARG_BDD ?=
 ARG_BDD_JUNIT ?= --junit --junit-directory $(REPORTS_ABS)/junit
 K8S_NAMESPACE ?= default
 HELM_RELEASE ?= dcs
+# The credential issuer is a release of its own, from the same chart and the
+# same values base production installs it with (ADR-34,
+# deployment/helm/values.issuer-base.yml).
+ISSUER_RELEASE ?= dcs-issuer
 DCS_SERVICE ?= $(HELM_RELEASE)-digital-contracting-service
 DCS_DEPLOYMENT ?= $(DCS_SERVICE)
 LOCAL_FORWARD_PORT ?= 18991
@@ -32,14 +35,33 @@ BDD_INGRESS_PORT ?= 18080
 BDD_PUBLIC_ORIGIN ?= http://localhost:$(BDD_INGRESS_PORT)
 BDD_DCS_BASE_URL ?= $(BDD_PUBLIC_ORIGIN)$(DCS_API_BASE_PATH)
 KIND_CONFIG ?= $(THIS_DIR)kind-config.yaml
-BDD_HELM_SET := \
+IS_WSL := $(shell grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null && echo 1)
+# The external audit-checkpoint sink (features/27) is an HTTPS server the behave
+# process runs in-process on the HOST; the ORCE pod posts to it from inside the
+# cluster, so it needs an address the cluster can route to. `host.docker.internal`
+# only exists on Docker Desktop / Rancher Desktop — on a plain Linux Docker engine
+# (which is what the CI runner has) it resolves nowhere and every publication
+# attempt dies before it leaves the pod. The address that always works there is
+# the kind bridge network's gateway, i.e. the host as the node container sees it;
+# it only exists once the cluster does, so BDD_HELM_SET below is expanded lazily.
+# The BDD webhook receiver (features/02 notifications) is reached at the same
+# address, as BDD_WEBHOOK_RECEIVER_HOST in run_bdd_helm.
+KIND_DOCKER_NETWORK ?= kind
+ifeq ($(IS_WSL),1)
+BDD_CHECKPOINT_SINK_HOST ?= $(shell ip -4 -o addr show dev veth-rd-wsl 2>/dev/null | awk '$$3 == "inet" { split($$4, address, "/"); print address[1]; exit }')
+else
+BDD_CHECKPOINT_SINK_HOST ?= $(shell docker network inspect "$(KIND_DOCKER_NETWORK)" --format '{{range .IPAM.Config}}{{println .Gateway}}{{end}}' 2>/dev/null | grep -m1 -E '^[0-9]+(\.[0-9]+){3}$$')
+endif
+BDD_HELM_SET = \
 	--set-string hydra.config.selfIssuerURL="$(BDD_PUBLIC_ORIGIN)" \
 	--set-string route.publicBaseURL="$(BDD_DCS_BASE_URL)" \
 	--set-string hydra.config.loginURL="$(BDD_PUBLIC_ORIGIN)/digital-contracting-service/ui/" \
 	--set-string hydra.config.consentURL="$(BDD_PUBLIC_ORIGIN)/digital-contracting-service/api/auth/consent" \
 	--set-string hydra.config.logoutURL="$(BDD_PUBLIC_ORIGIN)/digital-contracting-service/api/auth/logout-complete" \
 	--set-string hydra.clients[0].redirect_uris[0]="$(BDD_PUBLIC_ORIGIN)/digital-contracting-service/api/auth/callback" \
-	--set-string hydra.clients[0].post_logout_redirect_uris[0]="$(BDD_PUBLIC_ORIGIN)/digital-contracting-service/api/auth/logout-complete"
+	--set-string hydra.clients[0].post_logout_redirect_uris[0]="$(BDD_PUBLIC_ORIGIN)/digital-contracting-service/api/auth/logout-complete" \
+	--set-string orce.checkpointSink.url="https://$(BDD_CHECKPOINT_SINK_HOST):18443/checkpoints" \
+	--set-string webhooks.insecureHosts="$(BDD_CHECKPOINT_SINK_HOST):18444"
 HELM_CHART_PATH ?= ../../deployment/helm
 HELM_TIMEOUT ?= 20m
 
@@ -62,9 +84,9 @@ BDD_RUNNER_SCRIPT ?= scripts/run_bdd_helm.sh
 # What run_bdd_helm runs against the live stack: bdd (behave, default) or e2e
 # (Playwright). See run_e2e_kind_ci.
 RUN_MODE ?= bdd
-CERT_CHAIN_SECRET ?= $(DCS_SERVICE)-hsm-c2pa-x5chain
 COREDNS_REWRITE_SCRIPT ?= scripts/kind_coredns_rewrite.sh
 ORCE_PERSISTENCE_SCRIPT ?= scripts/ensure_orce_persistence.sh
+DUMP_CLUSTER_LOGS_SCRIPT ?= scripts/dump_cluster_logs.sh
 
 # Second DCS release ("dcs2", instance B) for the @two-instance peer-trust
 # scenarios (features/17_peer_trust) — see deployment/helm/values.bdd2.yml.
@@ -75,7 +97,6 @@ DCS_SERVICE_B ?= $(HELM_RELEASE_B)-digital-contracting-service
 DCS_DEPLOYMENT_B ?= $(DCS_SERVICE_B)
 BDD_PUBLIC_ORIGIN_B ?= http://dcs-b.localhost:$(BDD_INGRESS_PORT)
 BDD_DCS_BASE_URL_B ?= $(BDD_PUBLIC_ORIGIN_B)$(DCS_API_BASE_PATH)
-CERT_CHAIN_SECRET_B ?= $(DCS_SERVICE_B)-hsm-c2pa-x5chain
 # Mirrors BDD_HELM_SET, but for instance B's own Hydra/route pointed at the
 # dcs-b.localhost origin instead of dcs's plain localhost origin.
 BDD_HELM_SET_B := \
@@ -87,7 +108,7 @@ BDD_HELM_SET_B := \
 	--set-string hydra.clients[0].redirect_uris[0]="$(BDD_PUBLIC_ORIGIN_B)/digital-contracting-service/api/auth/callback" \
 	--set-string hydra.clients[0].post_logout_redirect_uris[0]="$(BDD_PUBLIC_ORIGIN_B)/digital-contracting-service/api/auth/logout-complete"
 
-.PHONY: kind_export_kubeconfig setup_environment ensure_venv run_bdd_test run_bdd_fast run_bdd_helm ensure_kind ensure_k8s_tools kind_create kind_delete kind_load_image kind_load_pdf_core_image kind_deploy kind_deploy_b kind_coredns_rewrite kind_uninstall run_bdd_kind run_bdd_kind_all run_bdd_kind_ci run_e2e_kind run_e2e_kind_ci run_bdd_audit_kind_ci build_dcs_image clean help kind_up kind_up_audit run_bdd_kind_once run_bdd_audit_kind_once kind_down
+.PHONY: kind_export_kubeconfig setup_environment ensure_venv run_bdd_test run_bdd_fast run_bdd_helm ensure_kind ensure_k8s_tools kind_create kind_delete kind_load_image kind_load_pdf_core_image kind_deploy kind_deploy_b kind_coredns_rewrite kind_dump kind_uninstall run_bdd_kind run_bdd_kind_all run_bdd_kind_ci run_e2e_kind run_e2e_kind_ci run_bdd_audit_kind_ci build_dcs_image clean help kind_up kind_up_audit run_bdd_kind_once run_bdd_audit_kind_once run_load_kind_once kind_down
 
 help:
 	@echo "make setup_environment   # Create venv and install bdd-executor"
@@ -120,13 +141,13 @@ setup_environment:
 	fi; \
 	"$(VENV_PATH)/bin/pip" install -q --upgrade pip wheel; \
 	"$(VENV_PATH)/bin/pip" install -q -e "$$SRC_PATH[dev]"; \
-	"$(VENV_PATH)/bin/pip" install -q psycopg2-binary jcs pypdf==5.7.0
+	"$(VENV_PATH)/bin/pip" install -q psycopg2-binary jcs pypdf==5.7.0 pyld
 	"$(VENV_PATH)/bin/pip" install -q -r "$(PROJECT_ROOT)/testWallet/requirements.txt"
 
-# Bootstrappt das venv nur, wenn es fehlt/kaputt ist — der pip-Refresh bei
-# jedem Lauf kostete sonst 10-60s pro Testzyklus.
+# Builds the venv only when it is missing or broken. A pip refresh on every run
+# costs 10-60 s per test cycle.
 ensure_venv:
-	@"$(VENV_ABS)/bin/python" -c 'import eu.xfsc.bdd.core, pypdf' 2>/dev/null || \
+	@"$(VENV_ABS)/bin/python" -c 'import eu.xfsc.bdd.core, pypdf, pyld' 2>/dev/null || \
 		$(MAKE) setup_environment
 
 run_bdd_test: ensure_venv
@@ -135,10 +156,9 @@ run_bdd_test: ensure_venv
 	cd "$(PROJECT_ROOT)" && \
 	"$(VENV_ABS)/bin/coverage" run --append -m behave $(ARG_BDD_JUNIT) $(FEATURES_PATH) $(ARG_BDD)
 
-# Schneller Dev-Loop für die Implementierungs-Iteration: kein pip-Refresh,
-# kein coverage, kein junit; stoppt beim ersten Fehlschlag. Scope über
-# T=<tag-expression> (z. B. T=@two-instance) und/oder F=<feature-pfad>.
-# Der vollständige, berichtende Lauf bleibt run_bdd_test.
+# Fast development loop: no pip refresh, no coverage, no junit; stops at the
+# first failure. Scope with T=<tag-expression> (e.g. T=@two-instance) and/or
+# F=<feature-path>. The full run with reports is run_bdd_test.
 run_bdd_fast: ensure_venv
 	@cd "$(PROJECT_ROOT)" && \
 	"$(VENV_ABS)/bin/behave" --stop $(if $(T),--tags=$(T)) $(if $(F),$(F),$(FEATURES_PATH)) $(ARG_BDD)
@@ -163,7 +183,9 @@ run_bdd_helm: setup_environment ensure_k8s_tools
 		DCS_DEPLOYMENT_B="$(DCS_DEPLOYMENT_B)" \
 		BDD_DCS_BASE_URL_B="$(BDD_DCS_BASE_URL_B)" \
 		BDD_PUBLIC_ORIGIN_B="$(BDD_PUBLIC_ORIGIN_B)" \
+		BDD_WEBHOOK_RECEIVER_HOST="$(BDD_CHECKPOINT_SINK_HOST)" \
 		ARG_BDD_JUNIT="$(ARG_BDD_JUNIT)" \
+		ARG_BDD_TAGS="$(ARG_BDD_TAGS)" \
 		ARG_BDD="$(ARG_BDD)" \
 		RUN_MODE="$(RUN_MODE)" \
 		bash "$(BDD_RUNNER_SCRIPT)"
@@ -178,7 +200,10 @@ DCS_BUILD_CACHE ?=
 PDF_CORE_BUILD_CACHE ?=
 
 build_dcs_image:
-	@$(DOCKER_BUILD) $(DCS_BUILD_CACHE) -f ../../deployment/docker/Dockerfile -t "$(DOCKER_IMAGE)" ../..
+	@$(DOCKER_BUILD) $(DCS_BUILD_CACHE) \
+		--build-arg GIT_SHA="$$(git rev-parse HEAD 2>/dev/null || echo unknown)" \
+		--build-arg BUILD_TIME="$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+		--target ci -f ../../deployment/docker/Dockerfile -t "$(DOCKER_IMAGE)" ../..
 
 build_pdf_core_image:
 	@$(DOCKER_BUILD) $(PDF_CORE_BUILD_CACHE) -f ../../pdf-core/Dockerfile -t "$(PDF_CORE_IMAGE)" ../..
@@ -196,14 +221,32 @@ ensure_k8s_tools:
 # host-port datapath (18080) always reaches the kind cluster.
 KIND_KUBECONFIG := $(CURDIR)/.tmp/kind-kubeconfig
 KIND_GOALS := kind_create kind_load_image kind_load_pdf_core_image kind_deploy kind_deploy_b \
-	kind_coredns_rewrite kind_uninstall run_bdd_kind run_bdd_kind_all run_bdd_kind_ci \
+	kind_coredns_rewrite kind_dump kind_uninstall run_bdd_kind run_bdd_kind_all run_bdd_kind_ci \
 	run_e2e_kind run_e2e_kind_ci \
-	run_bdd_audit_kind_ci kind_up kind_up_audit run_bdd_kind_once run_bdd_audit_kind_once kind_down
+	run_bdd_audit_kind_ci kind_up kind_up_audit run_bdd_kind_once \
+	run_bdd_audit_kind_once run_load_kind_once kind_down
 $(KIND_GOALS): export KUBECONFIG := $(KIND_KUBECONFIG)
 
 kind_export_kubeconfig:
 	@mkdir -p "$(CURDIR)/.tmp"
 	@"$(KIND_BIN)" export kubeconfig --name "$(KIND_CLUSTER_NAME)" --kubeconfig "$(KIND_KUBECONFIG)"
+	@server="$$("$(KUBECTL_BIN)" --kubeconfig "$(KIND_KUBECONFIG)" config view \
+		-o jsonpath='{.clusters[0].cluster.server}')"; \
+	if ! curl -ksS --max-time 2 "$${server}/readyz" >/dev/null 2>&1 && \
+		ip link show veth-rd-wsl >/dev/null 2>&1; then \
+		rd_gateway="$$(ip -4 -o addr show dev veth-rd-wsl | \
+			awk '{ split($$4, a, "[./]"); print a[1] "." a[2] "." a[3] ".1"; exit }')"; \
+		api_port="$${server##*:}"; \
+		if [[ -n "$$rd_gateway" ]] && \
+			curl -ksS --max-time 2 "https://$${rd_gateway}:$${api_port}/readyz" >/dev/null 2>&1; then \
+			cluster_name="$$("$(KUBECTL_BIN)" --kubeconfig "$(KIND_KUBECONFIG)" config view \
+				-o jsonpath='{.clusters[0].name}')"; \
+			echo "Using Rancher Desktop WSL gateway $${rd_gateway}:$${api_port} for kind API"; \
+			"$(KUBECTL_BIN)" --kubeconfig "$(KIND_KUBECONFIG)" config set-cluster "$$cluster_name" \
+				--server="https://$${rd_gateway}:$${api_port}" \
+				--tls-server-name=localhost >/dev/null; \
+		fi; \
+	fi
 
 kind_create: ensure_kind ensure_k8s_tools
 	@cluster_healthy=false; \
@@ -260,6 +303,12 @@ kind_deploy: kind_load_image kind_load_pdf_core_image kind_load_dss_image
 	@"$(KUBECTL_BIN)" create namespace "$(KIND_NAMESPACE)" --dry-run=client -o yaml | "$(KUBECTL_BIN)" apply -f -
 	@KUBECTL_BIN="$(KUBECTL_BIN)" K8S_NAMESPACE="$(KIND_NAMESPACE)" HELM_RELEASE="$(HELM_RELEASE)" \
 		bash "$(ORCE_PERSISTENCE_SCRIPT)"
+	@if [[ -z "$(BDD_CHECKPOINT_SINK_HOST)" ]]; then \
+		echo "Could not determine a host address reachable from kind for the BDD checkpoint sink"; \
+		echo "(no IPv4 gateway on docker network '$(KIND_DOCKER_NETWORK)'). Set BDD_CHECKPOINT_SINK_HOST."; \
+		exit 1; \
+	fi
+	@echo "BDD checkpoint sink advertised to the cluster as https://$(BDD_CHECKPOINT_SINK_HOST):18443/checkpoints"
 	@# Deploy without --wait: Helm defers post-install hooks until all deployments are
 	@# ready, but DCS can't become ready until the devCertChain post-install hook has
 	@# created its Secret — a deadlock. We break the cycle by letting helm return as
@@ -271,6 +320,8 @@ kind_deploy: kind_load_image kind_load_pdf_core_image kind_load_dss_image
 		--values "$(HELM_CHART_PATH)/values.bdd.yml" \
 		--set image.repository="$(DOCKER_IMAGE_REPOSITORY)" \
 		--set image.tag="$(DOCKER_IMAGE_TAG)" \
+		--set pdfCore.image.repository="$(PDF_CORE_IMAGE_REPOSITORY)" \
+		--set pdfCore.image.tag="$(PDF_CORE_IMAGE_TAG)" \
 		$(BDD_HELM_SET) \
 		$(KIND_HELM_VALUES) \
 		$(KIND_HELM_SET)
@@ -281,22 +332,27 @@ kind_deploy: kind_load_image kind_load_pdf_core_image kind_load_dss_image
 	@# time: a prior version wired only to cluster creation was observed to
 	@# not reliably stick.
 	@$(MAKE) kind_coredns_rewrite
+	@# The credential issuer, after the release above because its Ingress
+	@# references a Traefik Middleware and the Traefik CRDs arrive with that
+	@# release. Same chart, same values base and same release name production
+	@# uses, published at the same <origin>/issuer — a signed status list behind
+	@# a stripped path prefix is what broke in production, and it can only fail
+	@# here if here serves the same shape (ADR-34).
+	@KUBECTL_BIN="$(KUBECTL_BIN)" K8S_NAMESPACE="$(KIND_NAMESPACE)" HELM_RELEASE="$(ISSUER_RELEASE)" \
+		bash "$(ORCE_PERSISTENCE_SCRIPT)"
+	@"$(HELM_BIN)" upgrade --install "$(ISSUER_RELEASE)" "$(HELM_CHART_PATH)/charts/orce" \
+		--namespace "$(KIND_NAMESPACE)" \
+		--timeout "$(HELM_TIMEOUT)" \
+		--values "$(HELM_CHART_PATH)/values.issuer-base.yml" \
+		--values "$(HELM_CHART_PATH)/values.issuer.bdd.yml"
+	@"$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout status \
+		deployment/"$(ISSUER_RELEASE)"-orce --timeout "$(HELM_TIMEOUT)" || { \
+		$(MAKE) --no-print-directory kind_dump; exit 1; }
 	@# The image tag is static, so an unchanged manifest never rolls the pods
 	@# even though kind load just replaced the node image — restart both
 	@# freshly-built workloads so the run tests the image that was built.
 	@"$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout restart \
 		deployment/"$(DCS_DEPLOYMENT)" deployment/"$(DCS_DEPLOYMENT)"-pdf-core 2>/dev/null || true
-	@echo "Waiting for cert chain secret $(CERT_CHAIN_SECRET) (created by post-install hook)..."
-	@deadline=$$(( $$(date +%s) + 1200 )); \
-	until "$(KUBECTL_BIN)" get secret "$(CERT_CHAIN_SECRET)" -n "$(KIND_NAMESPACE)" >/dev/null 2>&1; do \
-		if [ $$(date +%s) -gt $$deadline ]; then \
-			echo "Timed out waiting for $(CERT_CHAIN_SECRET)"; \
-			"$(KUBECTL_BIN)" get pods -n "$(KIND_NAMESPACE)" -l app.kubernetes.io/instance=$(HELM_RELEASE) -o wide || true; \
-			"$(KUBECTL_BIN)" get events -n "$(KIND_NAMESPACE)" --sort-by=.lastTimestamp || true; \
-			exit 1; \
-		fi; \
-		sleep 5; \
-	done
 	@echo "Waiting for DCS deployment to become available..."
 	@if ! "$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout status \
 		deployment/"$(DCS_DEPLOYMENT)" --timeout "$(HELM_TIMEOUT)"; then \
@@ -320,6 +376,10 @@ kind_deploy: kind_load_image kind_load_pdf_core_image kind_load_dss_image
 		echo "=== HSM PROVISION JOB LOGS (instance A) ==="; \
 		"$(KUBECTL_BIN)" logs -n "$(KIND_NAMESPACE)" \
 			job/"$(DCS_DEPLOYMENT)"-hsm-provision --tail=100 || true; \
+		echo "=== FC REALM PROVISION JOB LOGS ==="; \
+		"$(KUBECTL_BIN)" logs -n "$(KIND_NAMESPACE)" \
+			job/"$(DCS_DEPLOYMENT)"-fc-realm-provision --tail=100 || true; \
+		$(MAKE) --no-print-directory kind_dump; \
 		exit 1; \
 	fi
 
@@ -333,8 +393,8 @@ kind_coredns_rewrite: ensure_k8s_tools
 
 # Deploys the SECOND DCS release (instance B, features/17_peer_trust) into
 # the same kind namespace, strictly after instance A: B probes
-# several of A's already-deployed shared services (Traefik, ORCE TSA, Status
-# List Service, IPFS) at its own startup, so it depends on kind_deploy rather
+# several of A's already-deployed shared services (Traefik, ORCE TSA,
+# DSS) at its own startup, so it depends on kind_deploy rather
 # than only on kind_create/kind_load_image.
 kind_deploy_b: kind_deploy
 	@echo "Deploying instance B (release $(HELM_RELEASE_B)) after instance A ($(HELM_RELEASE))..."
@@ -345,22 +405,13 @@ kind_deploy_b: kind_deploy
 		--values "$(HELM_CHART_PATH)/values.bdd2.yml" \
 		--set image.repository="$(DOCKER_IMAGE_REPOSITORY)" \
 		--set image.tag="$(DOCKER_IMAGE_TAG)" \
+		--set pdfCore.image.repository="$(PDF_CORE_IMAGE_REPOSITORY)" \
+		--set pdfCore.image.tag="$(PDF_CORE_IMAGE_TAG)" \
 		$(BDD_HELM_SET_B) \
 		$(KIND_HELM_VALUES) \
 		$(KIND_HELM_SET)
 	@"$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout restart \
 		deployment/"$(DCS_DEPLOYMENT_B)" 2>/dev/null || true
-	@echo "Waiting for cert chain secret $(CERT_CHAIN_SECRET_B) (created by post-install hook)..."
-	@deadline=$$(( $$(date +%s) + 1200 )); \
-	until "$(KUBECTL_BIN)" get secret "$(CERT_CHAIN_SECRET_B)" -n "$(KIND_NAMESPACE)" >/dev/null 2>&1; do \
-		if [ $$(date +%s) -gt $$deadline ]; then \
-			echo "Timed out waiting for $(CERT_CHAIN_SECRET_B)"; \
-			"$(KUBECTL_BIN)" get pods -n "$(KIND_NAMESPACE)" -l app.kubernetes.io/instance=$(HELM_RELEASE_B) -o wide || true; \
-			"$(KUBECTL_BIN)" get events -n "$(KIND_NAMESPACE)" --sort-by=.lastTimestamp || true; \
-			exit 1; \
-		fi; \
-		sleep 5; \
-	done
 	@echo "Waiting for DCS deployment (instance B) to become available..."
 	@if ! "$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout status \
 		deployment/"$(DCS_DEPLOYMENT_B)" --timeout "$(HELM_TIMEOUT)"; then \
@@ -384,10 +435,18 @@ kind_deploy_b: kind_deploy
 		echo "=== HSM PROVISION JOB LOGS (instance B) ==="; \
 		"$(KUBECTL_BIN)" logs -n "$(KIND_NAMESPACE)" \
 			job/"$(DCS_DEPLOYMENT_B)"-hsm-provision --tail=100 || true; \
+		$(MAKE) --no-print-directory kind_dump; \
 		exit 1; \
 	fi
 
+# State and logs of every container of every pod in the cluster, with the
+# previous run of each restarted container (scripts/dump_cluster_logs.sh).
+kind_dump:
+	@echo "=== ALL PODS, ALL CONTAINERS ==="
+	@KUBECTL_BIN="$(KUBECTL_BIN)" bash "$(DUMP_CLUSTER_LOGS_SCRIPT)" || true
+
 kind_uninstall:
+	@"$(HELM_BIN)" uninstall "$(ISSUER_RELEASE)" --namespace "$(KIND_NAMESPACE)" >/dev/null 2>&1 || true
 	@"$(HELM_BIN)" uninstall "$(HELM_RELEASE_B)" --namespace "$(KIND_NAMESPACE)" >/dev/null 2>&1 || true
 	@"$(HELM_BIN)" uninstall "$(HELM_RELEASE)" --namespace "$(KIND_NAMESPACE)" >/dev/null 2>&1 || true
 
@@ -419,7 +478,7 @@ run_e2e_kind_ci: build_dcs_image build_pdf_core_image run_e2e_kind
 run_bdd_audit_kind_ci: build_dcs_image build_pdf_core_image kind_deploy
 	@$(MAKE) run_bdd_audit_kind_once
 
-# The community-packaged EU DSS 6.2 demonstration webapp (visible-PAdES rQES).
+# The community-packaged EU DSS 6.2 demonstration webapp (visible-PAdES wallet-based AES).
 DSS_IMAGE ?= conectx/dss-demo:6.2.1
 
 # Pull (if absent) and load the DSS image into the kind cluster. The DSS is the
@@ -452,11 +511,19 @@ run_bdd_kind_once:
 		HELM_RELEASE="$(HELM_RELEASE)" \
 		FEATURES_PATH="$(if $(F),$(F),$(FEATURES_PATH))"
 
+# k6 load test (tests/load) against the deployed stack, without redeploying.
+run_load_kind_once:
+	@$(MAKE) run_bdd_helm \
+		K8S_NAMESPACE="$(KIND_NAMESPACE)" \
+		HELM_RELEASE="$(HELM_RELEASE)" \
+		RUN_MODE="load"
+
 run_bdd_audit_kind_once:
 	@$(MAKE) run_bdd_helm \
 		K8S_NAMESPACE="$(KIND_NAMESPACE)" \
 		HELM_RELEASE="$(HELM_RELEASE)" \
 		DCS_DEPLOYMENT_B="" \
+		ARG_BDD_TAGS="--tags=isolated_stack" \
 		FEATURES_PATH="features/08_audit_compliance/audit_ui_archive_orce.feature"
 
 # Shutdown deployment, cluster and clean test artifacts

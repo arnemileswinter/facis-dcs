@@ -1,14 +1,22 @@
 import { execFileSync } from 'node:child_process'
+import fs from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Browser, Page } from '@playwright/test'
-import { E2E_API_BASE, E2E_DSS_URL, E2E_FRONTEND_ORIGIN, E2E_STATUSLIST_URL } from '../playwright.config'
 import { applySession, type DcsRole, expect, mintSession, test } from './dcs-test'
+import { E2E_API_BASE, E2E_DSS_URL, E2E_FRONTEND_ORIGIN, E2E_ISSUER_BASE_URL } from '../playwright.config'
+import type { Browser, Locator, Page, Response } from '@playwright/test'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(here, '../../..')
-const python = process.env.E2E_BDD_PYTHON || path.join(homedir(), '.dcs-bdd-venv', 'bin', 'python3')
+const python = process.env.E2E_BDD_PYTHON ?? path.join(homedir(), '.dcs-bdd-venv', 'bin', 'python3')
+
+// The single-instance signing identity: MUST be passed explicitly to BOTH
+// complete_signing_webhook.py (the PID) and sign_prepared_pdf.py (the signing
+// certificate) — never left to each script's own env-var default — so the
+// two can never resolve to different signatories (ADR-20's cert-subject to
+// PID name-match gate rejects exactly that mismatch).
+const E2E_SIGNATORY_NAME = 'E2E Vertical Signer'
 
 /**
  * UI lifecycle helpers shared by e2e specs that need a contract in a given
@@ -36,7 +44,37 @@ async function confirmModal(page: Page, buttonName: 'Submit' | 'Confirm'): Promi
 async function completeParticipantDialog(page: Page): Promise<void> {
   const dialog = page.getByRole('dialog').filter({ hasText: 'Contract Counterparty' })
   await expect(dialog).toBeVisible()
+  await selectOriginatorRole(dialog)
   await dialog.getByRole('button', { name: 'Apply', exact: true }).click()
+}
+
+/** Binds the clause rule to the two catalogued roles — Granted by (assigner)
+ *  and Applies to (assignee). The builder emits no rule while either is unset,
+ *  and a template whose rules name no role parties declares no roles for a
+ *  contract to bind its originator to. */
+export async function selectBilateralClauseRoles(editor: Locator): Promise<void> {
+  const roleSelect = (label: string) =>
+    editor.locator('label.form-control').filter({ hasText: label }).locator('select')
+  const assigner = roleSelect('Granted by')
+  const assignee = roleSelect('Applies to')
+  const values = await assigner
+    .locator('option:not([disabled])')
+    .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value).filter(Boolean))
+  const [assignerRole, assigneeRole] = values
+  if (!assignerRole || !assigneeRole) throw new Error('the role catalog does not expose two roles')
+  await assigner.selectOption(assignerRole)
+  await assignee.selectOption(assigneeRole)
+}
+
+/** Picks the first of the template's two catalogued roles as the originator's
+ *  own. The dialog refuses Apply without one: the role binds the creating
+ *  organization to a party in the machine-readable rules, and the select stays
+ *  disabled until the loaded template declares exactly two catalogued roles. */
+export async function selectOriginatorRole(dialog: Locator): Promise<void> {
+  const roleSelect = dialog.getByLabel(/Your role in this contract/)
+  await expect(roleSelect).toBeEnabled()
+  const value = await roleSelect.locator('option:not([disabled])').first().getAttribute('value')
+  await roleSelect.selectOption(value)
 }
 
 async function waitForTemplateLoaded(page: Page, name: string): Promise<void> {
@@ -44,7 +82,12 @@ async function waitForTemplateLoaded(page: Page, name: string): Promise<void> {
 }
 
 /** DRAFT → SUBMITTED → REVIEWED → APPROVED for one template, via the UI. */
-async function submitReviewApproveTemplate(page: Page, loginAs: LoginAs, did: string, name: string): Promise<void> {
+export async function submitReviewApproveTemplate(
+  page: Page,
+  loginAs: LoginAs,
+  did: string,
+  name: string,
+): Promise<void> {
   await test.step(`submit template ${name} for review`, async () => {
     await gotoAs(page, loginAs, 'Template Creator', `/ui/templates/view/${did}`)
     const submitted = page.waitForResponse(
@@ -60,14 +103,12 @@ async function submitReviewApproveTemplate(page: Page, loginAs: LoginAs, did: st
     const verified = page.waitForResponse(
       (r) => r.url().includes('/template/verify') && r.request().method() === 'POST' && r.ok(),
     )
-    await page.getByRole('button', { name: 'Verify', exact: true }).click()
-    await verified
-    await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click()
     const forwarded = page.waitForResponse(
       (r) => r.url().includes('/template/submit') && r.request().method() === 'POST' && r.ok(),
     )
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
-    await confirmModal(page, 'Submit')
+    await verified
+    await page.getByRole('dialog').getByRole('button', { name: 'Confirm approval', exact: true }).click()
     await forwarded
   })
 
@@ -99,7 +140,7 @@ export const FIXTURE_CLAUSE_PROSE = 'The provider invoices the agreed payment am
  * inline placeholder renders an editable input, a bare constraint boundary does
  * not). Returns the created component's DID.
  */
-async function authorPaymentComponent(
+export async function authorPaymentComponent(
   page: Page,
   loginAs: LoginAs,
   name: string,
@@ -107,6 +148,7 @@ async function authorPaymentComponent(
 ): Promise<string> {
   await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
   await page.getByRole('button', { name: /Component/ }).click()
+  await page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
   await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(name)
   await page
     .getByRole('group')
@@ -131,12 +173,13 @@ async function authorPaymentComponent(
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
-  await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+  await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
+  await selectBilateralClauseRoles(editor)
   await editor.getByRole('button', { name: '+ constraint' }).click()
   const constraint = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
   await constraint.locator('select').nth(0).selectOption({ label: 'Payment Amount' })
-  await constraint.locator('select').nth(1).selectOption({ label: 'must be at most' })
+  await constraint.locator('select').nth(1).selectOption({ label: 'less than or equal to' })
   await constraint.locator('input[placeholder="value"]').fill('500')
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
@@ -157,23 +200,45 @@ async function authorPaymentComponent(
   return componentDid
 }
 
+/** The hierarchy level of a contract template and the name of the template a
+ *  parent contract must come from (DCS-FR-TR-02, DCS-FR-TR-23). */
+export interface TemplateStructureInput {
+  level: 'FRAME_AGREEMENT' | 'AGREEMENT' | 'SUB_AGREEMENT' | 'ADDENDUM'
+  requires?: string
+}
+
 /** Composes a Contract template by inlining an approved component's blocks,
  *  placeholders and policies into the Builder outline (flatten-on-compose).
- *  Returns its DID. */
-async function authorContractTemplateFrom(
+ *  With `structure`, the details editor also sets the hierarchy level and
+ *  selects the required template. Returns its DID. */
+export async function authorContractTemplateFrom(
   page: Page,
   loginAs: LoginAs,
   name: string,
   componentName: string,
+  structure?: TemplateStructureInput,
 ): Promise<string> {
   await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
   await page.getByRole('button', { name: /parent for other contracts/ }).click()
+  await page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
   await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(name)
   await page
     .getByRole('group')
     .filter({ hasText: 'Base Description' })
     .getByRole('textbox')
     .fill('Contract template composed for the fixture lifecycle e2e.')
+
+  if (structure) {
+    // The level first: changing it drops the required templates it cannot require.
+    await page.getByTestId('template-level').selectOption(structure.level)
+    if (structure.requires) {
+      const required = page
+        .getByTestId('template-required-templates')
+        .getByRole('checkbox', { name: new RegExp(structure.requires) })
+      await required.check()
+      await expect(required).toBeChecked()
+    }
+  }
 
   await page.getByRole('tab', { name: /Builder/ }).click()
   await page
@@ -197,24 +262,41 @@ async function authorContractTemplateFrom(
 
 /** Registers an approved contract template (publishes it to the Federated
  *  Catalogue) so contracts can be derived from it. */
-async function registerContractTemplate(page: Page, loginAs: LoginAs, did: string, name: string): Promise<void> {
+export async function registerContractTemplate(page: Page, loginAs: LoginAs, did: string, name: string): Promise<void> {
   await gotoAs(page, loginAs, 'Template Manager', `/ui/templates/view/${did}`)
   await waitForTemplateLoaded(page, name)
   const registered = page.waitForResponse(
     (r) => r.url().includes('/template/register') && r.request().method() === 'POST' && r.ok(),
   )
   await page.getByRole('button', { name: 'Register', exact: true }).click()
+  // Register goes through the shared ConfirmationModal ("Proceed with
+  // registration?") before it actually submits — the click above only opens
+  // it.
+  await page.getByRole('button', { name: 'Confirm', exact: true }).click()
   await registered
 }
 
 /** Derives a purely local contract from a registered template (no counterparty:
- *  the R6 dialog is applied empty). The contract lands in DRAFT. Returns its DID. */
-async function deriveLocalContract(page: Page, loginAs: LoginAs, templateName: string): Promise<string> {
+ *  the R6 dialog is applied empty). The contract lands in DRAFT. With
+ *  `parentContractName`, the new contract is added to that DRAFT contract
+ *  (dcs:parentContract), which the UI sets with an update right after the
+ *  create. Returns its DID. */
+export async function deriveLocalContract(
+  page: Page,
+  loginAs: LoginAs,
+  templateName: string,
+  parentContractName?: string,
+): Promise<string> {
   await gotoAs(page, loginAs, 'Contract Creator', '/ui/contracts/new')
   const picker = page.locator('select').first()
   const option = picker.locator('option', { hasText: templateName })
   await expect(option).toHaveCount(1)
   await picker.selectOption({ label: (await option.textContent())!.trim() })
+  if (parentContractName) {
+    await page
+      .getByRole('combobox', { name: 'Add to existing contract (optional)' })
+      .selectOption({ label: parentContractName })
+  }
 
   await page.getByRole('button', { name: 'Create', exact: true }).click()
   const created = page.waitForResponse((r) => r.url().includes('/contract/create') && r.request().method() === 'POST')
@@ -284,30 +366,8 @@ export async function buildDraftContractFixture(browser: Browser): Promise<Draft
   }
 }
 
-/**
- * Builds a fresh contract and drives it to APPROVED (approved-for-signing):
- * a component template with a semantic clause → a contract template composing
- * it → registration → contract derivation → negotiation, review, approval.
- * Returns the approved contract's DID.
- */
-export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promise<string> {
-  const unique = Date.now()
-  const componentName = `SCV Component ${unique}`
-  const contractTemplateName = `SCV Contract ${unique}`
-
-  const componentDid = await test.step('create component template with a semantic clause', () =>
-    authorPaymentComponent(page, loginAs, componentName, true))
-  await submitReviewApproveTemplate(page, loginAs, componentDid, componentName)
-
-  const contractTemplateDid = await test.step('create contract template from approved component', () =>
-    authorContractTemplateFrom(page, loginAs, contractTemplateName, componentName))
-  await submitReviewApproveTemplate(page, loginAs, contractTemplateDid, contractTemplateName)
-  await test.step('register approved contract template', () =>
-    registerContractTemplate(page, loginAs, contractTemplateDid, contractTemplateName))
-
-  const contractDid = await test.step('create contract from registered template', () =>
-    deriveLocalContract(page, loginAs, contractTemplateName))
-
+/** Fills the required Payment Amount of a DRAFT contract and submits it into negotiation. */
+export async function submitDraftIntoNegotiation(page: Page, loginAs: LoginAs, contractDid: string): Promise<void> {
   await test.step('fill the required Payment Amount and submit into negotiation', async () => {
     await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/edit/${contractDid}`)
     await expect(page.getByRole('button', { name: 'Update', exact: true })).toBeVisible()
@@ -336,11 +396,51 @@ export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promi
     const resp = await submitted
     expect(resp.ok(), `contract submit ${resp.status()}: ${await resp.text()}`).toBeTruthy()
   })
+}
+
+/**
+ * Builds a fresh contract and drives it to APPROVED (approved-for-signing):
+ * a component template with a semantic clause → a contract template composing
+ * it → registration → contract derivation → negotiation, review, approval.
+ * Returns the approved contract's DID.
+ *
+ * The review and approval pages name the role the user acts in
+ * (DCS-FR-CWE-25). With `reviewFinding`, the reviewer also annotates the
+ * Payment clause: the clause shows highlighted in the contract content, and
+ * the annotation goes with the forward to approval (DCS-IR-CWE-06).
+ */
+export async function buildApprovedContract(
+  page: Page,
+  loginAs: LoginAs,
+  options: { reviewFinding?: string } = {},
+): Promise<string> {
+  const unique = Date.now()
+  const componentName = `SCV Component ${unique}`
+  const contractTemplateName = `SCV Contract ${unique}`
+
+  const componentDid = await test.step('create component template with a semantic clause', () =>
+    authorPaymentComponent(page, loginAs, componentName, true))
+  await submitReviewApproveTemplate(page, loginAs, componentDid, componentName)
+
+  const contractTemplateDid = await test.step('create contract template from approved component', () =>
+    authorContractTemplateFrom(page, loginAs, contractTemplateName, componentName))
+  await submitReviewApproveTemplate(page, loginAs, contractTemplateDid, contractTemplateName)
+  await test.step('register approved contract template', () =>
+    registerContractTemplate(page, loginAs, contractTemplateDid, contractTemplateName))
+
+  const contractDid = await test.step('create contract from registered template', () =>
+    deriveLocalContract(page, loginAs, contractTemplateName))
+
+  await submitDraftIntoNegotiation(page, loginAs, contractDid)
 
   await test.step('accept negotiation', async () => {
     await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
     // Resolve any outstanding decision (Show opens a compare view that disables
     // Submit), then reload so that state clears before submitting.
+    const proposalsTab = page.getByRole('tab', { name: /proposals/i })
+    if (await proposalsTab.isVisible().catch(() => false)) {
+      await proposalsTab.click()
+    }
     const showBtn = page.getByRole('button', { name: 'Show' }).first()
     if (await showBtn.isVisible().catch(() => false)) {
       await showBtn.click()
@@ -352,7 +452,7 @@ export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promi
       await responded
       await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
     }
-    const submit = page.getByRole('button', { name: 'Submit', exact: true })
+    const submit = page.getByTestId('submit-negotiation')
     await expect(submit).toBeEnabled({ timeout: 30_000 })
     const accepted = page.waitForResponse(
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
@@ -363,16 +463,37 @@ export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promi
 
   await test.step('review contract', async () => {
     await gotoAs(page, loginAs, 'Contract Reviewer', `/ui/contracts/review/${contractDid}`)
+    await expect(page.getByText('· as Contract Reviewer')).toBeVisible()
+    if (options.reviewFinding) {
+      await page.getByRole('tab', { name: /content/i }).click()
+      const annotations = page.getByTestId('review-block-annotations')
+      await annotations
+        .getByRole('button')
+        .filter({ hasText: /provider invoices/ })
+        .first()
+        .click()
+      const highlighted = page.locator('.review-highlight')
+      await expect(highlighted).toHaveCount(1)
+      await expect(highlighted).toContainText(/provider invoices the agreed payment amount/)
+      await annotations.getByPlaceholder('Annotation…').fill(options.reviewFinding)
+    }
     const forwarded = page.waitForResponse(
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
     )
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
-    await confirmModal(page, 'Submit')
-    await forwarded
+    await page
+      .getByRole('dialog', { name: /local semantic precheck/i })
+      .getByRole('button', { name: 'Confirm approval', exact: true })
+      .click()
+    const forward = await forwarded
+    if (options.reviewFinding) {
+      expect(JSON.stringify(forward.request().postDataJSON())).toContain(options.reviewFinding)
+    }
   })
 
   await test.step('approve contract', async () => {
     await gotoAs(page, loginAs, 'Contract Approver', `/ui/contracts/approve/${contractDid}`)
+    await expect(page.getByText('· as Contract Approver')).toBeVisible()
     const approved = page.waitForResponse(
       (r) => r.url().includes('/contract/approve') && r.request().method() === 'POST' && r.ok(),
     )
@@ -440,6 +561,10 @@ export async function buildContractPendingApproval(page: Page, loginAs: LoginAs)
 
   await test.step('accept negotiation', async () => {
     await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
+    const proposalsTab = page.getByRole('tab', { name: /proposals/i })
+    if (await proposalsTab.isVisible().catch(() => false)) {
+      await proposalsTab.click()
+    }
     const showBtn = page.getByRole('button', { name: 'Show' }).first()
     if (await showBtn.isVisible().catch(() => false)) {
       await showBtn.click()
@@ -451,7 +576,7 @@ export async function buildContractPendingApproval(page: Page, loginAs: LoginAs)
       await responded
       await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
     }
-    const submit = page.getByRole('button', { name: 'Submit', exact: true })
+    const submit = page.getByTestId('submit-negotiation')
     await expect(submit).toBeEnabled({ timeout: 30_000 })
     const accepted = page.waitForResponse(
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
@@ -466,11 +591,186 @@ export async function buildContractPendingApproval(page: Page, loginAs: LoginAs)
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
     )
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
-    await confirmModal(page, 'Submit')
+    await page
+      .getByRole('dialog', { name: /local semantic precheck/i })
+      .getByRole('button', { name: 'Confirm approval', exact: true })
+      .click()
     await forwarded
   })
 
   return contractDid
+}
+
+/** Opens an APPROVED contract from the signing list in the Secure Contract Viewer and verifies it (step 2). */
+async function openAndVerifyInViewer(page: Page, loginAs: LoginAs, contractDid: string): Promise<void> {
+  await gotoAs(page, loginAs, 'Contract Signer', '/ui/signing')
+  const row = page.getByRole('row').filter({ hasText: contractDid })
+  await expect(row).toBeVisible()
+  await row.getByRole('link', { name: /Open/ }).click()
+  await expect(page).toHaveURL(/\/signing\/.+/)
+
+  // The badge follows the VERDICT, not the call completing
+  // (SecureContractViewerView.verify), so an absent badge is a failed integrity
+  // check rather than a slow one, and step 3 stays closed behind it. Capture the
+  // verdict the viewer read so the failure names the mismatch and its findings
+  // instead of reporting a missing element.
+  const verified = page.waitForResponse((r) => r.url().includes('/signature/verify'), { timeout: 60_000 })
+  await page.getByRole('button', { name: 'Verify', exact: true }).click()
+  const verifyResponse = await verified
+  await expect(
+    page.getByText('Verified', { exact: true }),
+    `the integrity check of ${contractDid} did not pass, so the ceremony stays closed: HTTP ${verifyResponse.status()} ${await verifyResponse.text().catch(() => '')}`,
+  ).toBeVisible()
+}
+
+/** Matches the POST /signature/request that starts the PID ceremony (not its /publish sub-resource). */
+function isCeremonyStart(r: Response): boolean {
+  return new URL(r.url()).pathname.endsWith('/signature/request') && r.request().method() === 'POST'
+}
+
+/**
+ * Plays the wallet's PID + PoA presentation for the ceremony the viewer
+ * started (ceremonyStarted is the armed response of that start). Returns the
+ * ceremony and the signature field it binds.
+ */
+async function presentPidForCeremony(
+  ceremonyStarted: Promise<Response>,
+): Promise<{ ceremonyId: string; signField: string }> {
+  const ceremonyResponse = await ceremonyStarted
+  expect(
+    ceremonyResponse.ok(),
+    `start signing ceremony: HTTP ${ceremonyResponse.status()} ${await ceremonyResponse.text().catch(() => '')}`,
+  ).toBeTruthy()
+  const ceremony = (await ceremonyResponse.json()) as { ceremony_id: string; wallet_uri: string }
+  expect(ceremony.ceremony_id).toBeTruthy()
+  expect(ceremony.wallet_uri).toBeTruthy()
+
+  const ceremonyStart = ceremonyResponse.request().postDataJSON() as { field_name?: string }
+  const signField = ceremonyStart.field_name?.trim() ?? ''
+  expect(signField, 'ceremony start must bind a signature field_name').toBeTruthy()
+
+  execFileSync(python, [path.join(here, 'complete_signing_webhook.py'), ceremony.wallet_uri], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      ISSUER_BASE_URL: E2E_ISSUER_BASE_URL,
+      BDD_DCS_BASE_URL: E2E_API_BASE,
+      E2E_SIGNATORY: E2E_SIGNATORY_NAME,
+    },
+    stdio: 'pipe',
+  })
+  return { ceremonyId: ceremony.ceremony_id, signField }
+}
+
+/**
+ * Opens an APPROVED contract in the Secure Contract Viewer, verifies it, and
+ * runs the ceremony (wallet PID+PoA presentation, then /signature/prepare) up
+ * to — but not including — signing the downloaded PDF. Shared by the correct
+ * happy-path signing flow and the deliberate-rejection variants below, which
+ * differ only in what they do with the prepared bytes.
+ */
+async function startCeremonyAndPrepareDocument(
+  page: Page,
+  loginAs: LoginAs,
+  contractDid: string,
+): Promise<{ preparedPath: string; signField: string; ceremonyId: string }> {
+  await openAndVerifyInViewer(page, loginAs, contractDid)
+
+  const ceremonyStarted = page.waitForResponse(isCeremonyStart, { timeout: 30_000 })
+  const preparedResponse = page.waitForResponse((r) => r.url().includes('/signature/prepare'), {
+    timeout: 180_000,
+  })
+
+  await page.getByRole('button', { name: /download document to sign/ }).click()
+  const { ceremonyId, signField } = await presentPidForCeremony(ceremonyStarted)
+
+  const prepared = await preparedResponse
+  expect(
+    prepared.ok(),
+    `prepare the to-be-signed document: HTTP ${prepared.status()} ${await prepared.text().catch(() => '')}`,
+  ).toBeTruthy()
+
+  const preparedEnvelope = (await prepared.json()) as { document: string }
+  const preparedBytes = Buffer.from(preparedEnvelope.document, 'base64')
+  expect(preparedBytes.subarray(0, 5).toString('latin1'), 'prepared document is a PDF').toBe('%PDF-')
+  const preparedPath = path.join(tmpdir(), `prepared-${ceremonyId}.pdf`)
+  fs.writeFileSync(preparedPath, preparedBytes)
+
+  return { preparedPath, signField, ceremonyId }
+}
+
+/**
+ * Signs an APPROVED contract with "Sign with wallet" in the Secure Contract
+ * Viewer (ADR-12, DCS-FR-SM-06, DCS-FR-SM-23): after the PID ceremony the
+ * viewer publishes the OID4VP signing request and shows its openid4vp:// QR.
+ * The test wallet consumes that request headlessly with the Document-Retrieval
+ * driver the BDD suite uses (testWallet/dcs_wallet/oid4vp_signing.py): it
+ * fetches the request object and the document, signs the document via the DSS
+ * SCA and posts it to the response_uri. The viewer waits until the DCS accepted
+ * the signature and shows SIGNED. No download or upload takes place.
+ */
+export async function signApprovedContractWithWallet(page: Page, loginAs: LoginAs, contractDid: string): Promise<void> {
+  await openAndVerifyInViewer(page, loginAs, contractDid)
+
+  const ceremonyStarted = page.waitForResponse(isCeremonyStart, { timeout: 30_000 })
+  const publishedResponse = page.waitForResponse(
+    (r) => /\/signature\/request\/[^/]+\/publish$/.test(new URL(r.url()).pathname) && r.request().method() === 'POST',
+    { timeout: 180_000 },
+  )
+  await page.getByRole('button', { name: 'Sign with wallet', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Sign with your wallet' })
+  await expect(dialog.getByText('present your PID and Power of Attorney')).toBeVisible()
+
+  const { ceremonyId, signField } = await presentPidForCeremony(ceremonyStarted)
+
+  const published = await publishedResponse
+  expect(
+    published.ok(),
+    `publish the signing request: HTTP ${published.status()} ${await published.text().catch(() => '')}`,
+  ).toBeTruthy()
+  const signingRequest = (await published.json()) as { ceremony_id: string; wallet_uri: string; request_uri: string }
+  expect(signingRequest.ceremony_id).toBe(ceremonyId)
+  expect(signingRequest.wallet_uri).toMatch(/^openid4vp:/)
+  expect(signingRequest.request_uri).toContain(`/signature/request/${ceremonyId}/object`)
+
+  await expect(dialog.getByText('Scan the QR code with your wallet to sign the document.')).toBeVisible()
+  await expect(dialog.getByRole('img', { name: 'Signing ceremony QR code' })).toBeVisible()
+  await expect(dialog.getByText('Waiting for the wallet signature…')).toBeVisible()
+
+  // The wallet reads the request object on the origin this harness reaches,
+  // as the BDD step does: the DCS builds request_uri from its advertised
+  // public base, which need not equal the host route.
+  const wallet = `
+import json, sys
+sys.path.insert(0, ${JSON.stringify(repoRoot)})
+from steps.support.services.auth_service import AuthService
+AuthService._ensure_dcs_wallet_importable()
+from dcs_wallet.oid4vp_signing import sign_via_document_retrieval
+request_uri, user, dss_url, field = sys.argv[1:5]
+print(json.dumps(sign_via_document_retrieval(
+    request_uri=request_uri, user=user, dss_url=dss_url, field=field,
+    keys_dir=AuthService.resolve_wallet_keys_dir(),
+)))
+`
+  const stdout = execFileSync(
+    python,
+    [
+      '-c',
+      wallet,
+      `${E2E_API_BASE}/signature/request/${ceremonyId}/object`,
+      E2E_SIGNATORY_NAME,
+      E2E_DSS_URL,
+      signField,
+    ],
+    { cwd: repoRoot, encoding: 'utf-8', timeout: 180_000 },
+  )
+  const callback = JSON.parse(stdout.trim().split('\n').pop() ?? '{}') as { status?: string }
+  expect(callback.status, `wallet callback: ${stdout}`).toBe('SIGNED')
+
+  // The dialog polls the ceremony until the DCS accepted the signature; the viewer then reloads the envelope.
+  await expect(dialog).toBeHidden({ timeout: 60_000 })
+  await expect(page.getByText('SIGNED', { exact: true })).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByText('Signed document accepted and recorded.')).toBeVisible()
 }
 
 /**
@@ -482,41 +782,55 @@ export async function buildContractPendingApproval(page: Page, loginAs: LoginAs)
  * the full-vertical end-to-end and the specs that need a signed contract.
  */
 export async function signApprovedContractViaViewer(page: Page, loginAs: LoginAs, contractDid: string): Promise<void> {
-  await gotoAs(page, loginAs, 'Contract Signer', '/ui/signing')
-  const row = page.getByRole('row').filter({ hasText: contractDid })
-  await expect(row).toBeVisible()
-  await row.getByRole('link', { name: /Open/ }).click()
-  await expect(page).toHaveURL(/\/signing\/.+/)
+  const { preparedPath, signField, ceremonyId } = await startCeremonyAndPrepareDocument(page, loginAs, contractDid)
 
-  await page.getByRole('button', { name: 'Verify', exact: true }).click()
-  await expect(page.getByText('Verified', { exact: true })).toBeVisible()
-
-  const ceremonyStarted = page.waitForResponse(
-    (r) => r.url().includes('/signature/request') && r.request().method() === 'POST' && r.ok(),
-  )
-  // Clicking the step-3 button opens the ceremony dialog; once the wallet
-  // presents its PID over the webhook, the viewer fetches the to-be-signed PDF
-  // (/signature/prepare) and downloads it.
-  const preparedDownload = page.waitForEvent('download')
-  await page.getByRole('button', { name: /download document to sign/ }).click()
-  const ceremony = (await (await ceremonyStarted).json()) as { ceremony_id: string }
-  expect(ceremony.ceremony_id).toBeTruthy()
-
-  execFileSync(python, [path.join(here, 'complete_signing_webhook.py'), ceremony.ceremony_id], {
-    cwd: repoRoot,
-    env: { ...process.env, STATUSLIST_SERVICE_URL: E2E_STATUSLIST_URL, BDD_DCS_BASE_URL: E2E_API_BASE },
-    stdio: 'pipe',
-  })
-
-  const preparedPath = (await (await preparedDownload).path())!
-  const signedPath = path.join(tmpdir(), `signed-${ceremony.ceremony_id}.pdf`)
+  const signedPath = path.join(tmpdir(), `signed-${ceremonyId}.pdf`)
   // No E2E_SIGN_FIELD: the wallet discovers the pre-placed field from the PDF.
   execFileSync(python, [path.join(here, 'sign_prepared_pdf.py'), preparedPath, signedPath], {
     cwd: repoRoot,
-    env: { ...process.env, DSS_URL: E2E_DSS_URL, E2E_SIGNATORY: 'E2E Vertical Signer' },
+    env: { ...process.env, DSS_URL: E2E_DSS_URL, E2E_SIGNATORY: E2E_SIGNATORY_NAME, E2E_SIGN_FIELD: signField },
     stdio: 'pipe',
   })
 
   await page.locator('input[type="file"]').setInputFiles(signedPath)
   await expect(page.getByText('SIGNED', { exact: true })).toBeVisible({ timeout: 120_000 })
+}
+
+/**
+ * Same ceremony as signApprovedContractViaViewer, but the uploaded PDF is
+ * signed with a certificate deliberately naming someone OTHER than the
+ * ceremony's verified PID (ADR-20 item 4 cert↔PID sole-control gate) —
+ * proving both that the DCS rejects it and that the Secure Contract Viewer's
+ * validation-failure view renders the SPECIFIC, typed cert_pid_mismatch
+ * message (backend/design/signature_management.go's Error() results, mapped
+ * by signingErrorMessage() in signature-management-service.ts), not a
+ * generic failure string.
+ */
+export async function signApprovedContractViaViewerWithMismatchedCert(
+  page: Page,
+  loginAs: LoginAs,
+  contractDid: string,
+): Promise<void> {
+  const { preparedPath, signField, ceremonyId } = await startCeremonyAndPrepareDocument(page, loginAs, contractDid)
+
+  const signedPath = path.join(tmpdir(), `mismatched-signed-${ceremonyId}.pdf`)
+  execFileSync(python, [path.join(here, 'sign_prepared_pdf.py'), preparedPath, signedPath], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      DSS_URL: E2E_DSS_URL,
+      // A fresh `user` (cert cache key) naming someone else entirely — the
+      // ceremony's verified PID is still E2E_SIGNATORY_NAME, so this
+      // certificate cannot match it.
+      E2E_SIGNATORY: 'Someone Else Entirely',
+      E2E_SIGN_FIELD: signField,
+    },
+    stdio: 'pipe',
+  })
+
+  await page.locator('input[type="file"]').setInputFiles(signedPath)
+  await expect(page.getByText('does not identify the verified signatory', { exact: false })).toBeVisible({
+    timeout: 120_000,
+  })
+  await expect(page.getByText('SIGNED', { exact: true })).not.toBeVisible()
 }

@@ -5,6 +5,7 @@ document anchoring (@context hub URL + sh:shapesGraph injected by the normalizat
 ontology-prefix enforcement at template creation."""
 
 import json
+import re
 
 import requests as _requests
 from behave import given, then, when
@@ -12,6 +13,8 @@ from behave import given, then, when
 from steps.support.api_client import (
     contract_retrieve_by_id_url,
     get_with_headers,
+    hub_shapes_anchors,
+    pac_audit_timeline,
     post_json,
     template_create_url,
 )
@@ -54,6 +57,42 @@ def step_when_resolve_ontology(context, name):
     context.requests_response = _requests.get(
         _hub_url(context, f"/semantic/ontology/{name}"),
         timeout=context.http_timeout_seconds,
+    )
+
+
+@then(
+    'the ontology defines at least {minimum:d} labeled value catalogs with labeled concepts for ODRL left operand "{operand}"'
+)
+def step_then_ontology_defines_grouped_value_catalogs(context, minimum, operand):
+    turtle = context.requests_response.json()["content"]
+    statements = re.findall(
+        r"(?ms)^([^\s@#]\S*)\s+(.+?\s\.)\s*(?=^[^\s@#]|\Z)",
+        "\n".join(line for line in turtle.splitlines() if not line.lstrip().startswith("#")),
+    )
+
+    catalogs = {
+        catalog
+        for _, body in statements
+        if "a dcs:ValueConstraint" in body
+        and f"dcs:odrlLeftOperand odrl:{operand}" in body
+        for catalog in re.findall(r"dcs:valueCatalog\s+(\S+)\s*[;.]", body)
+    }
+    labeled_schemes = {
+        subject
+        for subject, body in statements
+        if "a skos:ConceptScheme" in body and "skos:prefLabel" in body
+    }
+    schemes_with_labeled_concepts = {
+        scheme
+        for _, body in statements
+        if "a skos:Concept" in body and "skos:prefLabel" in body
+        for scheme in re.findall(r"skos:inScheme\s+(\S+)\s*[;.]", body)
+    }
+    complete_catalogs = catalogs & labeled_schemes & schemes_with_labeled_concepts
+
+    assert len(complete_catalogs) >= minimum, (
+        f"Expected at least {minimum} labeled catalogs with labeled concepts for odrl:{operand}, "
+        f"got {sorted(complete_catalogs)} from mapped catalogs {sorted(catalogs)}"
     )
 
 
@@ -216,10 +255,9 @@ def step_then_contract_anchored(context, name):
         f"Expected @context to carry a hub-served versioned context URL, got: {raw_context}"
     )
     # The shapes pin rides on sh:shapesGraph (ADR-8).
-    shapes_ref = contract_data.get("sh:shapesGraph") or {}
-    shapes_anchor = shapes_ref.get("@id") if isinstance(shapes_ref, dict) else shapes_ref
-    assert shapes_anchor and "/semantic/shapes/" in shapes_anchor, (
-        f"Expected a hub-served sh:shapesGraph anchor, got: {shapes_ref}"
+    shapes_anchors = hub_shapes_anchors(contract_data)
+    assert shapes_anchors, (
+        f"Expected a hub-served sh:shapesGraph anchor, got: {contract_data.get('sh:shapesGraph')}"
     )
     context.hub_anchor_url = anchor
 
@@ -251,6 +289,7 @@ def step_when_create_conflicting_template(context, prefix, iri):
         template_create_url(context),
         {
             "template_type": TemplateService.template_type_for_category("legal"),
+            "party_type": TemplateService.MULTI_PARTY_TYPE,
             "name": "BDD Conflicting Ontology Template",
             "description": "must be rejected",
             "template_data": doc,
@@ -264,6 +303,7 @@ def _external_context_template_payload(iri: str) -> dict:
     doc["@context"] = [doc["@context"], iri]
     return {
         "template_type": TemplateService.template_type_for_category("legal"),
+        "party_type": TemplateService.MULTI_PARTY_TYPE,
         "name": "BDD External Context Template",
         "description": "references an externally anchored context",
         "template_data": doc,
@@ -383,14 +423,25 @@ def _content_audit_trail_rule_severities(context, name, rule_id):
         f"{context.requests_response.text}"
     )
     did, _ = ContractService._contract_data(context, name)
-    body = context.requests_response.json()
-    resource = next((r for r in body if r.get("did") == did), None)
-    assert resource is not None, (
-        f"Expected a contract-content audit trail entry for '{name}' (did={did}), "
-        f"got DIDs: {[r.get('did') for r in body]}"
+    # Positive proof this contract was AUDITED, which is what the caller needs
+    # before reading anything into an absent finding. The run echoes the
+    # resource it was scoped to (PACExternalAuditResponse.resource), so an
+    # audit that never looked at this contract cannot satisfy "reports no
+    # error for this rule".
+    #
+    # The previous precondition asserted a finding EXISTED, which proves
+    # something weaker and is unsatisfiable by exactly the contracts this is
+    # asked about: ADR-9 — SHACL reports only non-conformance, so a fully
+    # compliant document produces ZERO findings, not N conforming ones.
+    audited = (context.requests_response.json().get("resource") or {}).get("did")
+    assert audited == did, (
+        f"Expected the audit run to be scoped to '{name}' (did={did}) so an absent "
+        f"finding means something; got resource: {context.requests_response.json().get('resource')!r}"
     )
+    timeline = pac_audit_timeline(context.requests_response)
+    entries = [entry for entry in timeline if entry.get("did") == did]
     severities = []
-    for entry in resource.get("audit_trail") or []:
+    for entry in entries:
         if entry.get("event_type") != "CONTRACT_CONTENT_POLICY_AUDIT_FINDING":
             continue
         event_data = entry.get("event_data")
@@ -415,7 +466,9 @@ def step_then_content_audit_trail_no_error_for_rule(context, name, rule_id):
     # goRDFlib (ADR-9) only reports non-conformance — a fully compliant
     # contract has NO finding for a conformant rule at all (not an "info"
     # one), so this asserts absence-of-violation rather than a specific
-    # passing severity.
+    # passing severity. A contract clean on EVERY rule has no entry at all:
+    # under DCS-FR-PACM-02/-03 and UC-08 ("violations (if any)") that IS the
+    # compliant outcome, not a missing precondition.
     did, severities = _content_audit_trail_rule_severities(context, name, rule_id)
     assert "error" not in severities, (
         f"Expected contract '{name}' (did={did}) to report no error for rule {rule_id!r}, "

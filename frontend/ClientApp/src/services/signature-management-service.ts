@@ -1,4 +1,41 @@
+import { isAxiosError } from 'axios'
 import http from '@/api/http'
+
+// ADR-20 acceptance-gate error codes (backend/design/signature_management.go's
+// submitSignature/signatureRequestCallback Error() results), keyed by Goa's
+// ServiceError.Name — the JSON "name" field every such response carries.
+// Mapped to a distinct, human-readable message per failure mode: NEVER by
+// matching the "message" text, which is free-form and not a stable contract.
+const SIGNING_ERROR_MESSAGES: Record<string, string> = {
+  document_mismatch:
+    'The signed document does not match what was prepared for signing. Its visible content changed after preparation. Download the document again and sign it without modification.',
+  nonce_mismatch:
+    'The signature is not bound to this signing request. It may be stale or was not produced for this ceremony. Start the signing ceremony again.',
+  level_below_required:
+    'The signature does not meet the signature level this contract requires (e.g. a Qualified Electronic Signature is required but an Advanced one was provided). Sign with a credential that meets the required level.',
+  cert_pid_mismatch:
+    "The signing certificate does not identify the verified signatory. Its name does not match the presented identity. Confirm you're signing with the certificate issued to you.",
+  jades_invalid: 'The machine-readable signature (JAdES) accompanying the signed document is invalid or malformed.',
+  signature_invalid: 'The submitted signature is not cryptographically valid.',
+  ceremony_required: 'A completed identity verification ceremony is required before this contract can be signed.',
+  // Not a refusal of this signer: the contract is waiting for the other party,
+  // and the wait ends without anyone here doing anything.
+  counterparty_not_settled:
+    'Waiting for the counterparty to settle this version. They have not yet confirmed they agree to the document about to be signed. Signing opens as soon as their settlement arrives. If the version was renegotiated, they have to settle it again.',
+}
+
+// Maps a signing-endpoint error to a human-readable message via the typed
+// backend error code, never by string-matching free-form error text.
+export function signingErrorMessage(e: unknown): string {
+  if (isAxiosError(e)) {
+    const name = e.response?.data?.name as string | undefined
+    if (name && SIGNING_ERROR_MESSAGES[name]) return SIGNING_ERROR_MESSAGES[name]
+    const backendMessage = e.response?.data?.message as string | undefined
+    if (backendMessage) return backendMessage
+    return e.message
+  }
+  return e instanceof Error ? e.message : String(e)
+}
 
 export interface SignatureContract {
   did: string
@@ -15,9 +52,20 @@ export interface SignatureContract {
 
 export interface SignatureContractDetail {
   contract: SignatureContract
-  // Absent for an APPROVED-unsigned contract with no signature yet (ADR-12).
+  // The most recent signature record of any status; absent for an
+  // APPROVED-unsigned contract with no signature yet (ADR-12).
   signature_envelope?: SignatureEnvelope
-  key_version?: number
+  // Signing status of every declared signature field (DCS-FR-SM-07/-24).
+  signature_fields?: SignatureFieldStatus[]
+}
+
+export interface SignatureFieldStatus {
+  field_name: string
+  status: 'SIGNED' | 'UNSIGNED'
+  // A counterparty signs this field on its own instance.
+  remote: boolean
+  signer_did?: string
+  signed_at?: string
 }
 
 export interface SignatureEnvelope {
@@ -88,6 +136,20 @@ export interface SignatureViewItem {
   pdf_hash?: string
   kb_sd_hash?: string
   validation_report_hash?: string
+  // ADR-20: the contract's OWN declared level requirement for this field —
+  // compare against credential_type (the level actually achieved).
+  required_credential_type?: string
+  // Whether DSS's qualification determination was QESIG (qualified cert +
+  // QSCD) — the QES evidence distinct from credential_type alone.
+  qualified?: boolean
+  signer_cert_subject?: string
+  signer_cert_serial?: string
+  poa_organization?: string
+  poa_roles?: string[]
+  summary_issuer?: string
+  // Live status-list state of the presented Power of Attorney credential.
+  credential_status?: 'VALID' | 'REVOKED' | 'SUSPENDED' | 'UNKNOWN'
+  credential_status_reason?: string
 }
 
 export interface SignatureViewResult {
@@ -108,6 +170,39 @@ export interface SignatureAuditEntry {
   res_log_pred_cid?: string
 }
 
+export interface SignatureClauseReportFinding {
+  rule_id?: string
+  severity: string
+  message: string
+  path?: string
+  field_iri?: string
+  focus_node?: string
+  source?: string
+  clause_ids?: string[]
+}
+
+export interface SignatureClauseReportSection {
+  clause_id: string
+  title?: string
+  /** not_assessed | undetermined | warnings_only | issues_identified | compliant */
+  status: string
+  findings: SignatureClauseReportFinding[]
+  assessment_run: string
+  /** Display: Not established | None | check ids */
+  applicable_checks: string
+  /** not_established | none | established */
+  applicable_checks_status: string
+  verdict_note?: string
+}
+
+export interface SignatureClauseReportResult {
+  did: string
+  assessment_run: string
+  scope_note?: string
+  clauses: SignatureClauseReportSection[]
+  unassigned_findings: SignatureClauseReportFinding[]
+}
+
 export type CeremonyStatus = 'pending' | 'verified' | 'expired' | 'failed'
 
 export interface CeremonyStartResult {
@@ -124,6 +219,20 @@ export interface CeremonyStatusResult {
   status: CeremonyStatus
   signer_did?: string
   expires_at?: string
+  // Set once a signature submitted for this ceremony was accepted.
+  signed_at?: string
+  // Set once a signing request is published for this ceremony.
+  request_expires_at?: string
+  // The last wallet response the DCS refused for this ceremony.
+  refusal_code?: string
+  refusal?: string
+}
+
+export interface SignatureRequestPublishResult {
+  ceremony_id: string
+  wallet_uri: string
+  request_uri: string
+  expires_at: string
 }
 
 export const signatureManagementService = {
@@ -150,15 +259,44 @@ export const signatureManagementService = {
     return http.get<CeremonyStatusResult>(`/signature/request/${ceremonyId}`).then((res) => res.data)
   },
 
+  // Wallet signing (ADR-12, DCS-FR-SM-06/-23): prepares the to-be-signed
+  // document for a verified ceremony and returns the OID4VP Document-Retrieval
+  // deep link. The wallet signs the document and posts it back to the DCS; the
+  // level defaults to the contract's own requirement for the field.
+  async publishSignatureRequest(ceremonyId: string): Promise<SignatureRequestPublishResult> {
+    return http
+      .post<SignatureRequestPublishResult>(`/signature/request/${encodeURIComponent(ceremonyId)}/publish`, {})
+      .then((res) => res.data)
+  },
+
   // The DCS holds no signing key (ADR-12). Signing is two steps: prepare the
   // to-be-signed PDF (PoA + summary embedded, signature field placed), which the
   // signatory signs externally (their wallet/QTSP, or a desktop PAdES signer),
   // then submit the signed PDF for validation and recording.
-  async prepareSignature(did: string, signerDid: string, credentialType: string): Promise<Blob> {
+  //
+  // ceremonyId MUST be the SAME ceremony_id (from startCeremony/the polled
+  // ceremony result) passed to BOTH prepareSignature and submitSignature —
+  // without it, the backend resolves "the signer's most recent verified
+  // ceremony [for fieldName]", which is only unambiguous while exactly one
+  // ceremony has been verified for that signer/field on this contract; a
+  // retried ceremony (e.g. "Start a new ceremony" after a stalled one) makes
+  // that heuristic pick a DIFFERENT ceremony at submit time than the one
+  // prepare pinned bytes onto (ADR-20 byte pinning requires the two calls
+  // resolve the SAME ceremony). fieldName is still sent for multi-signer
+  // contracts and as a fallback when ceremonyId is unavailable.
+  async prepareSignature(
+    did: string,
+    signerDid: string,
+    credentialType: string,
+    fieldName: string,
+    ceremonyId: string,
+  ): Promise<Blob> {
     const res = await http.post<{ document: string }>('/signature/prepare', {
       did,
       signer_did: signerDid,
       credential_type: credentialType,
+      field_name: fieldName,
+      ceremony_id: ceremonyId,
     })
     const bytes = Uint8Array.from(atob(res.data.document), (c) => c.charCodeAt(0))
     return new Blob([bytes], { type: 'application/pdf' })
@@ -169,6 +307,8 @@ export const signatureManagementService = {
     signerDid: string,
     credentialType: string,
     signedPdf: Blob,
+    fieldName: string,
+    ceremonyId: string,
   ): Promise<SignatureEnvelope | undefined> {
     const buffer = await signedPdf.arrayBuffer()
     let binary = ''
@@ -179,6 +319,8 @@ export const signatureManagementService = {
       did,
       signer_did: signerDid,
       credential_type: credentialType,
+      ceremony_id: ceremonyId,
+      field_name: fieldName,
       signed_pdf: btoa(binary),
       jades_signature: '',
     })
@@ -210,11 +352,20 @@ export const signatureManagementService = {
     return http.get<SignatureViewResult>('/signature/view', { params: { did } }).then((res) => res.data)
   },
 
-  async revokeSignature(did: string, signerDid: string): Promise<void> {
-    await http.post('/signature/revoke', { did, signer_did: signerDid })
+  async revokeSignature(did: string, signerDid: string, reason: string): Promise<void> {
+    await http.post('/signature/revoke', { did, signer_did: signerDid, reason })
   },
 
-  async getAudit(did: string): Promise<SignatureAuditEntry[]> {
-    return http.get<SignatureAuditEntry[]>('/signature/audit', { params: { did } }).then((res) => res.data ?? [])
+  async getAudit(did: string, justification: string): Promise<SignatureAuditEntry[]> {
+    return http
+      .get<SignatureAuditEntry[]>('/signature/audit', { params: { did, justification } })
+      .then((res) => res.data ?? [])
+  },
+
+  /** PACM-07 clause projection: live SHACL findings mapped conservatively to clause @ids. */
+  async getClauseReport(did: string): Promise<SignatureClauseReportResult> {
+    return http
+      .get<SignatureClauseReportResult>('/signature/clause-report', { params: { did } })
+      .then((res) => res.data)
   },
 }

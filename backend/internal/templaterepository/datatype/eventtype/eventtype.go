@@ -2,11 +2,6 @@
 // strings, used as the EventType() of templaterepository/event structs.
 package eventtype
 
-import (
-	"fmt"
-	"strings"
-)
-
 type EventType string
 
 const (
@@ -19,44 +14,16 @@ const (
 	Update       EventType = "UPDATE_CONTRACT_TEMPLATE"
 	RetrieveAll  EventType = "RETRIEVE_ALL_CONTRACT_TEMPLATES"
 	RetrieveByID EventType = "RETRIEVE_CONTRACT_TEMPLATE_BY_ID"
-	Search       EventType = "SEARCH_CONTRACT_TEMPLATE"
-	Archive      EventType = "ARCHIVE_CONTRACT_TEMPLATE"
-	Register     EventType = "REGISTER_CONTRACT_TEMPLATE"
-	Audit        EventType = "AUDIT_CONTRACT_TEMPLATE"
-	Publish      EventType = "PUBLISH_CONTRACT_TEMPLATE"
+	// RetrieveProvenance is a read of the provenance credentials.
+	RetrieveProvenance EventType = "RETRIEVE_CONTRACT_TEMPLATE_PROVENANCE"
+	Search             EventType = "SEARCH_CONTRACT_TEMPLATE"
+	Archive            EventType = "ARCHIVE_CONTRACT_TEMPLATE"
+	Delete             EventType = "DELETE_CONTRACT_TEMPLATE"
+	Register           EventType = "REGISTER_CONTRACT_TEMPLATE"
+	Audit              EventType = "AUDIT_CONTRACT_TEMPLATE"
+	Publish            EventType = "PUBLISH_CONTRACT_TEMPLATE"
 )
 
-var validStates = map[EventType]bool{
-	Create:       true,
-	Submit:       true,
-	Approve:      true,
-	Reject:       true,
-	Verify:       true,
-	Update:       true,
-	RetrieveAll:  true,
-	RetrieveByID: true,
-	Search:       true,
-	Archive:      true,
-	Register:     true,
-	Audit:        true,
-	Publish:      true,
-}
-
-func NewEventType(s string) (EventType, error) {
-	ts := EventType(strings.ToUpper(s))
-	if !ts.IsValid() {
-		return "", fmt.Errorf("invalid event type: %s", s)
-	}
-	return ts, nil
-}
-
-// IsValid checks if the EventType is a valid role
-func (s EventType) IsValid() bool {
-	upper := EventType(strings.ToUpper(string(s)))
-	return validStates[upper]
-}
-
-// String returns the string representation of the EventType
 func (s EventType) String() string {
 	return string(s)
 }

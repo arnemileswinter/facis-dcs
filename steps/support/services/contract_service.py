@@ -61,6 +61,18 @@ class ContractService:
         contract_workflow_engine.go Create()) accepts it as a
         reviewer/negotiator/approver DID.
 
+        NOTE (ADR-19, docs/adr-19-federation-agreement-credential.md):
+        `CheckForUntrustedPeers` and the `trusted_peers` table/
+        `DCS_TRUSTED_PEERS` env var this helper depends on are slated for
+        removal, replaced by the agreement-credential + PDP model. As of
+        this writing that removal has not landed, so this helper and the
+        FR-CWE-18 party-authorization scenarios using it remain valid
+        against the current backend; they will need a PDP-stub-based
+        replacement (steps/peer_trust/dcs_trust_pdp_steps.py) once the
+        removal does land — out of this ADR-19 BDD pass's scope since it
+        covers a different requirement (contract-party authorization, not
+        DCS-to-DCS federation shipping).
+
         Used as a stand-in for "a different, legitimate party that is NOT
         this instance": registering it (instead of this instance's own DID,
         see _local_peer_did) as a contract's sole reviewer/negotiator/
@@ -132,16 +144,18 @@ class ContractService:
         }
 
     @staticmethod
-    def _create_approved_template_for_contract(context):
+    def _create_approved_template_for_contract(context, template_data=None):
         creator_h = AuthService.get_headers_for_roles(["Template Creator"])
         create_resp = post_json(
             context,
             template_create_url(context),
             {
                 "template_type": TemplateService.CONTRACT_TEMPLATE_TYPE,
+                "party_type": TemplateService.MULTI_PARTY_TYPE,
                 "name": "BDD Contract Source Template",
                 "description": "BDD template for contract workflows",
-                "template_data": TemplateService.canonical_document_data("BDD Contract Source Template"),
+                "template_data": template_data
+                or TemplateService.canonical_document_data("BDD Contract Source Template"),
             },
             headers=creator_h,
         )
@@ -209,12 +223,23 @@ class ContractService:
 
 
     @staticmethod
-    def _create_contract_in_draft(context, contract_name: str):
-        t_did = ContractService._create_approved_template_for_contract(context)
+    def _reading_parties(context) -> dict:
+        """Create-payload `parties`: the organizations that may read the contract.
+        The creating organization reads its own contract; a copy received by a
+        peer is readable there only by the organizations named here. The BDD
+        users of both instances present the default organization; a scenario
+        with a dedicated organization (steps/encryption_at_rest) adds it."""
+        org = getattr(context, "encryption_org", None)
+        return {"parties": [AuthService.DEFAULT_ORGANIZATION] + ([org] if org else [])}
+
+    @staticmethod
+    def _create_contract_in_draft(context, contract_name: str, template_data=None):
+        t_did = ContractService._create_approved_template_for_contract(context, template_data=template_data)
         creator_h = AuthService.get_headers_for_roles(["Contract Creator"])
         peer_did = ContractService._local_peer_did(context)
         create_payload = {
             "template_did": t_did,
+            **ContractService._reading_parties(context),
         }
         create_resp = post_json(context, contract_create_url(context), create_payload, headers=creator_h)
         assert create_resp.status_code == 200, create_resp.text
@@ -235,8 +260,11 @@ class ContractService:
         t_did = ContractService._create_approved_template_for_contract(context)
         creator_h = AuthService.get_headers_for_roles(["Contract Creator"])
         peer_did = ContractService._local_peer_did(context)
+        # The negotiation steps respond as "TechVendor Inc". Reads and changes
+        # are scoped to the creating organization and the declared parties.
         create_payload = {
             "template_did": t_did,
+            "parties": [AuthService.DEFAULT_ORGANIZATION, "TechVendor Inc"],
         }
         create_resp = post_json(context, contract_create_url(context), create_payload, headers=creator_h)
         assert create_resp.status_code == 200, create_resp.text
@@ -277,6 +305,7 @@ class ContractService:
         create_payload = {
             "template_did": t_did,
             "counterparty": other_peer_did,
+            **ContractService._reading_parties(context),
         }
         create_resp = post_json(context, contract_create_url(context), create_payload, headers=creator_h)
         assert create_resp.status_code == 200, create_resp.text
@@ -309,7 +338,9 @@ class ContractService:
         context.contract_seed_headers[contract_name] = creator_h
 
     @staticmethod
-    def _create_approved_template_with_signature_field(context, signatory_name: str) -> str:
+    def _create_approved_template_with_signature_field(
+        context, signatory_name: str, *, required_credential_type: str | None = None,
+    ) -> str:
         """Like _create_approved_template_for_contract, but the template
         declares a named `dcs:signatureFields` entry (dcs:SignatureField,
         dcs:signatoryName) — the field pdf-core's PAdES signer is expected to
@@ -317,24 +348,31 @@ class ContractService:
         signature field by name: /T == signatoryName from the JSON-LD).
         See docs/semantic-ontology/linkml/tests/valid/signature-fields.jsonld
         for the schema shape this mirrors.
+
+        required_credential_type, when set ("AES"/"QES"), adds
+        dcs:requiredCredentialType to the field — the contract's own declared
+        signature-level requirement the submit gate enforces (ADR-20 SM-01).
         """
+        field_node = {
+            "@id": "urn:uuid:sig-field-1",
+            "@type": "dcs:SignatureField",
+            "dcs:signatoryName": signatory_name,
+        }
+        if required_credential_type:
+            field_node["dcs:requiredCredentialType"] = required_credential_type
+
         creator_h = AuthService.get_headers_for_roles(["Template Creator"])
         create_resp = post_json(
             context,
             template_create_url(context),
             {
                 "template_type": TemplateService.CONTRACT_TEMPLATE_TYPE,
+                "party_type": TemplateService.MULTI_PARTY_TYPE,
                 "name": "BDD Signature-Field Source Template",
                 "description": "BDD template for real-signing-vertical scenarios",
                 "template_data": {
                     **TemplateService.canonical_document_data("BDD Signature-Field Source Template"),
-                    "dcs:signatureFields": [
-                        {
-                            "@id": "urn:uuid:sig-field-1",
-                            "@type": "dcs:SignatureField",
-                            "dcs:signatoryName": signatory_name,
-                        }
-                    ],
+                    "dcs:signatureFields": [field_node],
                 },
             },
             headers=creator_h,
@@ -399,14 +437,19 @@ class ContractService:
         return t_did
 
     @staticmethod
-    def _create_contract_in_draft_with_signature_field(context, contract_name: str, signatory_name: str):
+    def _create_contract_in_draft_with_signature_field(
+        context, contract_name: str, signatory_name: str, *, required_credential_type: str | None = None,
+    ):
         """Like _create_contract_in_draft, but sourced from a template that
         carries a named dcs:SignatureField (see
         _create_approved_template_with_signature_field) — used by the
         real-signing-vertical scenarios that assert on the
-        PAdES-signed PDF's AcroForm /T field name.
+        PAdES-signed PDF's AcroForm /T field name, and by the ADR-20
+        level-enforcement negative test (required_credential_type="QES").
         """
-        t_did = ContractService._create_approved_template_with_signature_field(context, signatory_name)
+        t_did = ContractService._create_approved_template_with_signature_field(
+            context, signatory_name, required_credential_type=required_credential_type,
+        )
         creator_h = AuthService.get_headers_for_roles(["Contract Creator"])
         peer_did = ContractService._local_peer_did(context)
         create_payload = {
@@ -445,30 +488,37 @@ class ContractService:
 
     @staticmethod
     def _prepare_contract_under_review(context, contract_name: str):
-        # Refresh first: async writers (the PDF/C2PA pipeline) may have
-        # touched the row since the cached updated_at was taken.
-        ContractService._refresh_contract(context, contract_name)
-        did, updated_at = ContractService._contract_data(context, contract_name)
         creator_h = context.contract_seed_headers[contract_name]
-        submit_to_negotiation = post_json(
-            context,
-            contract_submit_url(context),
-            ContractService._contract_submit_payload(context, did, updated_at),
-            headers=creator_h,
-        )
-        assert submit_to_negotiation.status_code == 200, submit_to_negotiation.text
-        ContractService._refresh_contract(context, contract_name)
 
+        def submit_once(what: str):
+            # Refresh first: async writers (the PDF/C2PA pipeline) may advance
+            # updated_at between the read and this submit, which the backend
+            # answers as a retryable conflict — re-read and reissue, bounded.
+            import time as _time  # noqa: PLC0415
+
+            resp = None
+            for _ in range(4):
+                ContractService._refresh_contract(context, contract_name)
+                did, updated_at = ContractService._contract_data(context, contract_name)
+                resp = post_json(
+                    context,
+                    contract_submit_url(context),
+                    ContractService._contract_submit_payload(context, did, updated_at),
+                    headers=creator_h,
+                )
+                if resp.status_code != 409:
+                    break
+                _time.sleep(1)
+            assert resp is not None and resp.status_code == 200, (
+                f"{what} failed for '{contract_name}': "
+                f"{resp.status_code if resp is not None else 'no request'} "
+                f"{resp.text if resp is not None else ''}"
+            )
+
+        submit_once("Creator submit (draft -> negotiation)")
         # Backend workflow transitions Draft -> Negotiation on first submit,
         # then Negotiation -> Submitted on a second creator submit.
-        did, updated_at = ContractService._contract_data(context, contract_name)
-        submit_to_submitted = post_json(
-            context,
-            contract_submit_url(context),
-            ContractService._contract_submit_payload(context, did, updated_at),
-            headers=creator_h,
-        )
-        assert submit_to_submitted.status_code == 200, submit_to_submitted.text
+        submit_once("Creator submit (negotiation -> submitted)")
         ContractService._refresh_contract(context, contract_name)
 
     @staticmethod
@@ -479,16 +529,38 @@ class ContractService:
         # POST /contract/verify was removed (commit 2712047e, "Remove unneeded
         # code") — validation now runs server-side inside submit, so the
         # reviewer submit no longer needs a prior verify call.
-        reviewer_h = AuthService.get_headers_for_roles(["Contract Reviewer"])
-        retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=reviewer_h)
-        assert retrieve.status_code == 200, retrieve.text
-        updated_at = retrieve.json().get("updated_at")
+        # Same lost-update retry as the creator submits above: async PDF/C2PA
+        # writers can bump updated_at between retrieve and reviewer submit.
+        import time as _time  # noqa: PLC0415
 
-        review_submit = post_json(
-            context,
-            contract_submit_url(context),
-            ContractService._contract_reviewer_submit_payload(context, did, updated_at),
-            headers=reviewer_h,
+        reviewer_h = AuthService.get_headers_for_roles(["Contract Reviewer"])
+        review_submit = None
+        for _ in range(4):
+            retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=reviewer_h)
+            assert retrieve.status_code == 200, retrieve.text
+            updated_at = retrieve.json().get("updated_at")
+            payload = ContractService._contract_reviewer_submit_payload(context, did, updated_at)
+            # The reviewer forwards with a finding: a comment and an annotation
+            # on the first document block, which the approver reads back.
+            structure = (retrieve.json().get("contract_data") or {}).get("dcs:documentStructure") or {}
+            blocks = (structure.get("dcs:blocks") or {}).get("@list") or []
+            payload["comments"] = ["BDD review: payment terms checked"]
+            context.review_comments = payload["comments"]
+            if blocks and blocks[0].get("@id"):
+                payload["annotations"] = [{"block_id": blocks[0]["@id"], "comment": "Check this clause"}]
+                context.review_annotation_block_ids = [blocks[0]["@id"]]
+            review_submit = post_json(
+                context,
+                contract_submit_url(context),
+                payload,
+                headers=reviewer_h,
+            )
+            if review_submit.status_code != 409 and "updated elsewhere" not in review_submit.text.lower():
+                break
+            _time.sleep(1)
+        assert review_submit is not None and review_submit.status_code == 200, (
+            f"reviewer forward-to-approval failed for '{contract_name}': "
+            f"{review_submit.status_code if review_submit is not None else 'no request'} "
+            f"{review_submit.text if review_submit is not None else ''}"
         )
-        assert review_submit.status_code == 200, review_submit.text
         ContractService._refresh_contract(context, contract_name)

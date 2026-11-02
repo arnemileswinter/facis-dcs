@@ -64,10 +64,55 @@ func main() {
 		os.Exit(1)
 	}
 
-	jwk := hsm.ECPublicKeyJWK(pub)
+	jwk, err := hsm.ECPublicKeyJWK(pub)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gendid: encode key: %v\n", err)
+		os.Exit(1)
+	}
 	jwk["kid"] = "dev-key-1"
 	jwk["alg"] = "ES256"
 	jwk["x5c"] = []string{base64.StdEncoding.EncodeToString(certDER)}
+
+	// The federation agreement credential (ADR-19) is signed by a SEPARATE
+	// HSM key, published here as its own verificationMethod so a verifier can
+	// tell the eIDAS/JAdES identity key (#dev-key-1, above) apart from the VC
+	// signing key. Which is which is stated by the relationships below, not by
+	// the order of this list.
+	vcLabel := hsm.KeyLabelVC()
+	vcSigner, err := h.Signer(vcLabel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gendid: load vc key: %v\n", err)
+		os.Exit(1)
+	}
+	vcPub, ok := vcSigner.Public().(*ecdsa.PublicKey)
+	if !ok {
+		fmt.Fprintln(os.Stderr, "gendid: vc key is not ECDSA")
+		os.Exit(1)
+	}
+	vcCertDER, err := selfSignedCert(host, vcPub, vcSigner)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gendid: create vc certificate: %v\n", err)
+		os.Exit(1)
+	}
+	vcJWK, err := hsm.ECPublicKeyJWK(vcPub)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gendid: encode vc key: %v\n", err)
+		os.Exit(1)
+	}
+	vcJWK["kid"] = vcLabel
+	vcJWK["alg"] = "ES256"
+	vcJWK["x5c"] = []string{base64.StdEncoding.EncodeToString(vcCertDER)}
+
+	// Key-agreement key: peers wrap content-encryption keys to this public
+	// key. Published without x5c — it never signs anything.
+	ecdhLabel := hsm.KeyLabelECDH()
+	ecdhJWK, err := h.PublicJWK(ecdhLabel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gendid: load ecdh key: %v\n", err)
+		os.Exit(1)
+	}
+	ecdhJWK["kid"] = ecdhLabel
+	ecdhJWK["use"] = "enc"
 
 	doc := map[string]any{
 		"@context": []string{
@@ -82,8 +127,26 @@ func main() {
 				"controller":   *did,
 				"publicKeyJwk": jwk,
 			},
+			{
+				"id":           *did + "#" + vcLabel,
+				"type":         "JsonWebKey2020",
+				"controller":   *did,
+				"publicKeyJwk": vcJWK,
+			},
+			{
+				"id":           *did + "#" + ecdhLabel,
+				"type":         "JsonWebKey2020",
+				"controller":   *did,
+				"publicKeyJwk": ecdhJWK,
+			},
 		},
-		"assertionMethod": []string{*did + "#dev-key-1"},
+		// The identity key authenticates this instance to a peer (the DCS-to-DCS
+		// challenge-response) and asserts (JAdES, JAR); the VC key only asserts;
+		// the key-agreement key does neither. A consumer resolves a key by the
+		// relationship its use requires, so each one has to be stated.
+		"authentication":  []string{*did + "#dev-key-1"},
+		"assertionMethod": []string{*did + "#dev-key-1", *did + "#" + vcLabel},
+		"keyAgreement":    []string{*did + "#" + ecdhLabel},
 	}
 	if *endpoint != "" {
 		doc["services"] = []map[string]any{
@@ -100,7 +163,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "gendid: marshal: %v\n", err)
 		os.Exit(1)
 	}
-	if err := os.WriteFile(*out, append(data, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(*out, append(data, '\n'), 0o644); err != nil { // #nosec G306 -- did.json is a public document
 		fmt.Fprintf(os.Stderr, "gendid: write %s: %v\n", *out, err)
 		os.Exit(1)
 	}

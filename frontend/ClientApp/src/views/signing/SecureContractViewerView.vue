@@ -7,20 +7,33 @@ import { useContractDataPreprocess } from '@contract-workflow-engine/composables
 import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
 import { useContractContentValuesStore } from '@contract-workflow-engine/store/contractContentValuesStore'
 import SigningCeremonyDialog from '@/components/signing/SigningCeremonyDialog.vue'
+import { ERASED_CONTENT_MESSAGE, isErasedContentMessage } from '@/composables/useDocumentExport'
 import { ROUTES } from '@/router/router'
 import { getLocalDIDFile } from '@/services/did-service'
 import {
   type ProvenanceEntry,
   type SignatureContract,
   type SignatureEnvelope,
+  type SignatureFieldStatus,
   signatureManagementService,
+  type SignatureRequestPublishResult,
   type SignatureValidateResult,
   type SignatureVerifyResult,
+  signingErrorMessage,
 } from '@/services/signature-management-service'
 import { downloadBlob } from '@/utils/download-blob'
+import { findingVerdict } from '@/utils/signature-verdict'
+import { signingWorkflow } from '@/utils/signing-workflow'
 
-// QES is descoped (ADR-12); AES with PoA is the credential the wallet applies.
-const CREDENTIAL_TYPE = 'AES'
+// The level requested here is a hint to the wallet only — the backend gates
+// on the contract's OWN declared per-field requirement regardless of what is
+// requested (ADR-20 SM-01). AES covers every contract that doesn't declare a
+// stricter requirement; a contract requiring QES needs a wallet/QTSP capable
+// of producing one, which this desktop-upload path does not orchestrate.
+// The level this ceremony TARGETS, sent with the prepare request. What the
+// signature actually achieved is determined server-side and reported in the
+// compliance view; this constant must never be presented as that result.
+const CREDENTIAL_TARGET = 'AES'
 
 const route = useRoute()
 const router = useRouter()
@@ -43,14 +56,20 @@ const loading = ref(true)
 const loadError = ref<string | null>(null)
 
 const envelope = ref<SignatureEnvelope | undefined>()
+const signatureFields = ref<SignatureFieldStatus[]>([])
+const selectedField = ref('')
 const verifyResult = ref<SignatureVerifyResult | undefined>()
 const validateResult = ref<SignatureValidateResult | undefined>()
 const provenanceChain = ref<ProvenanceEntry[]>([])
+const provenanceError = ref<string | null>(null)
 
 // After prepare, the contract awaits the externally-signed upload; holds the
-// ceremony's signatory DID for the submit call and the to-be-signed PDF so the
-// signer can download it again without re-running the identity ceremony.
+// ceremony's signatory DID and ceremony id for the submit call (submit MUST
+// resolve the SAME ceremony prepare pinned bytes on, ADR-20) and the
+// to-be-signed PDF so the signer can download it again without re-running
+// the identity ceremony.
 const pendingSignerDid = ref<string | null>(null)
+const pendingCeremonyId = ref<string | null>(null)
 const preparedDocument = ref<Blob | null>(null)
 
 const busy = ref(false)
@@ -82,12 +101,46 @@ function stepState(id: StepId): 'done' | 'active' | 'pending' {
 }
 
 const signed = computed(() => envelope.value?.status === 'SIGNED')
-const executed = computed(() => done.value.validate && signed.value)
+
+// design/signature_management.go verify() and validate() both scope the signer
+// and the manager. The observer reaches this page from the signing list and
+// reads the envelope, but neither check is offered to it.
+const mayCheck = computed(() => isSigner.value || isManager.value)
+
+// The fields the local signer may still sign: unsigned and not a counterparty's
+// slot (DCS-FR-SM-07/-17).
+const signableFields = computed(() =>
+  signatureFields.value.filter((f) => !f.remote && f.status === 'UNSIGNED').map((f) => f.field_name),
+)
+const allFieldsSigned = computed(() =>
+  signatureFields.value.length ? signatureFields.value.every((f) => f.status === 'SIGNED') : signed.value,
+)
+const pendingFields = computed(() =>
+  signatureFields.value.filter((f) => f.status !== 'SIGNED').map((f) => f.field_name),
+)
+
+// A finding that names a defect, or a DSS indication below the AES bar
+// (dss.Report.AssertValidAES), fails the validation. Undetermined findings stay
+// listed but do not fail it.
+const validationDefects = computed(() => {
+  const defects = (validateResult.value?.findings ?? []).filter((f) => findingVerdict(f) === 'fail')
+  const indication = validateResult.value?.dss?.indication ?? ''
+  if (indication.toUpperCase() === 'TOTAL-FAILED' && !defects.some((f) => f.includes(indication))) {
+    defects.push(`EU DSS validation report: indication=${indication}`)
+  }
+  return defects
+})
+const validationPassed = computed(() => done.value.validate && validationDefects.value.length === 0)
+const executed = computed(() => validationPassed.value && allFieldsSigned.value)
 
 // The signature field to sign is the participating party's slot (dcs:signatoryName
 // == the party's DCS instance DID), seeded on the contract at negotiation. The
 // ceremony binds to it and the wallet's Power of Attorney must authorize that party.
 const signatureFieldName = computed<string>(() => {
+  if (signatureFields.value.length) {
+    if (signableFields.value.includes(selectedField.value)) return selectedField.value
+    return signableFields.value.find((name) => name === localInstanceDid.value) ?? signableFields.value[0] ?? ''
+  }
   const cd = contract.value?.contract_data as Record<string, unknown> | undefined
   const fields = cd?.['dcs:signatureFields'] as Record<string, unknown>[] | undefined
   const names = (fields ?? [])
@@ -104,6 +157,18 @@ const signatureFieldName = computed<string>(() => {
   return own ?? names[0] ?? ''
 })
 
+const canSign = computed(() =>
+  signatureFields.value.length ? signableFields.value.includes(signatureFieldName.value) : !signed.value,
+)
+
+function chooseField(event: Event) {
+  selectedField.value = (event.target as HTMLSelectElement).value
+}
+
+// The signing order and deadline the contract defines (DCS-FR-SM-13).
+const workflow = computed(() => signingWorkflow(contract.value?.contract_data))
+const deadlinePassed = computed(() => !!workflow.value.deadline && workflow.value.deadline.getTime() < Date.now())
+
 onMounted(async () => {
   try {
     // This instance's own did:web identifies which signature slot is ours.
@@ -111,20 +176,34 @@ onMounted(async () => {
     const detail = await signatureManagementService.retrieveById(did.value)
     contract.value = detail.contract
     envelope.value = detail.signature_envelope
+    signatureFields.value = detail.signature_fields ?? []
     loadContractContent(detail.contract.contract_data)
     done.value.retrieve = true
-    await loadProvenance()
   } catch (e: unknown) {
     loadError.value = `Failed to retrieve the contract: ${message(e)}`
   } finally {
     loading.value = false
   }
+  if (!loadError.value) await loadProvenance()
 })
+
+async function reloadSigningStatus() {
+  const detail = await signatureManagementService.retrieveById(did.value)
+  envelope.value = detail.signature_envelope
+  signatureFields.value = detail.signature_fields ?? []
+  selectedField.value = ''
+}
 
 // The C2PA provenance chain grows a manifest per lifecycle step and per applied
 // signature; an unsigned/never-exported contract simply has none yet.
+// The chain is supplementary: a failed read is reported and does not block the viewer.
 async function loadProvenance() {
-  provenanceChain.value = (await signatureManagementService.getProvenanceChain(did.value)).chain
+  try {
+    provenanceChain.value = (await signatureManagementService.getProvenanceChain(did.value)).chain
+    provenanceError.value = null
+  } catch (e: unknown) {
+    provenanceError.value = `The C2PA provenance chain could not be loaded: ${message(e)}`
+  }
 }
 
 // A dcs.lifecycle assertion labels each manifest; surface its human-facing bits.
@@ -154,6 +233,7 @@ function loadContractContent(contractData: unknown) {
     documentIri: ((contractData as Record<string, unknown>)['@id'] as string | undefined) ?? null,
     blocks: cd.blocks,
     layout: cd.layout,
+    contractFields: cd.contractFields,
     contractData: cd.contractData,
     policies: cd.policies,
   })
@@ -162,6 +242,9 @@ function loadContractContent(contractData: unknown) {
 }
 
 function message(e: unknown): string {
+  const data = (e as { response?: { data?: { message?: unknown } } }).response?.data
+  const serverMessage = typeof data?.message === 'string' ? data.message : ''
+  if (serverMessage && isErasedContentMessage(serverMessage)) return ERASED_CONTENT_MESSAGE
   return e instanceof Error ? e.message : String(e)
 }
 
@@ -177,7 +260,12 @@ async function verify() {
   delete stepError.value.verify
   try {
     verifyResult.value = await signatureManagementService.verifySignature(did.value)
-    done.value.verify = true
+    // The verdict, not the call completing. A deterministic re-render that does
+    // not match the signed document means the human-readable PDF and the
+    // machine-readable contract are different documents, which is the property
+    // this step exists to establish — so it must not read as Verified, and must
+    // not open the ceremony.
+    done.value.verify = verifyResult.value?.match === true
   } catch (e: unknown) {
     stepError.value.verify = `Verification failed: ${message(e)}`
   } finally {
@@ -196,38 +284,111 @@ async function applySignature() {
     const prepared = await signatureManagementService.prepareSignature(
       did.value,
       outcome.data.signerDid,
-      CREDENTIAL_TYPE,
+      CREDENTIAL_TARGET,
+      signatureFieldName.value,
+      outcome.data.ceremonyId,
     )
     preparedDocument.value = prepared
     downloadBlob(prepared, documentFilename.value)
     pendingSignerDid.value = outcome.data.signerDid
+    pendingCeremonyId.value = outcome.data.ceremonyId
     done.value.apply = true
   } catch (e: unknown) {
-    stepError.value.apply = `Could not prepare the contract for signing: ${message(e)}`
+    stepError.value.apply = `Could not prepare the contract for signing: ${signingErrorMessage(e)}`
   } finally {
     busy.value = false
   }
+}
+
+// Step 3, wallet path (ADR-12, DCS-FR-SM-06/-23): run the PID ceremony, publish
+// the signing request and let the wallet sign the document and post it back.
+// The dialog waits until the DCS accepted the wallet's signature; download and
+// upload stay as the fallback.
+async function signWithWallet() {
+  busy.value = true
+  delete stepError.value.apply
+  delete stepError.value.submit
+  try {
+    if (await walletSignatureAccepted()) await afterSignatureAccepted()
+  } catch (e: unknown) {
+    stepError.value.apply = `Wallet signing failed: ${signingErrorMessage(e)}`
+  } finally {
+    busy.value = false
+  }
+}
+
+// Runs the ceremony and the published signing request until the wallet's
+// signature is accepted. A retry after an expired or refused request publishes
+// a new request; a ceremony that can no longer be published is started again.
+async function walletSignatureAccepted(): Promise<boolean> {
+  const fieldName = signatureFieldName.value
+  let ceremonyId = ''
+  for (;;) {
+    if (!ceremonyId) {
+      const outcome = await ceremonyDialog.value?.reveal({ contractDid: did.value, fieldName })
+      if (!outcome || outcome.isCanceled || !outcome.data) return false
+      ceremonyId = outcome.data.ceremonyId
+    }
+    let published: SignatureRequestPublishResult
+    try {
+      published = await signatureManagementService.publishSignatureRequest(ceremonyId)
+    } catch (e: unknown) {
+      if (errorName(e) !== 'ceremony_required') throw e
+      ceremonyId = ''
+      continue
+    }
+    const signing = await ceremonyDialog.value?.reveal({
+      contractDid: did.value,
+      fieldName,
+      signingRequest: { ceremonyId: published.ceremony_id, walletUri: published.wallet_uri },
+    })
+    if (!signing || signing.isCanceled || !signing.data) return false
+    if (!signing.data.republish) return true
+  }
+}
+
+function errorName(e: unknown): unknown {
+  return (e as { response?: { data?: { name?: unknown } } }).response?.data?.name
+}
+
+// The signature is recorded at this point; a failed reload is reported on its own.
+async function afterSignatureAccepted() {
+  done.value.apply = true
+  done.value.submit = true
+  try {
+    await reloadSigningStatus()
+  } catch (e: unknown) {
+    stepError.value.submit = `The signature was recorded, but the contract could not be reloaded: ${message(e)}`
+  }
+  await loadProvenance()
 }
 
 // Step 4 — upload the externally-signed PDF; the DCS validates sole control and records it.
 async function submitSigned(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
-  if (!file || !pendingSignerDid.value) return
+  if (!file || !pendingSignerDid.value || !pendingCeremonyId.value) return
   busy.value = true
   delete stepError.value.submit
   try {
     envelope.value = await signatureManagementService.submitSignature(
       did.value,
       pendingSignerDid.value,
-      CREDENTIAL_TYPE,
+      CREDENTIAL_TARGET,
       file,
+      signatureFieldName.value,
+      pendingCeremonyId.value,
     )
     pendingSignerDid.value = null
-    done.value.submit = true
-    await loadProvenance()
+    pendingCeremonyId.value = null
   } catch (e: unknown) {
-    stepError.value.submit = `The signed contract was rejected: ${message(e)}`
+    stepError.value.submit = `The signed contract was rejected: ${signingErrorMessage(e)}`
+    busy.value = false
+    input.value = ''
+    return
+  }
+  try {
+    await afterSignatureAccepted()
   } finally {
     busy.value = false
     input.value = ''
@@ -288,6 +449,7 @@ async function validate() {
                   :blocks="dcsDraftStore.blocks"
                   :semantic-conditions="dcsDraftStore.semanticConditions"
                   :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
+                  :disabled="true"
                 />
               </div>
               <p v-else class="text-sm text-base-content/70 italic">This contract has no renderable clause content.</p>
@@ -297,6 +459,32 @@ async function validate() {
                 embedded PoA and signing summary is produced at the Apply Signature step.
               </p>
             </div>
+          </div>
+
+          <div
+            v-if="workflow.order.length || workflow.deadline"
+            data-testid="signing-workflow"
+            class="card mt-4 border border-base-300 bg-base-100 shadow-sm"
+          >
+            <div class="card-body gap-3">
+              <h4 class="text-sm font-bold">Signing order and deadline</h4>
+              <p v-if="workflow.deadline" class="text-sm">
+                Sign by {{ workflow.deadline.toLocaleString() }}
+                <span v-if="deadlinePassed" class="badge badge-sm badge-error">Deadline passed</span>
+              </p>
+              <ol v-if="workflow.order.length" class="list-inside list-decimal text-sm">
+                <li v-for="entry in workflow.order" :key="entry.field" :value="entry.position">
+                  <span class="font-mono text-xs break-all">{{ entry.field }}</span>
+                  <span v-if="entry.field === signatureFieldName" class="ml-2 badge badge-sm badge-primary">
+                    Your signature
+                  </span>
+                </li>
+              </ol>
+            </div>
+          </div>
+
+          <div v-if="provenanceError" class="mt-4 alert text-xs alert-warning" data-testid="provenance-error">
+            {{ provenanceError }}
           </div>
 
           <!-- C2PA provenance: the tamper-evident manifest chain embedded in the PDF -->
@@ -375,6 +563,7 @@ async function validate() {
               <div class="flex items-center justify-between">
                 <h4 class="card-title text-sm">2 · Verify integrity &amp; envelope</h4>
                 <span v-if="done.verify" class="badge badge-sm badge-success">Verified</span>
+                <span v-else-if="verifyResult" class="badge badge-sm badge-error">Not verified</span>
               </div>
               <p class="text-xs text-base-content/70">
                 pdf-core deterministically re-renders the PDF from the contract's embedded machine-readable payload and
@@ -396,7 +585,7 @@ async function validate() {
               </ul>
               <div v-if="stepError.verify" class="text-xs text-error">{{ stepError.verify }}</div>
               <div class="card-actions">
-                <button class="btn btn-sm btn-primary" :disabled="busy" @click="verify">
+                <button class="btn btn-sm btn-primary" :disabled="busy || !mayCheck" @click="verify">
                   <span v-if="busy && currentStep === 'verify'" class="loading loading-xs loading-spinner" />
                   {{ done.verify ? 'Re-verify' : 'Verify' }}
                 </button>
@@ -416,21 +605,41 @@ async function validate() {
               </div>
               <p class="text-xs text-base-content/70">
                 Present your PID in the wallet ceremony. The DCS then builds the to-be-signed PDF (with your Power of
-                Attorney and the signing summary embedded, credential {{ CREDENTIAL_TYPE }}) and downloads it to your
-                device. The DCS holds no signing key — you sign the document yourself.
+                Attorney and the signing summary embedded, targeting {{ CREDENTIAL_TARGET }}) and downloads it to your
+                device. The DCS holds no signing key. You sign the document yourself. With “Sign with wallet”, your
+                wallet fetches the document, signs it and sends it back.
               </p>
               <div v-if="!isSigner" class="text-xs text-warning">
                 Your role can review and validate this contract, but signing requires the Signer role.
               </div>
+              <label v-if="signableFields.length > 1" class="flex flex-col gap-1 text-xs">
+                <span>Signature field</span>
+                <select
+                  class="select-bordered select w-full select-sm"
+                  data-testid="signature-field-picker"
+                  :value="signatureFieldName"
+                  :disabled="busy"
+                  @change="chooseField"
+                >
+                  <option v-for="name in signableFields" :key="name" :value="name">{{ name }}</option>
+                </select>
+              </label>
               <div v-if="stepError.apply" class="text-xs text-error">{{ stepError.apply }}</div>
               <div class="card-actions">
                 <button
                   class="btn btn-sm btn-primary"
-                  :disabled="busy || !isSigner || !done.verify || signed"
+                  :disabled="busy || !isSigner || !done.verify || !canSign"
                   @click="applySignature"
                 >
                   <span v-if="busy && currentStep === 'apply'" class="loading loading-xs loading-spinner" />
                   {{ done.apply ? 'Verify & download again' : 'Verify identity & download document to sign' }}
+                </button>
+                <button
+                  class="btn btn-outline btn-sm btn-primary"
+                  :disabled="busy || !isSigner || !done.verify || !canSign"
+                  @click="signWithWallet"
+                >
+                  Sign with wallet
                 </button>
               </div>
               <div v-if="done.apply && !signed" class="mt-1 flex items-center gap-2 text-xs text-info">
@@ -455,13 +664,16 @@ async function validate() {
                 <span v-if="signed" class="badge badge-sm badge-success">Uploaded</span>
               </div>
               <p class="text-xs text-base-content/70">
-                Once you have signed the downloaded PDF, upload it here. The DCS validates that you alone controlled the
-                signing key (sole control) and records the executed contract.
+                Once you have signed the downloaded PDF, upload it here. The DCS checks that the signing certificate
+                names the same person as your identity credential, and records the executed contract. That is evidence
+                towards sole control, not a determination of it.
               </p>
               <p v-if="!done.apply" class="text-xs text-base-content/70 italic">
                 Complete step 3 first to get the document to sign.
               </p>
-              <p v-else-if="signed" class="text-xs text-success">Signed document accepted and recorded.</p>
+              <p v-else-if="signed || done.submit" class="text-xs text-success">
+                Signed document accepted and recorded.
+              </p>
               <div v-if="stepError.submit" class="text-xs text-error">{{ stepError.submit }}</div>
               <div class="card-actions">
                 <label class="btn btn-sm btn-primary" :class="{ 'btn-disabled': busy || !pendingSignerDid }">
@@ -487,18 +699,34 @@ async function validate() {
             <div class="card-body gap-2 p-4">
               <div class="flex items-center justify-between">
                 <h4 class="card-title text-sm">5 · Validate applied signatures</h4>
-                <span v-if="done.validate" class="badge badge-sm badge-success">Validated</span>
+                <span v-if="validationPassed" class="badge badge-sm badge-success">Validated</span>
+                <span v-else-if="done.validate" class="badge badge-sm badge-error">Validation failed</span>
               </div>
               <p class="text-xs text-base-content/70">Validate the applied signature(s) against trust policies.</p>
-              <ul v-if="validateResult?.findings?.length" class="list-disc pl-5 text-xs text-warning">
-                <li v-for="(f, i) in validateResult.findings" :key="i">{{ f }}</li>
-              </ul>
-              <p v-else-if="done.validate" class="text-xs text-success">
-                Signature validation passed with no findings.
-              </p>
+              <div v-if="done.validate && !validationPassed" class="alert text-xs alert-error" role="alert">
+                <div>
+                  <p class="font-semibold">The signature validation did not pass.</p>
+                  <ul class="list-disc pl-5">
+                    <li v-for="(f, i) in validationDefects" :key="i">{{ f }}</li>
+                  </ul>
+                </div>
+              </div>
+              <template v-else-if="validationPassed">
+                <p class="text-xs text-success">Signature validation passed.</p>
+                <ul v-if="validateResult?.findings?.length" class="list-disc pl-5 text-xs text-base-content/70">
+                  <li v-for="(f, i) in validateResult.findings" :key="i">{{ f }}</li>
+                </ul>
+                <p v-if="!allFieldsSigned" class="text-xs text-info" data-testid="pending-fields">
+                  Signatures still pending: {{ pendingFields.join(', ') || 'not all required signatures are applied' }}
+                </p>
+              </template>
               <div v-if="stepError.validate" class="text-xs text-error">{{ stepError.validate }}</div>
               <div class="card-actions">
-                <button class="btn btn-sm btn-primary" :disabled="busy || !signed" @click="validate">
+                <button
+                  class="btn btn-sm btn-primary"
+                  :disabled="busy || !(signed || done.submit) || !mayCheck"
+                  @click="validate"
+                >
                   <span v-if="busy && currentStep === 'validate'" class="loading loading-xs loading-spinner" />
                   {{ done.validate ? 'Re-validate' : 'Validate' }}
                 </button>
@@ -509,6 +737,10 @@ async function validate() {
 
         <p v-if="isManager && !isSigner" class="mt-4 text-xs text-base-content/70">
           Manager view: retrieval, verification and validation are available; signing is performed by a Signer.
+        </p>
+        <p v-if="!mayCheck" class="mt-4 text-xs text-base-content/70">
+          Read-only view: the contract and its signature envelope are shown; verification, validation and signing are
+          performed by a Signer or a Contract Manager.
         </p>
       </section>
     </div>

@@ -32,20 +32,27 @@ const (
 	ComplianceOfficer   UserRole = "Compliance Officer"
 	IntegrationManager  UserRole = "Integration Manager"
 
-	ProcessOrchestrator UserRole = "Process Orchestrator"
-	Validator           UserRole = "Validator"
-
 	SystemContractCreator  UserRole = "Sys. Contract Creator"
 	SystemContractReviewer UserRole = "Sys. Contract Reviewer"
 	SystemContractApprover UserRole = "Sys. Contract Approver"
 	SystemContractManager  UserRole = "Sys. Contract Manager"
 	SystemContractSigner   UserRole = "Sys. Contract Signer"
-	ContractTargetSystem   UserRole = "Contract Target System"
+	// ContractTargetSystem is SRS Table 5's "external system that receives and
+	// executes deployed contracts". It is carried by the credential issued to a
+	// registry entry (ADR-27) rather than configured by hand, and authorises
+	// only the deployment callback — and there only for deployments dispatched
+	// to that same target.
+	ContractTargetSystem UserRole = "Contract Target System"
 	// SystemAuditor extends the SRS System User classes (SRS §2.4 Table 5, all
 	// of which are contract-oriented) with the read-only integrity role an
 	// external notary needs: it may read the audit trail's tamper-evidence
 	// surface and nothing else. See ADR-16.
 	SystemAuditor UserRole = "Sys. Auditor"
+	// SystemIntegrationManager is the machine counterpart of the Integration
+	// Manager for one task: it manages the webhook subscriptions of its
+	// organization (/orce/webhooks), so an integration such as ORCE subscribes
+	// to DCS events with its own credential (DCS-NFR-SQ-08, ADR-29).
+	SystemIntegrationManager UserRole = "Sys. Integration Manager"
 )
 
 func NewUserRole(s string) (UserRole, error) {
@@ -63,10 +70,9 @@ func (r UserRole) IsValid() bool {
 		ContractCreator, ContractReviewer, ContractApprover, ContractManager,
 		ContractNegotiator, ContractSigner, ContractObserver,
 		ArchiveManager, Auditor, SystemAdministrator, ComplianceOfficer, IntegrationManager,
-		ProcessOrchestrator, Validator,
 		SystemContractCreator, SystemContractReviewer, SystemContractApprover,
 		SystemContractManager, SystemContractSigner, ContractTargetSystem,
-		SystemAuditor:
+		SystemAuditor, SystemIntegrationManager:
 		return true
 	}
 	return false
@@ -82,7 +88,7 @@ func (r UserRole) IsSystemRole() bool {
 	switch r {
 	case SystemContractCreator, SystemContractReviewer, SystemContractApprover,
 		SystemContractManager, SystemContractSigner, ContractTargetSystem,
-		SystemAuditor:
+		SystemAuditor, SystemIntegrationManager:
 		return true
 	}
 	return false

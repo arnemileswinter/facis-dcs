@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, normalizeClass, ref, useAttrs, useTemplateRef } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
+import { type DcsContractField, fieldFillScalar } from '@/models/dcs-jsonld'
 import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
+import { useErrorStore } from '@/stores/error-store'
 import { ContractState } from '@/types/contract-state'
+import { reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
 
 defineOptions({
@@ -32,8 +35,10 @@ const props = defineProps<{
 
 const confirmationModal = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-modal')
 
+const route = useRoute()
 const router = useRouter()
-const { isCreator, isManager } = useContractPermissions()
+const { isApprover, isCreator, isManager, isNegotiator } = useContractPermissions()
+const errorStore = useErrorStore()
 
 // SRS DCS-IR-CWE-01 / §1.2 offer→acceptance lifecycle: only a Contract Creator
 // may transmit a DRAFT to the counterparty (EventOffer is allowed solely from
@@ -43,18 +48,132 @@ const canOffer = computed(() => {
   return isCreator.value && props.contract.state === ContractState.draft
 })
 
+// An OFFERED contract's only forward move is the counterparty opening the
+// negotiation (contractstate.Transitions: Offered -Negotiate-> Negotiation,
+// SRS §4 — the Responder may accept, negotiate or refuse), and an unaccepted
+// offer carries no negotiation task, so the Negotiations tab cannot reach it —
+// by construction, since a task is minted only once a party engages. From
+// OFFERED this is therefore the sole route into the negotiate view and its
+// Accept offer / Change Proposal actions. From NEGOTIATION the task row in the
+// tab is the discoverable route and this stays as a convenience.
+// Contract Manager is included because the counterparty drives its inbound
+// contracts through that role (design accept_offer/negotiate both scope it);
+// on a pure responder instance no Creator or Negotiator role is granted, and
+// this button is that instance's only way into a received offer.
+const canNegotiate = computed(() => {
+  // Already on the negotiate page — the button only re-opens this route.
+  if (route.name === ROUTES.CONTRACTS.NEGOTIATE) return false
+  const state = props.contract.state
+  return (
+    (isNegotiator.value || isCreator.value || isManager.value) &&
+    (state === ContractState.offered || state === ContractState.negotiation)
+  )
+})
+
+const negotiateLabel = computed(() => (props.contract.state === ContractState.offered ? 'Review offer' : 'Negotiate'))
+
+function openNegotiation() {
+  void router.push({ name: ROUTES.CONTRACTS.NEGOTIATE, params: { did: props.contract.did } })
+}
+
+// Every field identifier the document still binds — from prose placeholders,
+// ODRL operands, or a data object's leaf. A declaration the document no longer
+// references anywhere is what a deleted clause leaves behind: nothing renders
+// an input for it, so no user can ever fill it.
+function boundFieldIds(document: unknown, declared: Set<string>, found = new Set<string>()): Set<string> {
+  if (Array.isArray(document)) {
+    for (const entry of document) boundFieldIds(entry, declared, found)
+    return found
+  }
+  if (typeof document !== 'object' || document === null) return found
+  for (const [key, value] of Object.entries(document)) {
+    // The declaration list itself states which fields exist, not which are used.
+    if (key === 'dcs:contractFields') continue
+    if (key === '@id' && typeof value === 'string' && declared.has(value)) found.add(value)
+    else boundFieldIds(value, declared, found)
+  }
+  return found
+}
+
+// Required contract fields still missing a filled dcs:value — the completeness
+// the backend's offer gate (command/offer.go validateOfferReady, SRS §1.2
+// definite proposal / §2.2.2 filled-out contract) rejects; checked here too so
+// the action is disabled with a reason instead of failing on click. The
+// backend stays authoritative, so this must never be the stricter of the two:
+// validation.ValidateContractClosed blocks on a field a rule or a prose
+// segment REFERENCES, and an unreferenced declaration passes it. Counting one
+// here disabled the button over a field the offer would have accepted, with a
+// reason naming something the contract no longer shows (a clause deleted in
+// the builder leaves its declarations behind).
+const unfilledRequired = computed<DcsContractField[]>(() => {
+  const fields = props.contract.contract_data?.['dcs:contractFields'] ?? []
+  const declared = new Set(fields.map((field) => field['@id']))
+  const bound = boundFieldIds(props.contract.contract_data, declared)
+  return fields.filter((field) => {
+    if (!field['dcs:required']) return false
+    if (!bound.has(field['@id'])) return false
+    const value = fieldFillScalar(field['dcs:value'])
+    return value === undefined || value === null || String(value).trim() === ''
+  })
+})
+
+const offerBlockedReason = computed(() => {
+  if (unfilledRequired.value.length === 0) return ''
+  const labels = unfilledRequired.value.map((field) => field['dcs:label'] || field['@id'])
+  return `Fill the required field(s) before offering to the counterparty: ${labels.join(', ')}`
+})
+
 const canTerminate = computed(() => {
   return isManager.value && props.contract.state !== ContractState.terminated
 })
 
-const canDeploy = computed(() => {
-  return isManager.value && props.contract.state === ContractState.signed
+// contractstate.Transitions allows EventWithdraw from exactly these four; it is
+// refused once APPROVED. design withdraw() scopes Contract Creator.
+const withdrawableStates: ContractState[] = [
+  ContractState.offered,
+  ContractState.negotiation,
+  ContractState.submitted,
+  ContractState.reviewed,
+]
+
+const canWithdraw = computed(() => {
+  return isCreator.value && withdrawableStates.includes(props.contract.state)
 })
+
+// command/renew.go renewableStates; design renew() scopes Contract Manager.
+const renewableStates: ContractState[] = [
+  ContractState.approved,
+  ContractState.signed,
+  ContractState.active,
+  ContractState.terminated,
+  ContractState.expired,
+]
+
+const canRenew = computed(() => {
+  return isManager.value && renewableStates.includes(props.contract.state)
+})
+
+// SIGNED and ACTIVE both, because deployment is a Contract Manager action and
+// not only an automatic one. UC-05's stimulus is "a Contract Manager submits a
+// signed contract for deployment", alongside DCS-FR-SM-12's automatic trigger on
+// signing completion. Offering it only in SIGNED left the manager no way to
+// re-dispatch a contract the target has to receive again — a target that was
+// unreachable, lost its state, or was replaced — even though the state machine
+// deliberately allows it (contractstate.EventDeploy is an idempotent ACTIVE ->
+// ACTIVE re-dispatch) and the auto-deploy subscriber only logs its failures.
+const canDeploy = computed(() => {
+  return (
+    isManager.value && (props.contract.state === ContractState.signed || props.contract.state === ContractState.active)
+  )
+})
+
+const deployLabel = computed(() => (props.contract.state === ContractState.active ? 'Redeploy' : 'Deploy'))
 
 const offering = ref(false)
 
 const offer = async () => {
   if (!isCreator.value || props.contract.state !== ContractState.draft) return
+  if (offerBlockedReason.value) return
   offering.value = true
   try {
     await contractWorkflowService.offer({
@@ -63,7 +182,7 @@ const offer = async () => {
     })
     router.go(0)
   } catch (err) {
-    console.error('Offer failed:', err)
+    reportActionError(err, 'Offer contract')
   } finally {
     offering.value = false
   }
@@ -72,7 +191,7 @@ const offer = async () => {
 const deploying = ref(false)
 
 const deploy = async () => {
-  if (!isManager.value || props.contract.state !== ContractState.signed) return
+  if (!canDeploy.value) return
   deploying.value = true
   try {
     await contractWorkflowService.deploy({
@@ -81,9 +200,81 @@ const deploy = async () => {
     })
     router.go(0)
   } catch (err) {
-    console.error('Deployment failed:', err)
+    reportActionError(err, 'Deploy contract')
   } finally {
     deploying.value = false
+  }
+}
+
+const withdrawing = ref(false)
+
+const withdraw = async () => {
+  if (!canWithdraw.value || !confirmationModal.value) return
+  const { isCanceled } = await confirmationModal.value.reveal({
+    message: 'Withdraw this contract from the counterparty? It cannot be taken forward afterwards.',
+  })
+  if (isCanceled) return
+  withdrawing.value = true
+  try {
+    await contractWorkflowService.withdraw({
+      did: props.contract.did,
+      updated_at: props.contract.updated_at,
+    })
+    await router.push({ name: ROUTES.CONTRACTS.LIST })
+  } catch (err) {
+    reportActionError(err, 'Withdraw contract')
+  } finally {
+    withdrawing.value = false
+  }
+}
+
+const renewing = ref(false)
+
+const renew = async () => {
+  if (!canRenew.value || !confirmationModal.value) return
+  const { isCanceled } = await confirmationModal.value.reveal({
+    message: 'Create a renewal contract from this one? The original is left untouched.',
+  })
+  if (isCanceled) return
+  renewing.value = true
+  try {
+    const response = await contractWorkflowService.renew({
+      did: props.contract.did,
+      updated_at: props.contract.updated_at,
+    })
+    await router.push({ name: ROUTES.CONTRACTS.VIEW, params: { did: response.did } })
+  } catch (err) {
+    reportActionError(err, 'Renew contract')
+  } finally {
+    renewing.value = false
+  }
+}
+
+// DCS-IR-CWE-10: the approver or manager decides catalogue availability with
+// this explicit action. design publish_catalogue accepts these states.
+const catalogueStates: ContractState[] = [ContractState.approved, ContractState.signed, ContractState.active]
+
+const canPublishCatalogue = computed(
+  () => (isApprover.value || isManager.value) && catalogueStates.includes(props.contract.state),
+)
+
+const publishing = ref(false)
+
+const publishCatalogue = async () => {
+  if (!canPublishCatalogue.value || !confirmationModal.value) return
+  const { isCanceled } = await confirmationModal.value.reveal({
+    message:
+      'Register this contract in the Federated Catalogue? The entry shows its name, state, version, template and validity period. The contract content and the parties are not published.',
+  })
+  if (isCanceled) return
+  publishing.value = true
+  try {
+    await contractWorkflowService.publishCatalogue(props.contract.did)
+    errorStore.add('Contract registered in the Federated Catalogue.', 'info')
+  } catch (err) {
+    reportActionError(err, 'Register in catalogue')
+  } finally {
+    publishing.value = false
   }
 }
 
@@ -95,7 +286,7 @@ const terminate = async () => {
       editor: { requiredText: true, placeholder: 'Reason' },
     })
     if (!reason) {
-      console.error('Reason is required for termination')
+      reportActionError(new Error('A reason is required.'), 'Terminate contract')
       return
     }
     if (!isCanceled) {
@@ -109,17 +300,64 @@ const terminate = async () => {
       }
     }
   } catch (err) {
-    console.error('Termination failed:', err)
+    reportActionError(err, 'Terminate contract')
   }
 }
 </script>
 
 <template>
-  <button v-if="canOffer" :class="[filteredClass, 'btn-primary']" :disabled="offering" @click="offer">
+  <button
+    v-if="canOffer"
+    :class="[filteredClass, 'btn-primary']"
+    :disabled="offering || offerBlockedReason !== ''"
+    :title="offerBlockedReason || undefined"
+    @click="offer"
+  >
     {{ offering ? 'Offering…' : 'Offer to counterparty' }}
   </button>
-  <button v-if="canDeploy" :class="[filteredClass, 'btn-primary']" :disabled="deploying" @click="deploy">
-    {{ deploying ? 'Deploying…' : 'Deploy' }}
+  <button
+    v-if="canDeploy"
+    data-testid="deploy-contract"
+    :class="[filteredClass, 'btn-primary']"
+    :disabled="deploying"
+    @click="deploy"
+  >
+    {{ deploying ? 'Deploying…' : deployLabel }}
+  </button>
+  <button
+    v-if="canNegotiate"
+    data-testid="open-negotiation"
+    :class="[filteredClass, 'btn-primary']"
+    @click="openNegotiation"
+  >
+    {{ negotiateLabel }}
+  </button>
+  <button
+    v-if="canRenew"
+    data-testid="renew-contract"
+    :class="[filteredClass, 'btn-primary']"
+    :disabled="renewing"
+    @click="renew"
+  >
+    {{ renewing ? 'Renewing…' : 'Renew' }}
+  </button>
+  <button
+    v-if="canPublishCatalogue"
+    data-testid="publish-catalogue"
+    :class="[filteredClass, 'btn-primary']"
+    :disabled="publishing"
+    @click="publishCatalogue"
+  >
+    {{ publishing ? 'Registering…' : 'Register in catalogue' }}
+  </button>
+  <button
+    v-if="canWithdraw"
+    data-testid="withdraw-contract"
+    :class="[filteredClass, 'btn-error']"
+    :disabled="withdrawing"
+    @click="withdraw"
+  >
+    {{ withdrawing ? 'Withdrawing…' : 'Withdraw' }}
   </button>
   <button v-if="canTerminate" :class="[filteredClass, 'btn-error']" @click="terminate">Terminate</button>
   <ConfirmationModal ref="confirmation-modal" />

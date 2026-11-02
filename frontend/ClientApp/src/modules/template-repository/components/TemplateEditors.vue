@@ -7,16 +7,21 @@ import BuilderPreviewDialog from '@template-repository/components/builder-editor
 import BuilderEditor from '@template-repository/components/BuilderEditor.vue'
 import ClauseEditor from '@template-repository/components/clauses-editor/ClauseEditor.vue'
 import ClausesEditor from '@template-repository/components/ClausesEditor.vue'
+import DataObjectsEditor from '@template-repository/components/data-objects/DataObjectsEditor.vue'
 import DetailsEditor from '@template-repository/components/DetailsEditor.vue'
 import MetaDataEditor from '@template-repository/components/MetaDataEditor.vue'
-import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
+import TemplateProvenance from '@template-repository/components/TemplateProvenance.vue'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
-import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore.ts'
+import { templateAuditRoles, useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
+import { useAuthStore } from '@/stores/auth-store'
 import AuditView from './AuditView.vue'
 
 withDefaults(
   defineProps<{
     title: string
+    partyTypeError?: string
+    nameError?: string
+    descriptionError?: string
   }>(),
   {},
 )
@@ -33,7 +38,9 @@ const tabs = computed(() => {
   })
 })
 const currentTabNumber = computed(() => 1 + tabs.value.map((tab) => tab.id).indexOf(activeTab.value))
-const { isManager } = useTemplatePermissions()
+const isAuditingAuthorized = computed(
+  () => templateAuditRoles.some((role) => useAuthStore().user?.roles?.includes(role)) ?? false,
+)
 </script>
 
 <template>
@@ -43,16 +50,18 @@ const { isManager } = useTemplatePermissions()
         {{ title }}
       </p>
       <div role="tablist" class="tabs-border tabs tabs-lg">
-        <a
+        <button
           v-for="(tab, _index) in tabs"
           :key="tab.id"
+          type="button"
           role="tab"
+          :aria-selected="activeTab === tab.id"
           class="tab text-base-content/70"
           :class="{ 'tab-active text-primary': activeTab === tab.id }"
           @click="templateEditorUiStore.setActiveTab(tab.id)"
         >
           {{ tab.label }}
-        </a>
+        </button>
       </div>
     </div>
   </div>
@@ -73,7 +82,11 @@ const { isManager } = useTemplatePermissions()
                 </div>
                 <div v-if="state" class="badge badge-sm badge-secondary">{{ state }}</div>
               </h2>
-              <DetailsEditor />
+              <DetailsEditor
+                :party-type-error="partyTypeError"
+                :name-error="nameError"
+                :description-error="descriptionError"
+              />
             </div>
           </div>
         </div>
@@ -86,8 +99,10 @@ const { isManager } = useTemplatePermissions()
                 <span class="badge w-8 badge-sm badge-primary">0{{ currentTabNumber }}</span>
                 Clauses
               </h2>
-              <ClauseEditor />
-              <div class="divider text-xs text-base-content/40">existing clauses</div>
+              <ClauseEditor v-if="templateEditorUiStore.isTemplateEditable" />
+              <div v-if="templateEditorUiStore.isTemplateEditable" class="divider text-xs text-base-content/70">
+                existing clauses
+              </div>
               <ClausesEditor />
             </div>
           </div>
@@ -117,20 +132,35 @@ const { isManager } = useTemplatePermissions()
           <BuilderPreviewDialog />
         </div>
 
+        <!-- DATA TAB -->
+        <div v-show="activeTab === 'data'">
+          <div class="card border border-base-300 bg-base-100 shadow-sm">
+            <div class="card-body gap-5">
+              <h2 class="card-title text-sm">
+                <span class="badge w-8 badge-sm badge-primary">0{{ currentTabNumber }}</span>
+                Semantic Data Objects
+              </h2>
+              <DataObjectsEditor mode="template" :editable="templateEditorUiStore.isTemplateEditable" />
+            </div>
+          </div>
+        </div>
+
         <!-- META TAB -->
         <div v-show="activeTab === 'meta'">
           <div class="card border border-base-300 bg-base-100 shadow-sm">
-            <div class="card-body">
+            <div class="card-body gap-5">
               <h2 class="card-title text-sm">
                 <span class="badge w-8 badge-sm badge-primary">0{{ currentTabNumber }}</span>
                 Meta Data
               </h2>
+              <TemplateProvenance />
+              <div class="divider my-0 text-xs text-base-content/40">custom metadata</div>
               <MetaDataEditor />
             </div>
           </div>
         </div>
 
-        <template v-if="isManager">
+        <template v-if="isAuditingAuthorized">
           <div v-show="activeTab === 'audit'">
             <div class="card border border-base-300 bg-base-100 shadow-sm">
               <div class="card-body">

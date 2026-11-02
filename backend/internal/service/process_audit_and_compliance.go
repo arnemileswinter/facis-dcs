@@ -16,25 +16,85 @@ import (
 	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
 	"digital-contracting-service/internal/auth"
 	"digital-contracting-service/internal/base"
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/base/contractreadpolicy"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	"digital-contracting-service/internal/middleware"
+	"digital-contracting-service/internal/processauditandcompliance/auditexecutor"
+	pacdb "digital-contracting-service/internal/processauditandcompliance/db"
 	pacevent "digital-contracting-service/internal/processauditandcompliance/event"
+	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
 	templatedb "digital-contracting-service/internal/templaterepository/db"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"goa.design/clue/log"
+	goa "goa.design/goa/v3/pkg"
 )
 
 type processAuditAndCompliancesrvc struct {
-	DB           *sqlx.DB
-	ATrailReader base.AuditTrailReader
-	CTRepo       templatedb.ContractTemplateRepo
-	CRepo        cwedb.ContractRepo
-	ATRepo       cwedb.ApprovalTaskRepo
+	DB                   *sqlx.DB
+	ATrailReader         base.AuditTrailReader
+	CTRepo               templatedb.ContractTemplateRepo
+	CRepo                cwedb.ContractRepo
+	ATRepo               cwedb.ApprovalTaskRepo
+	FRepo                pacdb.RiskFindingRepo
+	AuditExecutor        auditexecutor.Client
+	WorkflowGate         *workflowgate.Coordinator
+	auditRunReader       func(context.Context, string, string) (persistedAuditRun, error)
+	reportEventPersister func(context.Context, auditReport, string, string, string, string) error
 	auth.JWTAuthenticator
+}
+
+type auditEvidenceResource struct {
+	Did        string                                                  `json:"did"`
+	Component  string                                                  `json:"component"`
+	CreatedAt  string                                                  `json:"created_at"`
+	AuditTrail []*processauditandcompliance.PACResourceAuditTrailEntry `json:"audit_trail"`
+}
+
+// MarshalJSON adapts Goa's service-layer audit entry type to the
+// snake_case wire contract consumed by the external audit executor. Goa
+// result structs intentionally have no encoding/json tags because their HTTP
+// transport has generated encoders; here they are nested in an independent
+// executor envelope and therefore need an explicit adapter.
+func (r auditEvidenceResource) MarshalJSON() ([]byte, error) {
+	type wireEntry struct {
+		ID            int64   `json:"id"`
+		Component     string  `json:"component"`
+		EventType     string  `json:"event_type"`
+		EventData     any     `json:"event_data,omitempty"`
+		DID           *string `json:"did,omitempty"`
+		CreatedAt     string  `json:"created_at"`
+		ResLogPredCID *string `json:"res_log_pred_cid,omitempty"`
+		Kind          *string `json:"kind,omitempty"`
+		Result        *string `json:"result,omitempty"`
+		RuleID        *string `json:"rule_id,omitempty"`
+		Reason        *string `json:"reason,omitempty"`
+	}
+	entries := make([]wireEntry, 0, len(r.AuditTrail))
+	for _, entry := range r.AuditTrail {
+		if entry == nil {
+			continue
+		}
+		entries = append(entries, wireEntry{
+			ID: entry.ID, Component: entry.Component, EventType: entry.EventType,
+			EventData: entry.EventData, DID: entry.Did, CreatedAt: entry.CreatedAt,
+			ResLogPredCID: entry.ResLogPredCid, Kind: entry.Kind, Result: entry.Result,
+			RuleID: entry.RuleID, Reason: entry.Reason,
+		})
+	}
+	return json.Marshal(struct {
+		DID        string      `json:"did"`
+		Component  string      `json:"component"`
+		CreatedAt  string      `json:"created_at"`
+		AuditTrail []wireEntry `json:"audit_trail"`
+	}{
+		DID: r.Did, Component: r.Component, CreatedAt: r.CreatedAt, AuditTrail: entries,
+	})
 }
 
 type auditScopeConfig struct {
@@ -48,28 +108,89 @@ type auditScopeConfig struct {
 	includeArchiveTrail            bool
 }
 
-func NewProcessAuditAndCompliance(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, auditTrailReader base.AuditTrailReader, ctRepo templatedb.ContractTemplateRepo, cRepo cwedb.ContractRepo, atRepo cwedb.ApprovalTaskRepo) processauditandcompliance.Service {
-	return &processAuditAndCompliancesrvc{DB: db, JWTAuthenticator: jwtAuth, ATrailReader: auditTrailReader, CTRepo: ctRepo, CRepo: cRepo, ATRepo: atRepo}
+func NewProcessAuditAndCompliance(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, auditTrailReader base.AuditTrailReader, ctRepo templatedb.ContractTemplateRepo, cRepo cwedb.ContractRepo, atRepo cwedb.ApprovalTaskRepo, fRepo pacdb.RiskFindingRepo, executor auditexecutor.Client, gate *workflowgate.Coordinator) processauditandcompliance.Service {
+	return &processAuditAndCompliancesrvc{DB: db, JWTAuthenticator: jwtAuth, ATrailReader: auditTrailReader, CTRepo: ctRepo, CRepo: cRepo, ATRepo: atRepo, FRepo: fRepo, AuditExecutor: executor, WorkflowGate: gate}
 }
 
-func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processauditandcompliance.PACAuditRequest) (res []*processauditandcompliance.PACAuditResponse, err error) {
-
-	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
-	defer cancel()
-
+func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processauditandcompliance.PACAuditRequest) (*processauditandcompliance.PACExternalAuditResponse, error) {
 	scopeConfig, err := resolveAuditScope(req.Scope)
 	if err != nil {
 		return nil, processauditandcompliance.MakeBadRequest(err)
 	}
-	if err := s.validateAuditScopeDependencies(scopeConfig); err != nil {
-		return nil, processauditandcompliance.MakeInternalError(err)
-	}
-	scope := scopeConfig.component
 	roles := middleware.GetUserRoles(ctx)
 	if userrole.UserRoles(roles).HasRoles(userrole.ArchiveManager) && !userrole.UserRoles(roles).HasRoles(userrole.Auditor) && scopeConfig.scopeName != "archive" {
 		return nil, processauditandcompliance.MakeForbidden(fmt.Errorf("Archive Manager may only audit archive scope"))
 	}
+	if s.AuditExecutor == nil {
+		return nil, processauditandcompliance.MakeExecutorError(errors.New("audit executor is not configured"))
+	}
 
+	var allowed map[string]bool
+	if scopeConfig.scopeName == "archive" || scopeConfig.scopeName == "contracts" {
+		ctx, err = s.contractAuditContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		allowed, err = readableContractDIDs(ctx, s.DB)
+		if err != nil {
+			return nil, err
+		}
+		if did := auditRequestDID(req); did != "" && allowed != nil && !allowed[did] {
+			return nil, processauditandcompliance.MakeForbidden(contractreadpolicy.ErrDenied)
+		}
+	}
+
+	evidence, err := s.gatherAuditEvidence(ctx, req, scopeConfig)
+	if err != nil {
+		return nil, err
+	}
+	evidence = filterContractAuditEvidence(evidence, allowed)
+	if s.ATrailReader.Artifacts != nil {
+		redactErasedEvidence(ctx, s.ATrailReader.Artifacts, evidence)
+	}
+
+	id := uuid.NewString()
+	roleNames := make([]string, 0, len(roles))
+	for _, role := range roles {
+		roleNames = append(roleNames, role.String())
+	}
+	executorRequest := auditexecutor.Request{
+		ContractVersion: auditexecutor.ContractVersion,
+		AuditID:         id,
+		CorrelationID:   id,
+		Scope:           scopeConfig.scopeName,
+		Requester: auditexecutor.Requester{
+			Subject: middleware.GetParticipantID(ctx),
+			Roles:   roleNames,
+		},
+		Justification: req.Justification,
+		Evidence:      map[string]any{scopeConfig.scopeName: evidence},
+	}
+	if did := auditRequestDID(req); did != "" {
+		executorRequest.Resource = &auditexecutor.Resource{DID: did}
+	}
+	executorResponse, rawResponse, err := s.AuditExecutor.Run(ctx, executorRequest)
+	if err != nil {
+		return nil, processauditandcompliance.MakeExecutorError(err)
+	}
+	if err := s.persistAuditRun(ctx, executorRequest, executorResponse, rawResponse); err != nil {
+		if artifactstore.IsShredded(err) {
+			return nil, processauditandcompliance.MakeNotFound(err)
+		}
+		return nil, processauditandcompliance.MakeInternalError(err)
+	}
+	return toPACExternalAuditResponse(executorResponse, evidence), nil
+}
+
+func (s *processAuditAndCompliancesrvc) gatherAuditEvidence(ctx context.Context, req *processauditandcompliance.PACAuditRequest, scopeConfig auditScopeConfig) (res []*auditEvidenceResource, err error) {
+
+	ctx, cancel := context.WithTimeout(ctx, conf.PACAuditEvidenceTimeout())
+	defer cancel()
+
+	if err := s.validateAuditScopeDependencies(scopeConfig); err != nil {
+		return nil, processauditandcompliance.MakeInternalError(err)
+	}
+	scope := scopeConfig.component
 	qry := qry2.GetAuditLogQry{
 		Scope:         scope,
 		AuditedBy:     middleware.GetParticipantID(ctx),
@@ -77,8 +198,15 @@ func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processa
 		UserRoles:     middleware.GetUserRoles(ctx),
 		Justification: req.Justification,
 	}
-	if req.Did != nil {
-		qry.DID = strings.TrimSpace(*req.Did)
+	if scopeConfig.scopeName == "contracts" {
+		// Contract-scoped PAC incidents (for example a rejected federation
+		// signature) are anchored on the contract DID but owned by the PAC
+		// component. Include that related audit chain so an external audit can
+		// report the finding instead of seeing only workflow events.
+		qry.RelatedScopes = []componenttype.ComponentType{componenttype.ProcessAuditAndCompliance}
+	}
+	if did := auditRequestDID(req); did != "" {
+		qry.DID = did
 	}
 	handler := qry2.Auditor{
 		DB:           s.DB,
@@ -89,12 +217,21 @@ func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processa
 		return nil, processauditandcompliance.MakeInternalError(err)
 	}
 
+	if _, scoped := contractreadpolicy.FromContext(ctx); scoped {
+		allowed, err := readableContractDIDs(ctx, s.DB)
+		if err != nil {
+			return nil, err
+		}
+		resLogHistories = filterContractAuditChains(resLogHistories, allowed)
+	}
+
 	contractContentEntriesByDID := make(map[string][]datatype.AuditLogEntry)
 	if scopeConfig.includeContractContentTrail {
 		contractContentTrailQry := qry2.GetContractContentTrailQry{
 			RetrievedBy: middleware.GetParticipantID(ctx),
 			HolderDID:   middleware.GetHolderDID(ctx),
 			UserRoles:   middleware.GetUserRoles(ctx),
+			DID:         qry.DID,
 		}
 		contractContentTrailHandler := qry2.ContractContentTrailAuditor{
 			DB:    s.DB,
@@ -127,14 +264,14 @@ func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processa
 
 	archiveEntriesByDID := map[string][]*processauditandcompliance.PACResourceAuditTrailEntry{}
 	if scopeConfig.includeArchiveTrail {
-		result, err := s.auditArchiveTrailEntries(ctx)
+		result, err := s.auditArchiveTrailEntries(ctx, "")
 		if err != nil {
 			return nil, processauditandcompliance.MakeInternalError(err)
 		}
 		archiveEntriesByDID = result
 	}
 
-	result := make([]*processauditandcompliance.PACAuditResponse, 0)
+	result := make([]*auditEvidenceResource, 0)
 	seenDIDs := map[string]bool{}
 	for _, resLog := range resLogHistories {
 
@@ -222,7 +359,7 @@ func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processa
 			continue
 		}
 
-		result = append(result, &processauditandcompliance.PACAuditResponse{
+		result = append(result, &auditEvidenceResource{
 			Component:  scope.String(),
 			Did:        did,
 			CreatedAt:  time.Now().UTC().Format(time.RFC3339),
@@ -247,7 +384,7 @@ func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processa
 			})
 		}
 
-		result = append(result, &processauditandcompliance.PACAuditResponse{
+		result = append(result, &auditEvidenceResource{
 			Component:  componenttype.ContractTemplateRepo.String(),
 			Did:        did,
 			CreatedAt:  time.Now().UTC().Format(time.RFC3339),
@@ -275,7 +412,7 @@ func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processa
 			})
 		}
 
-		result = append(result, &processauditandcompliance.PACAuditResponse{
+		result = append(result, &auditEvidenceResource{
 			Component:  componenttype.ContractWorkflowEngine.String(),
 			Did:        did,
 			CreatedAt:  time.Now().UTC().Format(time.RFC3339),
@@ -286,22 +423,41 @@ func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processa
 		if seenDIDs[did] || len(entries) == 0 {
 			continue
 		}
-		result = append(result, &processauditandcompliance.PACAuditResponse{
+		result = append(result, &auditEvidenceResource{
 			Component:  componenttype.ContractStorageArchive.String(),
 			Did:        did,
 			CreatedAt:  time.Now().UTC().Format(time.RFC3339),
 			AuditTrail: entries,
 		})
 	}
+	if scopeConfig.scopeName == "contracts" {
+		did := auditRequestDID(req)
+		denialEvidence, err := s.collectTrustGateDenialEvidence(ctx, did)
+		if err != nil {
+			return nil, processauditandcompliance.MakeInternalError(err)
+		}
+		result = mergeAuditEvidenceResources(result, denialEvidence)
+	}
 
-	if req.Did != nil && strings.TrimSpace(*req.Did) != "" {
+	if requestedDID := auditRequestDID(req); requestedDID != "" {
 		filtered := result[:0]
 		for _, response := range result {
-			if response.Did == strings.TrimSpace(*req.Did) {
+			if response.Did == requestedDID {
 				filtered = append(filtered, response)
 			}
 		}
 		result = filtered
+	}
+	if scopeConfig.scopeName == "signatures" {
+		did := ""
+		if req.Did != nil {
+			did = strings.TrimSpace(*req.Did)
+		}
+		signatureEvidence, err := s.collectSignatureEvidence(ctx, did)
+		if err != nil {
+			return nil, processauditandcompliance.MakeInternalError(err)
+		}
+		result = mergeAuditEvidenceResources(result, signatureEvidence)
 	}
 	for _, response := range result {
 		for _, entry := range response.AuditTrail {
@@ -313,12 +469,79 @@ func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processa
 	return result, nil
 }
 
+func auditRequestDID(req *processauditandcompliance.PACAuditRequest) string {
+	if req == nil {
+		return ""
+	}
+	if req.Did != nil && strings.TrimSpace(*req.Did) != "" {
+		return strings.TrimSpace(*req.Did)
+	}
+	if req.ResourceID != nil {
+		return strings.TrimSpace(*req.ResourceID)
+	}
+	return ""
+}
+
+// collectTrustGateDenialEvidence exposes the durable outbox record immediately,
+// including during the short interval before the asynchronous audit-chain
+// anchoring processor has published it. The external executor therefore sees
+// a deterministic CHECK finding for a rejected peer request without weakening
+// the eventual tamper-evident audit trail.
+func (s *processAuditAndCompliancesrvc) collectTrustGateDenialEvidence(ctx context.Context, did string) ([]*auditEvidenceResource, error) {
+	type denialRow struct {
+		ID        int64     `db:"id"`
+		DID       string    `db:"did"`
+		Reason    string    `db:"reason"`
+		CreatedAt time.Time `db:"created_at"`
+	}
+	query := `
+		SELECT id, did, event_data ->> 'reason' AS reason, created_at
+		FROM outbox_events
+		WHERE event_type = 'PAC_TRUST_GATE_DENIAL'
+		  AND ($1 = '' OR did = $1)
+		ORDER BY id`
+	var rows []denialRow
+	if err := s.DB.SelectContext(ctx, &rows, query, did); err != nil {
+		return nil, fmt.Errorf("read trust-gate denial evidence: %w", err)
+	}
+
+	byDID := make(map[string]*auditEvidenceResource)
+	for _, row := range rows {
+		resource := byDID[row.DID]
+		if resource == nil {
+			resource = &auditEvidenceResource{
+				Did:       row.DID,
+				Component: componenttype.ProcessAuditAndCompliance.String(),
+				CreatedAt: row.CreatedAt.UTC().Format(time.RFC3339),
+			}
+			byDID[row.DID] = resource
+		}
+		kind, result, ruleID, reason := "CHECK", "FAILED", "FEDERATION_TRUST_GATE_DENIAL", row.Reason
+		resource.AuditTrail = append(resource.AuditTrail, &processauditandcompliance.PACResourceAuditTrailEntry{
+			ID:        row.ID,
+			Component: componenttype.ProcessAuditAndCompliance.String(),
+			EventType: "PAC_TRUST_GATE_DENIAL",
+			Did:       stringPointer(row.DID),
+			CreatedAt: row.CreatedAt.UTC().Format(time.RFC3339),
+			Kind:      &kind,
+			Result:    &result,
+			RuleID:    &ruleID,
+			Reason:    &reason,
+		})
+	}
+	result := make([]*auditEvidenceResource, 0, len(byDID))
+	for _, resource := range byDID {
+		result = append(result, resource)
+	}
+	return result, nil
+}
+
 func resolveAuditScope(rawScope string) (auditScopeConfig, error) {
 	normalizedScope := strings.TrimSpace(rawScope)
 	switch strings.ToLower(normalizedScope) {
-	case "templates":
+	case "template", "templates":
 		return templateAuditScopeConfig(), nil
-	case "contracts":
+	case "contract", "contracts":
 		return contractAuditScopeConfig(), nil
 	case "archive":
 		return archiveAuditScopeConfig(), nil
@@ -401,55 +624,87 @@ func (s *processAuditAndCompliancesrvc) AuditReport(ctx context.Context, p *proc
 		did = strings.TrimSpace(*p.Did)
 	}
 	if format != "json" && format != "csv" && format != "pdf" {
-		return nil, fmt.Errorf("unsupported audit report format %q", format)
+		return nil, processauditandcompliance.MakeBadRequest(fmt.Errorf("unsupported audit report format %q", format))
 	}
 	roles := middleware.GetUserRoles(ctx)
 	if userrole.UserRoles(roles).HasRoles(userrole.ArchiveManager) && !userrole.UserRoles(roles).HasRoles(userrole.Auditor) && strings.ToLower(scope) != "archive" {
 		return nil, processauditandcompliance.MakeForbidden(fmt.Errorf("Archive Manager may only export archive scope"))
 	}
-
-	auditResponses, err := s.Audit(ctx, &processauditandcompliance.PACAuditRequest{Scope: scope, Did: p.Did, Justification: p.Justification})
+	normalized, err := resolveAuditScope(scope)
 	if err != nil {
+		return nil, processauditandcompliance.MakeBadRequest(err)
+	}
+	if did != "" && (normalized.scopeName == "archive" || normalized.scopeName == "contracts") {
+		scoped, err := s.contractAuditContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		allowed, err := readableContractDIDs(scoped, s.DB)
+		if err != nil {
+			return nil, err
+		}
+		if allowed != nil && !allowed[did] {
+			return nil, processauditandcompliance.MakeForbidden(contractreadpolicy.ErrDenied)
+		}
+	}
+
+	raw, err := s.readLatestAuditRun(ctx, normalized.scopeName, did)
+	if errors.Is(err, errPACAuditRunNotFound) || artifactstore.IsShredded(err) {
+		return nil, processauditandcompliance.MakeNotFound(err)
+	}
+	var serviceError *goa.ServiceError
+	if errors.As(err, &serviceError) && serviceError.Name == "forbidden" {
 		return nil, err
 	}
-	generatedAt := time.Now().UTC()
-	generatedBy := middleware.GetParticipantID(ctx)
-	report := buildAuditReport(scope, did, generatedBy, generatedAt, auditResponses)
-	report.Format = format
-
-	var content []byte
-	switch format {
-	case "json":
-		bytes, err := json.Marshal(report)
-		if err != nil {
-			return nil, err
-		}
-		content = bytes
-	case "csv":
-		bytes, err := renderAuditReportCSV(report)
-		if err != nil {
-			return nil, err
-		}
-		content = bytes
-	case "pdf":
-		content = renderAuditReportPDF(report)
+	if err != nil {
+		return nil, processauditandcompliance.MakeInternalError(err)
+	}
+	if err := s.authorizeAuditReport(ctx, raw); err != nil {
+		return nil, err
 	}
 
+	content, report, err := renderPersistedExecutorReport(raw, format, middleware.GetParticipantID(ctx), time.Now().UTC())
+	if err != nil {
+		return nil, processauditandcompliance.MakeInternalError(err)
+	}
 	contentHash := hashBytes(content)
 	contentCID := ""
-	if s.ATrailReader.IPFSClient != nil {
-		stored, err := s.ATrailReader.IPFSClient.CreateFile(ctx, content)
+	if s.ATrailReader.Artifacts != nil {
+		envelope, err := sealPACSnapshot(ctx, s.ATrailReader.Artifacts, report.ReportID, raw.Scopes, content)
+		if artifactstore.IsShredded(err) {
+			return nil, processauditandcompliance.MakeNotFound(err)
+		}
 		if err != nil {
-			return nil, fmt.Errorf("archive audit report bytes: %w", err)
+			return nil, processauditandcompliance.MakeInternalError(err)
 		}
-		if stored != nil {
-			contentCID = stored.Identifier.Value
+		stored, err := s.ATrailReader.Artifacts.Put(ctx, s.ATrailReader.Artifacts.InstanceScope(), envelope)
+		if err != nil {
+			return nil, processauditandcompliance.MakeInternalError(fmt.Errorf("archive audit report bytes: %w", err))
 		}
+		contentCID = stored
 	}
-	if err := s.persistReportGeneratedEvent(ctx, report, format, contentHash, contentCID, p.Justification); err != nil {
-		return nil, err
+	justification := ""
+	if p != nil {
+		justification = p.Justification
+	}
+	if err := s.recordReportGenerated(ctx, report, format, contentHash, contentCID, justification); err != nil {
+		return nil, processauditandcompliance.MakeInternalError(err)
 	}
 	return content, nil
+}
+
+func (s *processAuditAndCompliancesrvc) readLatestAuditRun(ctx context.Context, scope, did string) (persistedAuditRun, error) {
+	if s.auditRunReader != nil {
+		return s.auditRunReader(ctx, scope, did)
+	}
+	return s.latestAuditRun(ctx, scope, did)
+}
+
+func (s *processAuditAndCompliancesrvc) recordReportGenerated(ctx context.Context, report auditReport, format, contentHash, contentCID, justification string) error {
+	if s.reportEventPersister != nil {
+		return s.reportEventPersister(ctx, report, format, contentHash, contentCID, justification)
+	}
+	return s.persistReportGeneratedEvent(ctx, report, format, contentHash, contentCID, justification)
 }
 
 func (s *processAuditAndCompliancesrvc) persistReportGeneratedEvent(ctx context.Context, report auditReport, format string, contentHash, contentCID, justification string) error {
@@ -476,12 +731,13 @@ func (s *processAuditAndCompliancesrvc) persistReportGeneratedEvent(ctx context.
 		ContentCID:    contentCID,
 		Justification: justification,
 		Summary: map[string]int{
-			"totalEvents": report.Summary.TotalEvents,
-			"totalChecks": report.Summary.TotalChecks,
-			"passed":      report.Summary.Passed,
-			"failed":      report.Summary.Failed,
-			"warnings":    report.Summary.Warnings,
-			"needsReview": report.Summary.NeedsReview,
+			"totalEvents":  report.Summary.TotalEvents,
+			"totalChecks":  report.Summary.TotalChecks,
+			"passed":       report.Summary.Passed,
+			"failed":       report.Summary.Failed,
+			"warnings":     report.Summary.Warnings,
+			"needsReview":  report.Summary.NeedsReview,
+			"notEvaluated": report.Summary.NotEvaluated,
 		},
 		HolderDID: middleware.GetHolderDID(ctx),
 		UserRoles: middleware.GetUserRoles(ctx),
@@ -499,7 +755,18 @@ func (s *processAuditAndCompliancesrvc) persistReportGeneratedEvent(ctx context.
 	return nil
 }
 
+// Monitor runs the compliance sweep over every contract, as the scheduled
+// sweep does, and returns the risks of the contracts the caller may read
+// (DCS-FR-PACM-02, ADR-31).
 func (s *processAuditAndCompliancesrvc) Monitor(ctx context.Context, p *processauditandcompliance.MonitorPayload) (res *processauditandcompliance.PACMonitorResponse, err error) {
+	scoped, err := s.contractAuditContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	allowed, err := readableContractDIDs(scoped, s.DB)
+	if err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -508,6 +775,7 @@ func (s *processAuditAndCompliancesrvc) Monitor(ctx context.Context, p *processa
 		DB:     s.DB,
 		ATRepo: s.ATRepo,
 		CRepo:  s.CRepo,
+		FRepo:  s.FRepo,
 	}
 	result, err := handler.Handle(ctx, qry2.MonitorQry{
 		MonitoredBy: middleware.GetParticipantID(ctx),
@@ -519,11 +787,25 @@ func (s *processAuditAndCompliancesrvc) Monitor(ctx context.Context, p *processa
 	}
 
 	risks := make([]*processauditandcompliance.PACComplianceRisk, 0, len(result.Risks))
+	anonymized := map[string]bool{}
 	for _, risk := range result.Risks {
+		if allowed != nil && !allowed[risk.DID] {
+			continue
+		}
+		detail := risk.Detail
+		// The identity of a denied actor is audit-log content: it is shown
+		// only to a request that gives a justification (DCS-FR-PACM-04).
+		if risk.RiskType == qry2.RiskTypeUnauthorizedAccess && p.Justification == nil {
+			if anonymized[risk.DID] {
+				continue
+			}
+			anonymized[risk.DID] = true
+			detail = fmt.Sprintf("unauthorized access to contract %s was attempted and denied", risk.DID)
+		}
 		risks = append(risks, &processauditandcompliance.PACComplianceRisk{
 			Did:        risk.DID,
 			RiskType:   risk.RiskType,
-			Detail:     risk.Detail,
+			Detail:     detail,
 			DetectedAt: risk.DetectedAt.Format(time.RFC3339),
 		})
 	}
@@ -537,22 +819,29 @@ func (s *processAuditAndCompliancesrvc) IncidentReport(ctx context.Context, p *p
 	log.Printf(ctx, "processAuditAndCompliance.incident_report")
 
 	if p == nil || len(p.Findings) == 0 {
-		return map[string]any{"status": "accepted"}, nil
+		return nil, processauditandcompliance.MakeBadRequest(errors.New("an incident report needs at least one finding"))
 	}
+
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
 
 	did := ""
 	if p.ContractDid != nil {
 		did = strings.TrimSpace(*p.ContractDid)
 	}
-	if did == "" && p.TemplateDid != nil {
+	switch {
+	case did != "":
+		if err := s.authorizeContract(ctx, did); err != nil {
+			return nil, err
+		}
+	case p.TemplateDid != nil && strings.TrimSpace(*p.TemplateDid) != "":
 		did = strings.TrimSpace(*p.TemplateDid)
-	}
-	if did == "" {
+		if err := s.authorizeIncidentDID(ctx, did); err != nil {
+			return nil, err
+		}
+	default:
 		return nil, processauditandcompliance.MakeBadRequest(fmt.Errorf("incident report findings must be linked to a contract_did or template_did"))
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
-	defer cancel()
 
 	findings := make([]qry2.IncidentFinding, 0, len(p.Findings))
 	for _, finding := range p.Findings {
@@ -563,17 +852,122 @@ func (s *processAuditAndCompliancesrvc) IncidentReport(ctx context.Context, p *p
 	}
 
 	handler := qry2.IncidentReporter{DB: s.DB}
-	if err := handler.Handle(ctx, qry2.IncidentReportQry{
+	caseID, err := handler.Handle(ctx, qry2.IncidentReportQry{
 		DID:        did,
 		Findings:   findings,
 		ReportedBy: middleware.GetParticipantID(ctx),
 		HolderDID:  middleware.GetHolderDID(ctx),
 		UserRoles:  middleware.GetUserRoles(ctx),
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, processauditandcompliance.MakeInternalError(err)
 	}
 
-	return map[string]any{"status": "recorded", "did": did, "findings": len(findings)}, nil
+	return map[string]any{"status": "recorded", "case_id": caseID, "did": did, "findings": len(findings)}, nil
+}
+
+// CaseFile exports the case file of an incident for regulatory review
+// (DCS-FR-PACM-05).
+func (s *processAuditAndCompliancesrvc) CaseFile(ctx context.Context, p *processauditandcompliance.CaseFilePayload) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	handler := qry2.CaseFileExporter{DB: s.DB, Authorize: s.authorizeIncidentDID}
+	content, err := handler.Handle(ctx, qry2.CaseFileQry{
+		CaseID:        p.CaseID,
+		ExportedBy:    middleware.GetParticipantID(ctx),
+		Justification: p.Justification,
+		HolderDID:     middleware.GetHolderDID(ctx),
+		UserRoles:     middleware.GetUserRoles(ctx),
+	})
+	var named interface{ ErrorName() string }
+	switch {
+	case errors.Is(err, qry2.ErrCaseNotFound):
+		return nil, processauditandcompliance.MakeNotFound(err)
+	case errors.As(err, &named):
+		return nil, err
+	case err != nil:
+		return nil, processauditandcompliance.MakeInternalError(err)
+	}
+	return content, nil
+}
+
+// Cases lists the incident cases linked to a template or to a contract the
+// caller may read (DCS-IR-PACM-04, DCS-FR-PACM-05).
+func (s *processAuditAndCompliancesrvc) Cases(ctx context.Context, _ *processauditandcompliance.CasesPayload) ([]*processauditandcompliance.PACCase, error) {
+	scoped, err := s.contractAuditContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	allowed, err := readableContractDIDs(scoped, s.DB)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+	cases, err := qry2.Cases(ctx, s.DB)
+	if err != nil {
+		return nil, processauditandcompliance.MakeInternalError(err)
+	}
+	result := make([]*processauditandcompliance.PACCase, 0, len(cases))
+	for _, c := range cases {
+		if c.LinkedTo == "contract" && allowed != nil && !allowed[c.DID] {
+			continue
+		}
+		item := &processauditandcompliance.PACCase{
+			CaseID: c.CaseID, Did: c.DID, LinkedTo: c.LinkedTo, ReportedBy: c.ReportedBy,
+			ReportedAt: c.ReportedAt.UTC().Format(time.RFC3339), Findings: c.Findings,
+		}
+		if c.ExportedAt != nil {
+			exportedAt := c.ExportedAt.UTC().Format(time.RFC3339)
+			item.ExportedAt = &exportedAt
+		}
+		result = append(result, item)
+	}
+	return result, nil
+}
+
+// authorizeIncidentDID admits a contract the caller may read and any
+// template: templates are not organization-scoped.
+func (s *processAuditAndCompliancesrvc) authorizeIncidentDID(ctx context.Context, did string) error {
+	var linked struct {
+		Contract bool `db:"contract"`
+		Template bool `db:"template"`
+	}
+	if err := s.DB.GetContext(ctx, &linked, `SELECT EXISTS (SELECT 1 FROM contracts WHERE did = $1) AS contract,
+		EXISTS (SELECT 1 FROM contract_templates WHERE did = $1) AS template`, did); err != nil {
+		return processauditandcompliance.MakeInternalError(err)
+	}
+	switch {
+	case linked.Contract:
+		return s.authorizeContract(ctx, did)
+	case linked.Template:
+		return nil
+	}
+	return processauditandcompliance.MakeNotFound(fmt.Errorf("no contract or template has DID %q", did))
+}
+
+// PartyReport exports the compliance report of a contract segmented by party
+// (DCS-FR-PACM-07).
+func (s *processAuditAndCompliancesrvc) PartyReport(ctx context.Context, p *processauditandcompliance.PartyReportPayload) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+	if err := s.authorizeContract(ctx, p.Did); err != nil {
+		return nil, err
+	}
+
+	handler := qry2.PartyReporter{DB: s.DB}
+	content, err := handler.Handle(ctx, qry2.PartyReportQry{
+		DID: p.Did, GeneratedBy: middleware.GetParticipantID(ctx),
+		HolderDID: middleware.GetHolderDID(ctx), UserRoles: middleware.GetUserRoles(ctx),
+	})
+	if errors.Is(err, qry2.ErrContractNotFound) {
+		return nil, processauditandcompliance.MakeNotFound(err)
+	}
+	if err != nil {
+		return nil, processauditandcompliance.MakeInternalError(err)
+	}
+	return content, nil
 }
 
 // CheckpointHead serves the newest audit-trail checkpoint head. Everything in
@@ -592,6 +986,20 @@ func (s *processAuditAndCompliancesrvc) CheckpointHead(ctx context.Context, p *p
 	}
 	if head == nil {
 		return nil, processauditandcompliance.MakeNotFound(errors.New("no audit checkpoint has been anchored yet"))
+	}
+	return toCheckpointHead(*head), nil
+}
+
+func (s *processAuditAndCompliancesrvc) CheckpointBySequence(ctx context.Context, p *processauditandcompliance.CheckpointBySequencePayload) (*processauditandcompliance.PACCheckpointHead, error) {
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+	handler := qry2.CheckpointAuditor{DB: s.DB, ARepo: s.ATrailReader.ARepo}
+	head, err := handler.BySequence(ctx, p.Seq)
+	if err != nil {
+		return nil, processauditandcompliance.MakeInternalError(err)
+	}
+	if head == nil {
+		return nil, processauditandcompliance.MakeNotFound(fmt.Errorf("checkpoint %d not found", p.Seq))
 	}
 	return toCheckpointHead(*head), nil
 }

@@ -17,7 +17,9 @@ func TestSubmitterContractDataForSemanticValidationPersistsSubmittedData(t *test
 	ctx := context.Background()
 	did := "did:web:facis.example:contract:submit"
 	submitted := minimalCanonicalContractData(t, "did:web:facis.example:contract:stale")
-	storedInvalid := datatype.JSON(`{"semanticConditionValues":[{"parameterName":"provider.country","parameterValue":"USA"}]}`)
+	storedInvalid := datatype.JSON(`{
+        "semanticConditionValues":[{"parameterName":"provider.country","parameterValue":"USA"}],
+        "dcs:effectiveShapes":[{"@id":"https://dcs.test/semantic/shapes/facis-dcs?version=4"}]}`)
 
 	repo := &submitContractRepoFake{
 		stored: &db.Contract{
@@ -34,9 +36,6 @@ func TestSubmitterContractDataForSemanticValidationPersistsSubmittedData(t *test
 	if err != nil {
 		t.Fatalf("contractDataForSemanticValidation returned error: %v", err)
 	}
-	if repo.readDataCalled {
-		t.Fatalf("stored contract data was read even though submitted data was provided")
-	}
 	if repo.updated == nil || repo.updated.ContractData == nil {
 		t.Fatalf("submitted contract data was not persisted")
 	}
@@ -51,8 +50,18 @@ func TestSubmitterContractDataForSemanticValidationPersistsSubmittedData(t *test
 	if err := json.Unmarshal(*repo.updated.ContractData, &decoded); err != nil {
 		t.Fatalf("could not decode persisted contract data: %v", err)
 	}
+	// The submitted document is what is stored — the stale stored one is only
+	// consulted for the Semantic Hub bundle the contract is pinned to, which a
+	// client-assembled document never carries.
 	if decoded["@id"] != did {
 		t.Fatalf("persisted contract data @id = %v, want %s", decoded["@id"], did)
+	}
+	if _, ok := decoded["semanticConditionValues"]; ok {
+		t.Fatalf("stored contract data leaked into the submitted document: %v", decoded)
+	}
+	effectiveShapes, _ := decoded["dcs:effectiveShapes"].([]any)
+	if len(effectiveShapes) != 1 {
+		t.Fatalf("pinned effective shapes were not carried forward: %v", decoded["dcs:effectiveShapes"])
 	}
 }
 
@@ -133,13 +142,11 @@ func minimalCanonicalContractData(t *testing.T, id string) datatype.JSON {
 
 type submitContractRepoFake struct {
 	db.ContractRepo
-	stored         *db.Contract
-	updated        *db.ContractUpdateData
-	readDataCalled bool
+	stored  *db.Contract
+	updated *db.ContractUpdateData
 }
 
 func (r *submitContractRepoFake) ReadDataByDID(context.Context, *sqlx.Tx, string) (*db.Contract, error) {
-	r.readDataCalled = true
 	return r.stored, nil
 }
 
@@ -148,6 +155,31 @@ func (r *submitContractRepoFake) Update(_ context.Context, _ *sqlx.Tx, data db.C
 	return nil
 }
 
+func (r *submitContractRepoFake) CreateHistoryEntryForDID(context.Context, *sqlx.Tx, string, string) error {
+	return nil
+}
+
 func (r *submitContractRepoFake) Create(context.Context, *sqlx.Tx, db.Contract) error {
 	panic("not implemented")
+}
+
+func TestCollectDocumentBlockIDsIndexesLayoutNodes(t *testing.T) {
+	doc := map[string]any{
+		"@id": "urn:contract",
+		"dcs:documentStructure": map[string]any{
+			"dcs:blocks": map[string]any{
+				"@list": []any{
+					map[string]any{"@id": "urn:contract#block-a", "@type": "dcs:Clause"},
+					map[string]any{"@id": "urn:contract#block-b", "@type": "dcs:Section"},
+				},
+			},
+		},
+	}
+	ids, err := collectDocumentBlockIDs(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ids["urn:contract#block-a"] || !ids["urn:contract#block-b"] {
+		t.Fatalf("expected block ids, got %#v", ids)
+	}
 }

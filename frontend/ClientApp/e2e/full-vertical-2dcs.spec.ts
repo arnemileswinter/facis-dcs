@@ -1,17 +1,23 @@
 import { expect, test } from './dcs-test'
 import {
+  acceptOfferOn,
   acceptOpenDecisionsOn,
   assertManifestChainGrew,
   assertNotYetSignable,
   assertReceivedInState,
+  assertSigningRefusedUntilCounterpartySettles,
   authorContractTemplate,
   authorSemanticComponent,
+  awaitPeerRedlineOn,
+  contractDocumentOn,
   counterOffer,
   createContractViaUi,
   deployContract,
+  fillContractAmountOn,
   instanceA,
   manifestChainLength,
   offerToCounterparty,
+  openContractFromList,
   openInstanceB,
   publishShapeOnInstance,
   registerTemplateOn,
@@ -19,6 +25,7 @@ import {
   saveArtifact,
   settleToApprovedOn,
   signOnInstance,
+  stagedCounterOffer,
   submitReviewApproveTemplateOn,
   verifyArtifact,
 } from './multi-dcs-helpers'
@@ -38,9 +45,17 @@ import { E2E_FRONTEND_ORIGIN } from '../playwright.config'
  * Exercises the merged backend R5/R5c work: the negotiation counter-offer
  * round-trip (each adjustment ships a new PDF, chain grows), the
  * settle/consolidation gate (signing refused pre-settle; extrinsic phase
- * proposed→agreed→executed on the retrieve API), and cross-instance double
- * signing (B signs on A's signed PDF). The single-instance full-vertical.spec.ts
+ * proposed→agreed→executed on the retrieve API), the mutual settlement gate
+ * (signing refused while the counterparty has not settled this version, and
+ * opening once its shipped settlement artifact arrives), and cross-instance
+ * double signing (B signs on A's signed PDF). The single-instance full-vertical.spec.ts
  * stays as the local-only lifecycle coverage until this supersedes it.
+ *
+ * Every stage from 4 on ARRIVES at least once the way a human does — a row found
+ * in a list or a task tab, then that page's own action — instead of navigating
+ * straight to the URL. A hop that types the URL reaches its page even when
+ * nothing in the product links there, which is exactly how a negotiate view the
+ * counterparty had no route to passed every run of this vertical.
  *
  * SRS traceability: every stage cites the governing requirement so this reads as
  * a normative, traceable proof rather than an arbitrary script. Federation is
@@ -61,15 +76,18 @@ test.describe.configure({ retries: 0 })
 
 let bInstance: Awaited<ReturnType<typeof openInstanceB>> | undefined
 test.afterEach(async () => {
-  await bInstance?.context.close().catch(() => {})
+  await bInstance?.context.close().catch(() => undefined)
   bInstance = undefined
 })
 
 test('full two-instance negotiation vertical (A <-> B)', async ({ page, context, browser }) => {
-  // Ten stages across two instances, including two full wallet signing
-  // ceremonies in Stage 8 — the earlier 15min budget left no headroom once the
-  // ceremony waits were sized to span the wallet leg.
-  test.setTimeout(1_500_000)
+  // Ten stages across two instances, including three full wallet signing
+  // ceremonies — the two that sign in Stage 8, plus the one Stage 7 runs to the
+  // point of refusal — an earlier, shorter budget left no headroom once the
+  // ceremony waits were sized to span the wallet leg. Still well under the
+  // original 25min: generous for the real ceremony waits, but a genuine hang
+  // here shouldn't cost 25 minutes (+ a CI retry) to surface.
+  test.setTimeout(840_000)
   const a = instanceA(page, context, E2E_FRONTEND_ORIGIN)
   const b = await openInstanceB(browser)
   bInstance = b
@@ -114,6 +132,11 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
   await test.step('Stage 4 [DCS-FR-CWE-16, ADR-13]: A creates a contract with B as counterparty', async () => {
     const bDidWeb = await resolveDidWeb(b)
     contractDid = await createContractViaUi(a, contractTemplateName, bDidWeb)
+    // SRS §2.2.2: Contract Generation ends with a filled-out contract ready to
+    // be sent — the offer gate (command/offer.go validateOfferReady) rejects an
+    // unfilled draft, so A proposes its opening amount before Stage 5's offer.
+    // The Stage 6 ping-pong then negotiates it 20000 -> 10000 -> 15000.
+    await fillContractAmountOn(a, contractDid, '20000')
   })
 
   // ---- Stage 5 [SRS §2.2 lifecycle offered→accepted→executed; DCS-NFR-BR-08
@@ -143,20 +166,28 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
   // adjustment ships a new PDF and the C2PA ingredient chain grows by one on BOTH
   // parties (the counterparty's provenance is chained, not reset).
   await test.step('Stage 6 [DCS-FR-CWE-18, DCS-IR-CWE-03/-04, DCS-OR-C2PA-002]: negotiation ping-pong 20000 -> 10000 -> 15000', async () => {
-    // B redlines 20000 -> 10000: the counter-offer applies the value to
-    // contract_data immediately, so the negotiated PDF re-renders with the redline
-    // and re-ships to A over the PDF exchange (the C2PA chain grows on both).
-    await counterOffer(b, contractDid, { value: '10000' })
-    bChain = await assertManifestChainGrew(b, contractDid, bChain)
-    aChain = await assertManifestChainGrew(a, contractDid, aChain)
+    // B enters the round first, arriving the way its counterparty would: the
+    // offer is found in B's contract list, opened, and taken into negotiation
+    // through the contract's own action, where "Accept offer" fires
+    // Offered --EventNegotiate--> Negotiation. The acceptance is what mints B's
+    // negotiation task and so what puts the contract in B's Negotiations tab —
+    // asserted empty for this contract before the accept and holding its row
+    // after, since a received offer on its own queues nothing.
+    await acceptOfferOn(b, contractDid)
+
+    // B redlines 20000 -> 10000 through the SRS §3.1.1 Save-draft leg: the
+    // redline is staged as B's party draft, survives leaving the Negotiate
+    // view, and only "Change Proposal" makes it real. Propose does not apply
+    // or re-ship a PDF; the proposal syncs to A on the negotiation outbound
+    // channel. C2PA grows later when Accept+Submit merges and ships.
+    await stagedCounterOffer(b, contractDid, { value: '10000' })
+    await awaitPeerRedlineOn(a, contractDid, { label: 'Payment Amount', value: '10000' })
     await saveArtifact(b, contractDid, '02-counter-10k-B')
     await saveArtifact(a, contractDid, '02-counter-10k-A')
 
-    // A counters 10000 -> 15000: the redline runs the other direction and ships
-    // back, growing the chain again on both instances.
+    // A counters with 15000: proposal syncs to B the same way.
     await counterOffer(a, contractDid, { value: '15000' })
-    aChain = await assertManifestChainGrew(a, contractDid, aChain)
-    bChain = await assertManifestChainGrew(b, contractDid, bChain)
+    await awaitPeerRedlineOn(b, contractDid, { label: 'Payment Amount', value: '15000' })
     await saveArtifact(a, contractDid, '03-counter-15k-A')
     await saveArtifact(b, contractDid, '03-counter-15k-B')
   })
@@ -165,17 +196,20 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
   // ADR-2 state machine gates EventSign until APPROVED; ADR-13 extrinsic lifecycle
   // → agreed]: consolidation/settle = reaching APPROVED via the real submit →
   // review → approve flow on each instance (not a fabricated /contract/settle
-  // route). Signing is refused before APPROVED (ACCEPTED = signing gate); the
-  // extrinsic lifecycle flips proposed → agreed on both sides.
-  await test.step('Stage 7 [DCS-IR-CWE-10, ADR-2, ADR-13]: settle = APPROVED; signing gated pre-settle', async () => {
+  // route). Signing is refused twice over — before APPROVED by the local state
+  // machine, and after it while the COUNTERPARTY has not settled, which local
+  // state cannot answer; the extrinsic lifecycle flips proposed → agreed on both
+  // sides.
+  await test.step('Stage 7 [DCS-IR-CWE-10, ADR-2, ADR-13]: settle = APPROVED; signing gated pre-settle and pre-counterparty', async () => {
     // The signing gate holds pre-settle: B's signer cannot sign an unapproved
     // contract — the Secure Contract Viewer's signing list does not offer it.
     await assertNotYetSignable(b, contractDid)
 
-    // Mutual agreement first: the ping-pong ended with A's 15000 counter, so B
-    // still owes a decision on it. That undecided record replicates to A's copy
-    // too, and any open decision disables Submit — so A cannot consolidate until
-    // B has accepted. This IS the settle handshake, not test scaffolding.
+    // Proposals sync both ways: A must Accept B's 10000, B must Accept A's
+    // 15000, before either Submit can merge the round. settleToApprovedOn
+    // accepts open decisions then submits; run both sides so each holds the
+    // peer's Accept before (or as) it closes the round.
+    await acceptOpenDecisionsOn(a, contractDid)
     await acceptOpenDecisionsOn(b, contractDid)
 
     // Settle = consolidate to APPROVED via the real submit → review → approve UI
@@ -183,7 +217,23 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
     // Each instance runs its OWN submit → review → approve: the intrinsic state
     // is local RBAC, so A approving says nothing about B's copy — B's reviewer
     // and approver still have to act, and the signing gate is per instance.
+    // Submit-merge ships the formal PDF; C2PA grows here, not on Propose.
     await settleToApprovedOn(a, contractDid)
+    aChain = await assertManifestChainGrew(a, contractDid, aChain)
+    bChain = await assertManifestChainGrew(b, contractDid, bChain)
+
+    // A is now APPROVED and has shipped its own settlement, but B has not
+    // settled: A's signer is offered the contract and is still refused, because
+    // signing claims BOTH parties agreed this version and A holds no evidence
+    // that B did. Absence of that evidence is not agreement — this is the gate
+    // the live demo instances went straight past, signing while the peer was
+    // still negotiating.
+    await assertSigningRefusedUntilCounterpartySettles(a, contractDid, 'Instance A Signatory')
+
+    // B settles the same document, which ships B's settlement to A. Stage 8
+    // then signs on both instances: that it succeeds at all is the other half
+    // of this assertion — the gate opens on the peer's evidence arriving, not
+    // on anything A does.
     await settleToApprovedOn(b, contractDid)
     await assertReceivedInState(a, contractDid, 'APPROVED')
     await assertReceivedInState(b, contractDid, 'APPROVED')
@@ -191,15 +241,8 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
     await saveArtifact(b, contractDid, '07-settle-B')
   })
 
-  // ---- Stage 8 [DCS-IR-SM-02/-03/-04 viewer verify/apply/validate signature;
-  // DCS-IR-SI-04 Wallet & TSP Signing Integration; SRS §1 AES + PAdES/JAdES;
-  // ADR-12 wallet-driven signing; ADR-3 signing semantics; DCS-OR-C2PA-003
-  // lifecycle → active]: both sign via the Secure Contract Viewer wallet ceremony
-  // (not a /signature/apply route). A signs A's field → ships to B → B signs ON
-  // TOP (incremental PAdES) → B ships the double-signed PDF back to A. The
-  // double-signed artifact CONVERGES on both: two AcroForm sigs, banner active,
-  // veraPDF PDF/A-3a PASS, c2patool valid, DSS validates both as AES + PAdES-B-T.
   await test.step('Stage 8 [DCS-IR-SM-03, DCS-IR-SI-04, ADR-12]: both sign; double-signed artifact verifies', async () => {
+    // DCS-FR-CWE-01
     await signOnInstance(a, contractDid, 'Instance A Signatory')
     // A's signature ships to B, but only the ARTIFACT replicates: the intrinsic
     // state is each instance's own RBAC progress, which a re-ship deliberately
@@ -216,11 +259,13 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
   })
 
   // ---- Stages 9-10 [UC-05 Contract Deployment; DCS-FR-SM-10 Proof of Contract
-  // Execution (receipt/hash/tx-id); DCS-FR-CWE-09 + DCS-FR-CWE-31 deployment KPI
-  // callback; SRS §2.2.5 Process Audit & Compliance (PACM)]: deploy to the
-  // target, receipt + async KPIs checked vs policy, and the full audit trail on
-  // both instances.
-  await test.step('Stages 9-10 [UC-05, DCS-FR-SM-10, DCS-FR-CWE-09/-31, §2.2.5]: deploy, receipt, KPI, audit', async () => {
+  // Execution (receipt/hash/tx-id); SRS §2.2.5 Process Audit & Compliance
+  // (PACM)]: deploy to the target and walk the full audit trail on both
+  // instances. No KPI is asserted here: the KPI verdict is the target system's
+  // conclusion, not the DCS's (ADR-33), so it is exercised where a target
+  // actually reports one — kpi-underperformance-alert.spec.ts end to end, and
+  // features/05_contract_deployment for the callback contract itself.
+  await test.step('Stages 9-10 [UC-05, DCS-FR-SM-10, §2.2.5]: deploy, receipt, audit', async () => {
     // A's Contract Manager clicks "Deploy" (SIGNED -> ACTIVE) on the signed contract.
     await deployContract(a, contractDid)
 
@@ -249,5 +294,49 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
     const ipfsTrailMiss = body.includes('ipfs could not find') || body.includes('DataIdentifier not found')
     expect(ipfsTrailMiss, `audit ${auditResp.status()}: ${body}`).toBeTruthy()
     test.info().annotations.push({ type: 'known-flake', description: `audit tolerated an IPFS trail miss: ${body}` })
+  })
+
+  // ---- Stage 11 [DCS-FR-CWE-11 Contract Renewal, DCS-FR-CSA-15 Renewal and
+  // Extension]: A's Contract Manager renews the double-signed contract. The
+  // renewal is a new DRAFT that needs fresh signatures. Its dcs:renewsContract
+  // references the original's DID, version, the signed PDF (which holds both
+  // PAdES signatures) and the signatory attribution A's document records. B
+  // countersigned an already signed PDF, which stamps no party node, so A's
+  // document attributes A's signature only. The draft's PDF renders on the
+  // renew event: the export waits at most 60 s server-side, the retry sweep
+  // runs every 5 min.
+  await test.step('Stage 11 [DCS-FR-CWE-11, DCS-FR-CSA-15]: renew; draft references the signed original and exports', async () => {
+    await openContractFromList(a, 'Contract Manager', contractDid)
+    await a.page.getByTestId('renew-contract').click()
+    const renewed = a.page.waitForResponse(
+      (r) => r.url().includes('/contract/renew') && r.request().method() === 'POST',
+      { timeout: 30_000 },
+    )
+    await a.page.getByRole('dialog').getByTestId('confirmation-confirm').click()
+    const renewResponse = await renewed
+    expect(renewResponse.ok(), `renew on ${a.origin}: HTTP ${renewResponse.status()}`).toBeTruthy()
+    const renewal = (await renewResponse.json()) as { did: string; renews_contract_version: number }
+    await expect(a.page).toHaveURL(new RegExp(`/ui/contracts/view/${renewal.did}`))
+
+    const signedParties = ((await contractDocumentOn(a, contractDid))['dcs:parties'] as Record<string, unknown>[])
+      .filter((node) => node['dcs:hasSignatory'])
+      .map((node) => ({
+        'dcs:party': { '@id': node['@id'] },
+        'dcs:hasSignatory': node['dcs:hasSignatory'],
+        ...(node['dcs:hasPowerOfAttorney'] ? { 'dcs:hasPowerOfAttorney': node['dcs:hasPowerOfAttorney'] } : {}),
+      }))
+    expect(signedParties, "A's document attributes A's signature").toHaveLength(1)
+
+    const renewalDoc = await contractDocumentOn(a, renewal.did)
+    const reference = renewalDoc['dcs:renewsContract'] as Record<string, unknown>
+    expect(String(reference['@id'])).toMatch(new RegExp(`${contractDid}$`))
+    expect(reference['dcs:version']).toBe(renewal.renews_contract_version)
+    expect(String((reference['dcs:signedDocument'] as Record<string, unknown>)?.['@id'])).toMatch(/^ipfs:\/\/\S+$/)
+    expect(reference['dcs:signatures']).toEqual(signedParties)
+    for (const node of renewalDoc['dcs:parties'] as Record<string, unknown>[]) {
+      expect(node['dcs:hasSignatory'], 'the renewal draft claims no signatory').toBeUndefined()
+    }
+
+    await verifyArtifact(a, renewal.did, { lifecycle: 'draft', save: '11-renewal-A' })
   })
 })

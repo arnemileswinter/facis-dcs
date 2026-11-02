@@ -1,5 +1,5 @@
 import { semanticParameterLabel } from '@template-repository/utils/semantic-parameter-label'
-import type { DcsContentSegment, DcsPlaceholderRef } from '@/models/dcs-jsonld'
+import type { DcsContentSegment, DcsContractFieldRef } from '@/models/dcs-jsonld'
 import type { SemanticCondition } from '@template-repository/models/contract-template'
 import type { ClausePlaceholderHighlight } from '@template-repository/models/template-editor-ui-store'
 import type { Ref } from 'vue'
@@ -236,10 +236,10 @@ export function stringToContent(text: string, conditions: SemanticCondition[]): 
     const key = m[1] ?? ''
     const resolved = paramByKey.get(key)
     if (resolved) {
-      // The clause references the placeholder by @id; the node itself (label,
-      // datatype, value) lives in the top-level dcs:contractData registry.
-      const placeholder: DcsPlaceholderRef = { '@id': resolved.fieldId }
-      content.push(placeholder)
+      // The clause references the ContractField by @id; its declaration lives
+      // in the top-level dcs:contractFields registry.
+      const fieldReference: DcsContractFieldRef = { '@id': resolved.fieldId }
+      content.push(fieldReference)
     } else {
       content.push(m[0])
     }
@@ -538,6 +538,9 @@ export function useClauseTextChips(
         const highlightClass =
           h && matchHighlight(seg.conditionId, seg.parameterName, h) ? ` ${CHIP_HIGHLIGHT_CLASS}` : ''
         span.className = baseClass + highlightClass
+        // The owning asset instance's accent marks the chip, matching its row.
+        const accent = conditions.find((c) => c.conditionId === seg.conditionId)?.accentColor
+        if (accent) span.style.borderLeft = `3px solid ${accent}`
         el.appendChild(span)
       }
     }

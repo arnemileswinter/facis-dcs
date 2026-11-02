@@ -9,12 +9,29 @@
 
 set -euo pipefail
 
-trap 'kill $(jobs -p) 2>/dev/null; exit' INT TERM
+cleanup() {
+  local pids
+  pids="$(jobs -p)"
+  if [[ -n "$pids" ]]; then
+    kill $pids 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT INT TERM
 
 # Config
 HELM_RELEASE="dcs"
 HELM_CHART_PATH="deployment/helm"
 HELM_VALUES_FILE="deployment/helm/values.dev.yml"
+# The credential issuer is a release of its own, installed from the same chart
+# and the same values base production uses (ADR-34, values.issuer-base.yml).
+ISSUER_RELEASE="dcs-issuer"
+ISSUER_CHART_PATH="deployment/helm/charts/orce"
+ISSUER_VALUES_BASE="deployment/helm/values.issuer-base.yml"
+ISSUER_VALUES_FILE="deployment/helm/values.issuer.dev.yml"
+# Every credential this stack issues names this issuer's status list, and the
+# verifier refuses a list whose `sub` is not the URI the credential names — so
+# this is the URL the backend must reach it on, not merely one that works.
+export ISSUER_BASE_URL="${ISSUER_BASE_URL:-http://localhost:30181}"
 PDF_CORE_DIR="pdf-core"
 PDF_CORE_DEV_ENV="$PDF_CORE_DIR/.dev.env"
 PDF_CORE_ENV="$PDF_CORE_DIR/.env"
@@ -25,9 +42,34 @@ echo "=== Setting up dev environment ==="
 
 # Helm: idempotent install-or-upgrade so this script works whether or not
 # the release was already installed manually first.
-echo "Updating Helm dependencies and deploying to Kubernetes..."
-helm dependency update "$HELM_CHART_PATH"
+echo "Building locked Helm dependencies and deploying to Kubernetes..."
+helm dependency build --skip-refresh "$HELM_CHART_PATH"
 helm upgrade --install "$HELM_RELEASE" "$HELM_CHART_PATH" -f "$HELM_VALUES_FILE"
+
+# The issuer first: the backend verifies its status list against anchors, and
+# the login credential a developer presents names that list. Installed exactly
+# as production installs it — same chart, same release name, same values base.
+echo "Deploying the credential issuer ($ISSUER_RELEASE)..."
+helm upgrade --install "$ISSUER_RELEASE" "$ISSUER_CHART_PATH" \
+  -f "$ISSUER_VALUES_BASE" -f "$ISSUER_VALUES_FILE"
+kubectl rollout status "deployment/${ISSUER_RELEASE}-orce" --timeout=5m
+
+# The backend's catalogue readiness gate makes exactly one verification call and
+# exits if it fails — deliberately, so a broken catalogue is not papered over by
+# retries. That leaves the ordering to whoever starts the backend: fc-service is
+# a Spring Boot app behind Fuseki and answers nothing for a while after a
+# deploy, so starting air straight away races it and kills the process:
+#
+#   federated catalogue functional verification failed: ... context deadline
+#   exceeded (Client.Timeout exceeded while awaiting headers)
+#
+# Only wait when the values file actually deploys it.
+if python3 -c "import sys,yaml; sys.exit(0 if (yaml.safe_load(open('$HELM_VALUES_FILE')) or {}).get('federatedCatalogue',{}).get('enabled') else 1)"; then
+  echo "Waiting for the Federated Catalogue to answer before starting the backend..."
+  kubectl wait --for=condition=ready pod \
+    -l "app.kubernetes.io/instance=${HELM_RELEASE},app.kubernetes.io/name=federated-catalogue" \
+    --timeout=10m
+fi
 
 # The host-side backend verifies every RFC 3161 token against the same
 # certificate used by the in-cluster ORCE TSA. Keep the local trust anchor in
@@ -37,21 +79,17 @@ kubectl get secret "$TSA_TRUST_SECRET" \
   -o jsonpath='{.data.tsa-cert\.pem}' | base64 --decode > "$TSA_TRUST_CERT_FILE"
 echo "✓ ORCE TSA trust certificate exported"
 
-echo "Waiting for Federated Catalogue to become ready..."
-kubectl wait --for=condition=ready pod \
-  -l "app.kubernetes.io/instance=${HELM_RELEASE},app.kubernetes.io/name=federated-catalogue" \
-  --timeout=10m
-
-echo "Waiting for statuslist-service..."
-kubectl wait --for=condition=ready pod \
-  -l "app.kubernetes.io/instance=${HELM_RELEASE},app.kubernetes.io/name=statuslist-service" \
-  --timeout=5m
-
 echo "Installing testWallet dependencies..."
 make -C testWallet install
 
-echo "Initializing statuslist for dev (NATS create when list is empty)..."
-make -C testWallet ensure-statuslist
+# The issuer serves and signs its own status list (ADR-34); nothing to create.
+# What this checks is that the backend will be able to USE it: the URL the
+# issuer answers under is the one the committed credentials name, its chain ends
+# at a root the committed anchor bundle holds (by fingerprint — every ORCE root
+# is called "FACIS Demo Root CA"), and its leaf names the issuer. Each of those
+# refuses a login with the list unread, which reads as a revoked credential.
+echo "Checking the issuer status list credentials point at..."
+make -C testWallet check-status-list
 
 # Setup backend .env
 cp backend/.env.dev1 backend/.env
@@ -72,11 +110,18 @@ echo "SOFTHSM2_CONF=$HSM_TOKEN_DIR/softhsm2.conf" >> backend/.env
 )
 echo "✓ HSM token provisioned and did-8991.json regenerated"
 
-# Issue the C2PA x5chain binding the dcs-c2pa token key so pdf-core can embed it
-# in the COSE_Sign1 protected header (the signing itself runs in the backend).
+# Issue the C2PA x5chain binding the dcs-c2pa token key. The backend reads it
+# from DCS_ISSUER_X5CHAIN_PATH, signs the COSE_Sign1 with the token key and
+# sends the chain to pdf-core per request for the protected header. The same
+# chain publishes the key the backend signs its own status list with, so the
+# leaf carries this instance's origin and did:web as SANs — a verifier refuses
+# a list whose leaf does not name the issuer the token claims to be.
 bash scripts/c2pa-cert-provision.sh "$HSM_TOKEN_DIR" dcs 1234 \
-  "$PDF_CORE_DIR/certs/dev/c2pa-x5chain-8991.pem"
-echo "✓ C2PA x5chain provisioned for pdf-core"
+  "$PDF_CORE_DIR/certs/dev/c2pa-x5chain-8991.pem" \
+  /usr/lib/softhsm/libsofthsm2.so \
+  "http://localhost:8991/crl/dcs-c2pa.crl" \
+  "http://localhost:8991" "did:web:localhost%3A8991"
+echo "✓ C2PA x5chain provisioned"
 
 # Publish an initial (empty) CRL for the dev signing CA so the leaf's
 # crlDistributionPoints resolves to a fresh, valid list. crlcheck (ops) or the
@@ -149,7 +194,25 @@ echo "=== Starting backend (air) ==="
 air &> /tmp/backend-live.log &
 BACKEND_PID=$!
 
-# Cleanup on exit
-wait $VITE_PID 2>/dev/null || true
-wait $PDF_CORE_PID 2>/dev/null || true
-wait $BACKEND_PID 2>/dev/null || true
+# All three processes are long-lived. The first one that exits is therefore a
+# terminal stack event, not something to hide while another dev server keeps
+# running. In particular, propagate backend startup-gate failures immediately.
+set +e
+wait -n "$VITE_PID" "$PDF_CORE_PID" "$BACKEND_PID"
+EXIT_STATUS=$?
+set -e
+
+if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+  echo "Backend exited; startup diagnostics:" >&2
+  tail -n 200 /tmp/backend-live.log >&2 || true
+elif ! kill -0 "$PDF_CORE_PID" 2>/dev/null; then
+  echo "pdf-core exited; diagnostics:" >&2
+  tail -n 200 /tmp/pdf-core-live.log >&2 || true
+else
+  echo "Vite dev server exited unexpectedly." >&2
+fi
+
+if [[ "$EXIT_STATUS" -eq 0 ]]; then
+  exit 1
+fi
+exit "$EXIT_STATUS"

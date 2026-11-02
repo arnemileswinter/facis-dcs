@@ -14,20 +14,35 @@ import (
 	semantichubgen "digital-contracting-service/gen/semantic_hub"
 	"digital-contracting-service/internal/auth"
 	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/base/safehttp"
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/semantichub"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
+	"goa.design/clue/log"
 )
 
 const maxSchemaFetchBytes = 8 << 20 // 8 MiB
 
+// schemaFetchClient dials public addresses only: no loopback, link-local or
+// private address, also on a redirect hop, because every dial is checked
+// (DCS-FR-TR-03).
+var schemaFetchClient = schemaClient(safehttp.Policy{DenyPrivate: true})
+
+func schemaClient(p safehttp.Policy) *http.Client {
+	client := safehttp.Client(20*time.Second, p)
+	// Canonical schemas sit behind w3id/purl redirects. The default policy
+	// follows up to 10 of them; each hop goes through the checked dialer.
+	client.CheckRedirect = nil
+	return client
+}
+
 // fetchSchemaFromURL retrieves a schema document over http(s), following
-// redirects (Gaia-X and other canonical schemas sit behind w3id/purl
-// redirects). It is register-only and RBAC-gated (Template Manager); it bounds
-// the scheme, response size, and time. The caller snapshots the bytes as an
-// immutable version.
+// redirects. It is register-only and RBAC-gated (Template Manager); it bounds
+// the scheme, the addresses, the response size, and time. The caller
+// snapshots the bytes as an immutable version.
 func fetchSchemaFromURL(ctx context.Context, rawURL string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
@@ -43,9 +58,7 @@ func fetchSchemaFromURL(ctx context.Context, rawURL string) (string, error) {
 	}
 	req.Header.Set("Accept", "text/turtle, application/ld+json, application/rdf+xml, application/json, */*")
 
-	// http.Client follows up to 10 redirects by default.
-	client := &http.Client{Timeout: 20 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := schemaFetchClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("fetch %s: %w", parsed.Redacted(), err)
 	}
@@ -64,7 +77,38 @@ func fetchSchemaFromURL(ctx context.Context, rawURL string) (string, error) {
 	if len(body) == 0 {
 		return "", fmt.Errorf("fetched schema from %s is empty", parsed.Redacted())
 	}
-	return string(body), nil
+	return unwrapHubSchemaItem(parsed, body), nil
+}
+
+// unwrapHubSchemaItem returns the schema document a DCS hub anchor serves.
+//
+// The anchor a template carries in sh:shapesGraph
+// (/semantic/shapes/{name}?version=N) dereferences to a SemanticSchemaItem
+// envelope, not to raw Turtle — so installing a peer's library straight from
+// the anchor the template declares would otherwise snapshot the JSON envelope
+// as the shapes graph. Recognized only on a /semantic/ path and only when the
+// body carries the envelope's full shape, so a schema document that happens
+// to have a "content" key is left verbatim.
+func unwrapHubSchemaItem(source *url.URL, body []byte) string {
+	if !strings.Contains(source.Path, "/semantic/") {
+		return string(body)
+	}
+	var item struct {
+		Name    *string `json:"name"`
+		Kind    *string `json:"kind"`
+		Version *int    `json:"version"`
+		Content *string `json:"content"`
+	}
+	if err := json.Unmarshal(body, &item); err != nil {
+		return string(body)
+	}
+	if item.Name == nil || item.Kind == nil || item.Version == nil || item.Content == nil {
+		return string(body)
+	}
+	if strings.TrimSpace(*item.Content) == "" {
+		return string(body)
+	}
+	return *item.Content
 }
 
 // SemanticHub service implementation (DCS-FR-TR-03, UC-02-08).
@@ -102,20 +146,8 @@ func (s *semanticHubsrvc) Register(ctx context.Context, p *semantichubgen.Regist
 		content = fetched
 	}
 
-	if p.Kind == "context" {
-		// A context version must at least parse as a JSON-LD document with
-		// an @context object — a broken active context would break every
-		// subsequent document normalization.
-		var doc struct {
-			Context map[string]any `json:"@context"`
-		}
-		if err := json.Unmarshal([]byte(content), &doc); err != nil || len(doc.Context) == 0 {
-			return nil, semantichubgen.MakeBadRequest(
-				fmt.Errorf("context schema content must be a JSON-LD document with a non-empty @context object"))
-		}
-	}
-	if strings.TrimSpace(content) == "" {
-		return nil, semantichubgen.MakeBadRequest(errors.New("schema content must not be empty (provide content or source_url)"))
+	if err := semantichub.ValidateSchemaContent(p.Name, p.Kind, content); err != nil {
+		return nil, semantichubgen.MakeBadRequest(err)
 	}
 
 	tx, err := s.DB.BeginTxx(ctx, nil)
@@ -125,8 +157,17 @@ func (s *semanticHubsrvc) Register(ctx context.Context, p *semantichubgen.Regist
 	defer func() { _ = tx.Rollback() }()
 
 	activate := p.Activate != nil && *p.Activate
-	version, err := s.Repo.Register(ctx, tx, p.Name, p.Kind, p.MediaType, content, middleware.GetParticipantID(ctx), activate)
+	requestedVersion := 0
+	if p.Version != nil {
+		requestedVersion = *p.Version
+	}
+	version, err := s.Repo.Register(ctx, tx, p.Name, p.Kind, p.MediaType, content, middleware.GetParticipantID(ctx), requestedVersion, activate)
 	if err != nil {
+		// An occupied version number is the registrant's mistake to correct,
+		// not a server fault: the hub already holds that immutable version.
+		if errors.Is(err, semantichub.ErrVersionTaken) {
+			return nil, semantichubgen.MakeBadRequest(err)
+		}
 		return nil, semantichubgen.MakeInternalError(err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -155,6 +196,17 @@ func (s *semanticHubsrvc) Rollback(ctx context.Context, p *semantichubgen.Rollba
 		return nil, semantichubgen.MakeInternalError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	schema, err := s.Repo.Get(ctx, tx, p.Name, p.Kind, p.Version)
+	if err != nil {
+		if errors.Is(err, semantichub.ErrSchemaNotFound) {
+			return nil, semantichubgen.MakeNotFound(err)
+		}
+		return nil, semantichubgen.MakeInternalError(err)
+	}
+	if err := semantichub.ValidateSchemaContent(schema.Name, schema.Kind, schema.Content); err != nil {
+		return nil, semantichubgen.MakeBadRequest(err)
+	}
 
 	if err := s.Repo.Activate(ctx, tx, p.Name, p.Kind, p.Version); err != nil {
 		if errors.Is(err, semantichub.ErrSchemaNotFound) {
@@ -239,9 +291,12 @@ func (s *semanticHubsrvc) ResolveOntology(ctx context.Context, p *semantichubgen
 	return toSchemaItem(schema), nil
 }
 
-// ResolveProfile serves validation profiles at the anchor path
-// (/semantic/profile/{name}?version=N) that semantichub.AnchorURL embeds
-// into every produced document's dcterms:conformsTo.
+// ResolveProfile serves a registered validation profile at
+// /semantic/profile/{name}?version=N. Documents no longer carry a
+// dcterms:conformsTo anchor pointing here — claiming conformance to one
+// envelope profile said nothing about the vocabulary a contract's own data
+// uses — but the profiles remain readable, and the rules still run at
+// validation time.
 func (s *semanticHubsrvc) ResolveProfile(ctx context.Context, p *semantichubgen.ResolveProfilePayload) (res *semantichubgen.SemanticSchemaItem, err error) {
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -335,6 +390,33 @@ func (s *semanticHubsrvc) List(ctx context.Context) (res []*semantichubgen.Seman
 	return out, nil
 }
 
+// FollowHubActivations calls refresh each time any replica commits a hub
+// activation, and after the listening connection is restored, because
+// activations can be missed while it is down. The anchors are process-wide
+// state, so without this only the replica that served the activation request
+// would use the new versions.
+func FollowHubActivations(ctx context.Context, databaseURL string, refresh func(context.Context) error) error {
+	listener := pq.NewListener(databaseURL, time.Second, time.Minute, nil)
+	if err := listener.Listen(semantichub.ActivationChannel); err != nil {
+		_ = listener.Close()
+		return fmt.Errorf("listen for semantic hub activations: %w", err)
+	}
+	go func() {
+		defer func() { _ = listener.Close() }()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-listener.Notify:
+				if err := refresh(ctx); err != nil {
+					log.Errorf(ctx, err, "re-anchor validation after a semantic hub activation")
+				}
+			}
+		}
+	}()
+	return nil
+}
+
 // RefreshValidationAnchors re-points the validation layer's process-wide
 // schema anchors at the hub's current active versions. Called at startup
 // and after every activation (register-with-activate, rollback).
@@ -347,16 +429,26 @@ func RefreshValidationAnchors(ctx context.Context, db *sqlx.DB) error {
 	if err != nil {
 		return fmt.Errorf("load active hub shapes version: %w", err)
 	}
-	profileVersion, err := semantichub.ActiveVersion(ctx, db, semantichub.ProfileName, "profile")
+	// The class -> library index a produced document's sh:shapesGraph
+	// declares its registered shape libraries from (ADR-23): validation
+	// honours the declaration, so a library must be declared to be enforced.
+	libraryClasses, err := semantichub.ActiveShapeLibraryClasses(ctx, db)
 	if err != nil {
-		return fmt.Errorf("load active hub profile version: %w", err)
+		return fmt.Errorf("index active hub shape libraries: %w", err)
 	}
+	libraryAnchors := make(map[string]validation.ShapeLibraryAnchor, len(libraryClasses))
+	for class, library := range libraryClasses {
+		libraryAnchors[class] = validation.ShapeLibraryAnchor{
+			Name: library.Name,
+			URL:  semantichub.AnchorURL("shapes", library.Name, library.Version),
+		}
+	}
+	validation.SetShapeLibraryAnchors(libraryAnchors)
 	validation.SetCanonicalOntologyIRIs(hubIRIs)
 	validation.ResetDomainOntologyCache()
 	validation.SetSchemaAnchorRefs(
 		semantichub.AnchorURL("context", semantichub.ContextName, contextVersion),
 		semantichub.AnchorURL("shapes", semantichub.ShapesName, shapesVersion),
-		semantichub.AnchorURL("profile", semantichub.ProfileName, profileVersion),
 	)
 	return nil
 }

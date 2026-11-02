@@ -1,3 +1,4 @@
+import type { PartyType } from '@/types/party-type'
 export interface TemplateCatalogueRetrieveRequest {
   offset: number
   limit: number
@@ -9,8 +10,8 @@ export interface TemplateCatalogueRetrieveByIdRequest {
 }
 
 export interface TemplateCatalogueSearchRequest {
+  party_type?: PartyType
   did?: string
-  document_number?: string
   version?: number
   name?: string
   description?: string

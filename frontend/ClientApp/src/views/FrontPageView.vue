@@ -27,7 +27,7 @@ const stages: Stage[] = [
   {
     name: 'Templates',
     description:
-      'Template Creators draft reusable templates — prose sections, clauses and placeholders bound to requirement fields, plus typed clauses from the hub catalog. Each template passes review, approval and catalogue registration before contracts can use it.',
+      'Template Creators draft reusable templates with prose sections, clauses and placeholders bound to requirement fields, plus typed clauses from the hub catalog. Each template passes review, approval and catalogue registration before contracts can use it.',
     roles: 'Template Creator, Template Reviewer, Template Approver, Template Manager',
     routeName: ROUTES.TEMPLATES.LIST,
     linkLabel: 'Open Templates',
@@ -60,7 +60,7 @@ const stages: Stage[] = [
   {
     name: 'Audit & Archive',
     description:
-      'Every lifecycle action is recorded in a tamper-proof, IPFS-anchored trail. Auditors run scoped audits with exportable reports; archived contracts stay verifiable end to end.',
+      'Every lifecycle action is recorded in a tamper-evident, IPFS-anchored trail. Auditors run scoped audits with exportable reports; archived contracts stay verifiable end to end.',
     roles: 'Auditor, Archive Manager',
     routeName: ROUTES.AUDIT.LIST,
     linkLabel: 'Open Audit',
@@ -81,7 +81,7 @@ const visibleStages = computed(() => stages.filter((stage) => canAccess(stage.ro
     <div>
       <h1 class="text-2xl/7 font-bold sm:text-3xl sm:tracking-tight">Digital Contracting Service</h1>
       <p class="mt-2 text-base-content/70">
-        Templates, negotiated contracts, verifiable signatures and auditable archives — end to end.
+        Templates, negotiated contracts, verifiable signatures and auditable archives from start to finish.
       </p>
       <p class="mt-1 text-sm text-base-content/70">You see the stages your roles can act on.</p>
     </div>

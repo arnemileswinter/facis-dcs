@@ -5,18 +5,24 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
 	"time"
 
 	genauth "digital-contracting-service/gen/auth"
+	"digital-contracting-service/internal/auth"
 	authaudit "digital-contracting-service/internal/auth/audit"
 	authdb "digital-contracting-service/internal/auth/db"
+	authevents "digital-contracting-service/internal/auth/event"
 	"digital-contracting-service/internal/auth/hydra"
 	"digital-contracting-service/internal/auth/oid4vp"
 	oid4vprequest "digital-contracting-service/internal/auth/oid4vp/request"
+	"digital-contracting-service/internal/base/datatype/componenttype"
+	baseevent "digital-contracting-service/internal/base/event"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/jmoiron/sqlx"
 	"goa.design/clue/log"
 	goa "goa.design/goa/v3/pkg"
@@ -26,11 +32,20 @@ const oauthStateSizeBytes = 24
 
 // AuthConfig wires auth dependencies from cmd/dcs/main.go (no env reads in handlers).
 type AuthConfig struct {
-	Hydra             *hydra.Client
-	Trust             *oid4vp.TrustConfig
-	DCQLQuery         any
-	PIDDCQLQuery      any
-	RequestSigner     oid4vprequest.Signer
+	Hydra         *hydra.Client
+	Trust         *oid4vp.TrustConfig
+	DCQLQuery     any
+	PIDDCQLQuery  any
+	RequestSigner oid4vprequest.Signer
+	// OID4VPClientID identifies this verifier to a wallet. It is NOT the Hydra
+	// OAuth client id: OpenID4VP requires a prefixed identifier, and a bare
+	// value means the "pre-registered" prefix, which wallets outside a
+	// pre-agreed federation refuse outright.
+	OID4VPClientID string
+	// ParticipantDID is this instance's own participant identity. Login does
+	// not compare it with the credential's organization: the organizations a
+	// login issuer may attest are set per issuer in the trust configuration.
+	ParticipantDID    string
 	PublicAPIBase     string
 	LogoutRedirectURI string
 	UIPath            string
@@ -38,6 +53,9 @@ type AuthConfig struct {
 }
 
 type authSvc struct {
+	// JWTAuthenticator guards the administrator methods and keeps the
+	// lockout of credential holders (FR-UC-01-4).
+	auth.JWTAuthenticator
 	hydra             *hydra.Client
 	trust             *oid4vp.TrustConfig
 	dcqlQuery         any
@@ -48,9 +66,15 @@ type authSvc struct {
 	oid4vpStateTTL    time.Duration
 	presentations     authdb.PresentationAttemptRepo
 	requestSigner     oid4vprequest.Signer
+	oid4vpClientID    string
+	participantDID    string
+	// checkCredentialStatus checks a session's PoA status reference again.
+	checkCredentialStatus func(json.RawMessage) error
+	// recordSessionEnded writes a session end to the audit trail.
+	recordSessionEnded func(context.Context, authevents.SessionEndedEvent) error
 }
 
-func NewAuth(db *sqlx.DB, presentations authdb.PresentationAttemptRepo, cfg AuthConfig) (genauth.Service, error) {
+func NewAuth(db *sqlx.DB, presentations authdb.PresentationAttemptRepo, jwtAuth auth.JWTAuthenticator, cfg AuthConfig) (genauth.Service, error) {
 	if cfg.Hydra == nil {
 		return nil, fmt.Errorf("hydra client is required")
 	}
@@ -67,12 +91,20 @@ func NewAuth(db *sqlx.DB, presentations authdb.PresentationAttemptRepo, cfg Auth
 		return nil, fmt.Errorf("oid4vp DCQL query is required")
 	}
 
+	if strings.TrimSpace(cfg.ParticipantDID) == "" {
+		return nil, fmt.Errorf("participant DID is required")
+	}
+
 	if cfg.PIDDCQLQuery == nil {
 		return nil, fmt.Errorf("oid4vp PID DCQL query is required")
 	}
 
+	var recordSessionEnded func(context.Context, authevents.SessionEndedEvent) error
 	if db != nil {
 		oid4vp.ConfigurePresentationAuditRecorder(&authaudit.Recorder{DB: db})
+		recordSessionEnded = func(ctx context.Context, evt authevents.SessionEndedEvent) error {
+			return baseevent.CreateInOwnTx(ctx, db, evt, componenttype.System)
+		}
 	}
 
 	oid4vpStateTTL := cfg.OID4VPStateTTL
@@ -81,6 +113,7 @@ func NewAuth(db *sqlx.DB, presentations authdb.PresentationAttemptRepo, cfg Auth
 	}
 
 	return &authSvc{
+		JWTAuthenticator:  jwtAuth,
 		hydra:             cfg.Hydra,
 		trust:             cfg.Trust,
 		dcqlQuery:         cfg.DCQLQuery,
@@ -91,6 +124,11 @@ func NewAuth(db *sqlx.DB, presentations authdb.PresentationAttemptRepo, cfg Auth
 		oid4vpStateTTL:    oid4vpStateTTL,
 		presentations:     presentations,
 		requestSigner:     cfg.RequestSigner,
+		oid4vpClientID:    cfg.OID4VPClientID,
+		participantDID:    cfg.ParticipantDID,
+
+		checkCredentialStatus: oid4vp.CheckStatus,
+		recordSessionEnded:    recordSessionEnded,
 	}, nil
 }
 
@@ -162,6 +200,22 @@ func (s *authSvc) Refresh(ctx context.Context) (*genauth.RefreshResult, error) {
 		return nil, goa.PermanentError("unauthorized", "token refresh failed: %v", err)
 	}
 
+	// A session lasts only as long as the credential it was opened with
+	// (NFR-BR-06, IR-CI-09): a revoked PoA ends it at the next refresh.
+	if err := s.checkSessionCredential(tokenResp.AccessToken); err != nil {
+		log.Printf(ctx, "auth.refresh refused: %v", err)
+		s.auditSessionEnd(ctx, tokenResp.AccessToken, err)
+		refreshToken := tokenResp.RefreshToken
+		if strings.TrimSpace(refreshToken) == "" {
+			refreshToken = cookie.Value
+		}
+		if err := s.hydra.RevokeRefreshToken(ctx, refreshToken); err != nil {
+			log.Printf(ctx, "auth.refresh could not revoke the session: %v", err)
+		}
+		clearAuthSessionCookies(ctx)
+		return nil, goa.PermanentError("unauthorized", auth.CredentialRefused)
+	}
+
 	if strings.TrimSpace(tokenResp.RefreshToken) != "" {
 		SetRefreshTokenInContext(ctx, tokenResp.RefreshToken)
 	}
@@ -175,6 +229,47 @@ func (s *authSvc) Refresh(ctx context.Context) (*genauth.RefreshResult, error) {
 		TokenType:   tokenResp.TokenType,
 		ExpiresIn:   tokenResp.ExpiresIn,
 	}, nil
+}
+
+// auditSessionEnd writes the end of a session at token refresh to the audit
+// trail, with the subject, the participant and the reason (FR-UC-09-2).
+func (s *authSvc) auditSessionEnd(ctx context.Context, accessToken string, reason error) {
+	if s.recordSessionEnded == nil {
+		return
+	}
+	claims := jwt.MapClaims{}
+	_, _, _ = jwt.NewParser().ParseUnverified(accessToken, claims)
+	subject, _ := claims["sub"].(string)
+	ext, _ := claims["ext"].(map[string]any)
+	participant, _ := ext["iss"].(string)
+	if err := s.recordSessionEnded(ctx, authevents.SessionEndedEvent{
+		SubjectDID:     subject,
+		ParticipantDID: participant,
+		Reason:         reason.Error(),
+		OccurredAt:     time.Now().UTC(),
+	}); err != nil {
+		log.Printf(ctx, "auth.refresh could not audit the session end: %v", err)
+	}
+}
+
+// checkSessionCredential checks again the status of the PoA credential named
+// in a refreshed access token. The token comes directly from the Hydra token
+// endpoint, so its signature is not checked here.
+func (s *authSvc) checkSessionCredential(accessToken string) error {
+	claims := jwt.MapClaims{}
+	if _, _, err := jwt.NewParser().ParseUnverified(accessToken, claims); err != nil {
+		return fmt.Errorf("read refreshed access token: %w", err)
+	}
+	ext, _ := claims["ext"].(map[string]any)
+	ref, ok := ext[hydra.CredentialStatusClaim]
+	if !ok {
+		return fmt.Errorf("session carries no credential status reference")
+	}
+	raw, err := json.Marshal(ref)
+	if err != nil {
+		return err
+	}
+	return s.checkCredentialStatus(raw)
 }
 
 func (s *authSvc) Logout(ctx context.Context) (*genauth.LogoutResult, error) {

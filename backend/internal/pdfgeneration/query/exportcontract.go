@@ -10,7 +10,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"digital-contracting-service/internal/base/ipfs"
+	"digital-contracting-service/internal/base/artifactstore"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
@@ -30,12 +30,12 @@ type ExportContractPdfQry struct {
 }
 
 type ExportContractPdfHandler struct {
-	DB         *sqlx.DB
-	CRepo      cwedb.ContractRepo
-	IPFSClient *ipfs.APIClient
-	PDFCore    *pdfcore.Client
-	VCIssuer   provenance.VCIssuer
-	IssuerDID  string
+	DB        *sqlx.DB
+	CRepo     cwedb.ContractRepo
+	Artifacts *artifactstore.Store
+	PDFCore   *pdfcore.Client
+	VCIssuer  provenance.VCIssuer
+	IssuerDID string
 }
 
 func (h *ExportContractPdfHandler) Handle(ctx context.Context, qry ExportContractPdfQry) (io.ReadCloser, error) {
@@ -67,14 +67,16 @@ func (h *ExportContractPdfHandler) Handle(ctx context.Context, qry ExportContrac
 			return nil, fmt.Errorf("read contract PDF state for %s: %w", qry.DID, err)
 		}
 
-		// A PAdES-signed PDF is frozen: serve it as-is regardless of later
-		// lifecycle bookkeeping — post-signature mutation breaks PAdES validators.
-		if pdfState.IPFSCID != "" && provenance.IsFrozenC2PAState(pdfState.C2PAState) {
-			return h.fetch(qry.DID, pdfState.IPFSCID)
+		// A frozen PDF is never re-rendered: serve it as it is stored, once the
+		// regenerator has appended the lifecycle manifest of a state the
+		// contract reached after signing (suspended, terminated, expired).
+		if pdfState.IPFSCID != "" && provenance.IsFrozenC2PAState(pdfState.C2PAState) &&
+			!provenance.SignedLifecycleAppendPending(pdfState.Signed, pdfState.C2PAState, currentC2PAState) {
+			return h.fetch(ctx, qry.DID, pdfState.IPFSCID)
 		}
 		// Serve only when the cached PDF reflects the current content and state.
 		if pdfState.IPFSCID != "" && pdfState.C2PAState == currentC2PAState && pdfState.PayloadHash == currentPayloadHash {
-			return h.fetch(qry.DID, pdfState.IPFSCID)
+			return h.fetch(ctx, qry.DID, pdfState.IPFSCID)
 		}
 
 		// Log the blocking condition on the first unsatisfied poll (survives a
@@ -99,12 +101,15 @@ func (h *ExportContractPdfHandler) Handle(ctx context.Context, qry ExportContrac
 	}
 }
 
-func (h *ExportContractPdfHandler) fetch(did, cid string) (io.ReadCloser, error) {
-	r, err := h.IPFSClient.FetchFile(cid)
-	if err != nil || len(r.Data) == 0 {
+func (h *ExportContractPdfHandler) fetch(ctx context.Context, did, cid string) (io.ReadCloser, error) {
+	pdf, err := h.Artifacts.Get(ctx, artifactstore.ContractScope(did), cid)
+	if err != nil {
 		return nil, fmt.Errorf("fetch PDF from IPFS %s for contract %s: %w", cid, did, err)
 	}
-	return io.NopCloser(bytes.NewReader(r.Data)), nil
+	if len(pdf) == 0 {
+		return nil, fmt.Errorf("fetch PDF from IPFS %s for contract %s: empty artifact", cid, did)
+	}
+	return io.NopCloser(bytes.NewReader(pdf)), nil
 }
 
 func (h *ExportContractPdfHandler) readContract(ctx context.Context, did string) (*cwedb.Contract, error) {

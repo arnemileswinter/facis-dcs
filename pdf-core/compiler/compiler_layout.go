@@ -286,7 +286,6 @@ func layoutDocumentFull(doc documentModel) (pages []pageLayout, flatSections []s
 			SectionIdx:     -1,
 			LocalClauseIdx: -1,
 		})
-		mcid++
 		sigY -= 40
 		for _, sigField := range doc.SignatureFields {
 			fieldWidth := 360.0
@@ -358,24 +357,6 @@ func wrapTextPts(input string, maxWidth float64, fontSize float64) []string {
 	for _, word := range words[1:] {
 		candidate := lines[len(lines)-1] + " " + word
 		if strPts(candidate, fontSize) <= maxWidth {
-			lines[len(lines)-1] = candidate
-			continue
-		}
-		lines = append(lines, word)
-	}
-	return lines
-}
-
-func wrapText(input string, limit int) []string {
-	trimmed := strings.TrimSpace(input)
-	if trimmed == "" {
-		return []string{""}
-	}
-	words := strings.Fields(trimmed)
-	lines := []string{words[0]}
-	for _, word := range words[1:] {
-		candidate := lines[len(lines)-1] + " " + word
-		if len(candidate) <= limit {
 			lines[len(lines)-1] = candidate
 			continue
 		}

@@ -15,16 +15,28 @@ Endpoint surface (backend/design/contract_workflow_engine.go):
 
 2. `POST /contract/deployment/callback` (target -> DCS, DCS-IR-SI-05):
    payload `{"did", "correlation_id", "status", ...}` (ack/status update)
-   or `{"did", "correlation_id", "kpi": {"metric", "value"}}` (KPI report),
-   protected by the shared-secret header `X-Deployment-Callback-Secret`
-   (env `BDD_DEPLOYMENT_CALLBACK_SECRET`, default
-   "bdd-deployment-callback-secret"), mirroring the EUDIPLO-webhook
-   precedent (steps/real_signing_vertical).
+   or `{"did", "correlation_id", "kpi": {"metric", "value", "verdict",
+   "rule"}}` (KPI report), authenticated as the target's own OAuth2 client
+   (ADR-27): a bearer token from the client_credentials grant, and accepted
+   only for deployments dispatched to that target. One shared secret proved
+   merely that SOME target was calling, so any registered target could
+   acknowledge another's deployment. (The signing ceremony's callback
+   authenticates differently again, by unguessable ceremony id plus ADR-20
+   nonce binding — see steps/real_signing_vertical.)
+
+   The target system classifies, the DCS records (ADR-33): `verdict` is the
+   target's own conclusion — satisfied, violated or not_evaluated — and
+   `rule` is the `@id` of the ODRL rule it concluded about, quoted back from
+   the `odrl:policy` the deployment envelope carried. A stated verdict that
+   names no rule, or names a rule this contract did not deploy, is refused
+   with 400: an untraceable conclusion is a malformed report. A report
+   carrying no verdict at all is silence, and is recorded as not_evaluated —
+   never as compliance.
 
 3. `GET /contract/retrieve/{did}` carries a `"kpis"` field (list of
-   `{"metric", "value", "observed_at", "violation"}`). SLA violations are
-   asserted as a per-KPI `"violation": true` marker OR the metric name
-   appearing in a top-level `"kpi_violations"` list.
+   `{"metric", "value", "observed_at", "verdict", "rule"}`). The DCS derives
+   no verdict of its own, so an SLA breach is asserted as the target's
+   reported `"verdict": "violated"` on a named `"rule"`.
 
 4. Archive entries (`GET /archive/search?did=...`) carry an `"evidence"`
    JSON object with a nested `"deployment"` object:
@@ -50,8 +62,9 @@ callback chain. Forcing `state='ACTIVE'` directly via the shared test DB
 connection (context.db, see environment.py) isolates the behavior under
 test (archived must not be treated as inactive) from the deploy mechanism,
 which the other scenarios exercise directly. This mirrors the accepted
-precedent of direct-DB seams for preconditions the API has no fast/existing
-path to establish (steps/peer_trust's `_seed_trusted_peer`,
+precedent of direct-DB seams for preconditions/assertions the API has no
+fast/existing path to establish or observe (steps/peer_trust/
+dcs_trust_pdp_steps.py's read-only `sync_fails` polling — ADR-19 — and
 steps/template_management/contract_state_machine_steps's exp_date
 backdate).
 
@@ -79,6 +92,8 @@ from steps.support.api_client import (
     contract_deploy_url,
     contract_deployment_callback_url,
     contract_retrieve_by_id_url,
+    contract_target_designate_url,
+    contract_targets_url,
     get_with_headers,
     post_json,
 )
@@ -89,7 +104,11 @@ from steps.template_management.contract_state_machine_steps import (
     _apply_signature as _apply_signature_via_ceremony,
 )
 
-DEPLOYMENT_CALLBACK_SECRET_HEADER = "X-Deployment-Callback-Secret"
+# The target authenticates as its own registered OAuth2 client (ADR-27). One
+# shared secret proved only that SOME target was calling, so any registered
+# target could acknowledge another's deployment.
+TARGET_CLIENT_ID = os.getenv("BDD_TARGET_CLIENT_ID", "dcs-orce-target")
+TARGET_CLIENT_SECRET = os.getenv("BDD_TARGET_CLIENT_SECRET", "dcs-orce-target-secret")
 
 
 # ---------------------------------------------------------------------------
@@ -97,8 +116,42 @@ DEPLOYMENT_CALLBACK_SECRET_HEADER = "X-Deployment-Callback-Secret"
 # ---------------------------------------------------------------------------
 
 
-def _callback_secret() -> str:
-    return os.getenv("BDD_DEPLOYMENT_CALLBACK_SECRET", "bdd-deployment-callback-secret")
+def _target_access_token(client_id: str = TARGET_CLIENT_ID, secret: str = TARGET_CLIENT_SECRET) -> str:
+    """A client-credentials token for the contract target, the same grant a real
+    target system uses before calling back."""
+    response = _requests.post(
+        _hydra_token_url(),
+        data={
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": secret,
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=30,
+    )
+    assert response.status_code == 200, (
+        f"Hydra refused the client_credentials grant for '{client_id}': "
+        f"{response.status_code} {response.text}"
+    )
+    token = response.json().get("access_token")
+    assert token, f"no access_token for '{client_id}': {response.text}"
+    return token
+
+
+def _hydra_token_url() -> str:
+    explicit = os.getenv("BDD_HYDRA_TOKEN_URL", "").strip()
+    if explicit:
+        return explicit
+    base = os.getenv("BDD_DCS_BASE_URL", "http://localhost:5173/api").rstrip("/")
+    origin = "/".join(base.split("/")[:3])
+    return f"{origin}/oauth2/token"
+
+
+def _target_callback_headers() -> dict:
+    return {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {_target_access_token()}",
+    }
 
 
 def _archive_entry_for(context, name):
@@ -135,23 +188,81 @@ def _kpi_entries(retrieve_json: dict) -> list:
     return kpis if isinstance(kpis, list) else []
 
 
-def _kpi_violation_names(retrieve_json: dict) -> list:
-    violations = retrieve_json.get("kpi_violations")
-    return violations if isinstance(violations, list) else []
+ODRL_RULE_BUCKETS = ("odrl:permission", "odrl:prohibition", "odrl:obligation")
 
 
-def _odrl_bound_field_iri(context, name: str) -> str:
-    """The @id of the contract's ODRL-bound contract-data placeholder — the
-    node IRI a KPI reports against (EvaluateKPIViolation binds by this IRI, not
-    a label). Read straight from the stored contract so it reflects the @id the
-    backend rebased the fixture's urn: node to."""
-    did, _ = ContractService._contract_data(context, name)
-    manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
-    retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=manager_h)
-    assert retrieve.status_code == 200, retrieve.text
-    placeholders = (retrieve.json().get("contract_data") or {}).get("dcs:contractData") or []
-    assert placeholders, f"contract '{name}' declares no dcs:contractData placeholder to bind a KPI to"
-    return placeholders[0]["@id"]
+def deployed_rule_ids(policy: dict) -> list:
+    """The `@id` of every ODRL rule an `odrl:policy` slot carries, nested
+    duties and consequences included — the set a reported verdict may name
+    (command.deployedRuleIDs is the backend's counterpart)."""
+
+    def collect(rules, out):
+        nodes = rules if isinstance(rules, list) else [rules]
+        for rule in nodes:
+            if not isinstance(rule, dict):
+                continue
+            rule_id = str(rule.get("@id") or "").strip()
+            if rule_id:
+                out.append(rule_id)
+            for nested in ("odrl:duty", "odrl:consequence"):
+                if nested in rule:
+                    collect(rule[nested], out)
+
+    ids: list = []
+    for bucket in ODRL_RULE_BUCKETS:
+        if bucket in (policy or {}):
+            collect(policy[bucket], ids)
+    return ids
+
+
+def deployed_policy(context, name: str) -> dict:
+    """The `odrl:policy` the deployment envelope handed the target, read off
+    the deploy response's own echo of the dispatched payload. That echo is the
+    only place the harness sees what the target sees, and the rules travel in
+    it verbatim — same `@id`s, so a verdict quoting one is traceable back to
+    the term of the contract the parties signed (ADR-33)."""
+    policy = getattr(context, "deployment_policy", None)
+    assert isinstance(policy, dict), (
+        f"contract '{name}' has not been deployed in this scenario, so no odrl:policy was echoed "
+        "back to quote a rule @id from"
+    )
+    return policy
+
+
+def sole_deployed_rule(context, name: str) -> str:
+    """The single rule the deployed policy carries. The ODRL fixtures state
+    exactly one, so a scenario about "the rule this contract deployed" needs no
+    further discrimination; a contract carrying several has to say which."""
+    rules = deployed_rule_ids(deployed_policy(context, name))
+    assert len(rules) == 1, (
+        f"expected contract '{name}' to deploy exactly one ODRL rule for the target to conclude "
+        f"about, got: {rules!r}"
+    )
+    return rules[0]
+
+
+def rule_constraining_field(policy: dict, field_iri: str) -> str:
+    """The `@id` of the deployed rule whose constraint names `field_iri` as its
+    `odrl:leftOperand` — how a scenario picks the one term of a multi-rule
+    contract that governs the quantity its target measured."""
+
+    def constrains(node) -> bool:
+        if isinstance(node, dict):
+            if str((node.get("odrl:leftOperand") or {}).get("@id") or "") == field_iri:
+                return True
+            return any(constrains(value) for value in node.values())
+        if isinstance(node, list):
+            return any(constrains(item) for item in node)
+        return False
+
+    for bucket in ODRL_RULE_BUCKETS:
+        rules = (policy or {}).get(bucket) or []
+        for rule in rules if isinstance(rules, list) else [rules]:
+            if isinstance(rule, dict) and constrains(rule.get("odrl:constraint")):
+                rule_id = str(rule.get("@id") or "").strip()
+                assert rule_id, f"the deployed rule constraining {field_iri} carries no @id to attribute a verdict to"
+                return rule_id
+    raise AssertionError(f"no deployed ODRL rule constrains {field_iri}; policy was: {policy!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +293,9 @@ def step_given_full_workflow_to_signed(context, name):
     # Reuses the ceremony-aware helpers from contract_state_machine_steps.py
     # / real_signing_vertical rather than re-implementing the
     # submit -> review -> approve -> sign chain a third time.
+    contract_dids = getattr(context, "contract_dids", None) or {}
+    if name not in contract_dids:
+        ContractService._create_contract_in_draft(context, name)
     _advance_to_approved(context, name)
     _apply_signature_via_ceremony(context, name)
 
@@ -189,6 +303,88 @@ def step_given_full_workflow_to_signed(context, name):
 # ---------------------------------------------------------------------------
 # Given/When — manual deploy trigger
 # ---------------------------------------------------------------------------
+
+
+BDD_TARGET_NAME = "BDD Contract Target"
+
+
+def _registered_target_id(context) -> str:
+    """The registry entry for the shipped ORCE contract-target flow (ADR-25).
+
+    Deployment used to address one endpoint from CONTRACT_TARGET_URL; it now
+    goes to a target the contract designates, so the suite registers one once
+    and reuses it. Registration is idempotent by name.
+    """
+    cached = getattr(context, "bdd_target_id", None)
+    if cached:
+        return cached
+    admin_h = AuthService.get_headers_for_roles(["Sys. Administrator"])
+    listed = get_with_headers(context, contract_targets_url(context), headers=admin_h)
+    assert listed.status_code == 200, f"could not list contract targets: {listed.status_code} {listed.text}"
+    for entry in listed.json() or []:
+        if entry.get("name") == BDD_TARGET_NAME:
+            context.bdd_target_id = entry["id"]
+            return context.bdd_target_id
+
+    created = post_json(
+        context,
+        contract_targets_url(context),
+        {
+            "name": BDD_TARGET_NAME,
+            "url": os.getenv("BDD_CONTRACT_TARGET_URL", "http://dcs-orce:1880/contract-target/deploy"),
+            "description": "Shipped ORCE contract-target flow used by the BDD suite.",
+            "enabled": True,
+        },
+        headers=admin_h,
+    )
+    assert created.status_code == 200, f"could not register the contract target: {created.status_code} {created.text}"
+    context.bdd_target_id = created.json()["id"]
+    return context.bdd_target_id
+
+
+def _ensure_target_designated(context, name, target_id=None):
+    """Point the contract at a registered target so it has somewhere to deploy.
+
+    A contract designates its own destination (ADR-25) because the automatic
+    trigger on signing completion has no human present to choose one.
+    """
+    resolved = target_id if target_id is not None else _registered_target_id(context)
+    manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
+    # The updated_at token is optimistic concurrency, and the async pipeline
+    # (regeneration, gate verdicts) legitimately advances the contract between
+    # the read and this write late in a run. The refusal names its own remedy —
+    # reload and try again — so that is what happens, bounded.
+    deadline = time.monotonic() + 60
+    while True:
+        ContractService._refresh_contract(context, name)
+        did, updated_at = ContractService._contract_data(context, name)
+        resp = post_json(
+            context,
+            contract_target_designate_url(context),
+            {"did": did, "updated_at": updated_at, "target_id": resolved},
+            headers=manager_h,
+        )
+        if resp.status_code == 200:
+            break
+        if "changed since it was read" not in resp.text or time.monotonic() >= deadline:
+            break
+        time.sleep(2)
+    assert resp.status_code == 200, (
+        f"could not designate a target system for contract '{name}': {resp.status_code} {resp.text}"
+    )
+    ContractService._refresh_contract(context, name)
+
+
+@step('contract "{name}" deploys to the configured target system')
+def step_contract_deploys_to_configured_target(context, name):
+    """Point the contract at the seeded target (ADR-25).
+
+    Stated explicitly rather than folded into the workflow steps because
+    deployment is opt-in: a contract that designates no target simply does not
+    deploy, which is an ordinary outcome for a party that only holds an
+    agreement. A scenario that expects deployment has to say where to.
+    """
+    _ensure_target_designated(context, name)
 
 
 @step('an authorized user deploys contract "{name}" to the configured contract target')
@@ -200,15 +396,36 @@ def step_when_deploy_contract(context, name):
     # registered only via @when is "undefined" when behave looks it up as a
     # Given; `@step` registers this text under given/when/then alike, and
     # the step is also genuinely used as a real When.
-    did, updated_at = ContractService._contract_data(context, name)
+    _ensure_target_designated(context, name)
+    did, _ = ContractService._contract_data(context, name)
     manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
-    context.requests_response = post_json(
-        context, contract_deploy_url(context), {"did": did, "updated_at": updated_at}, headers=manager_h
-    )
+# Signing already starts an automatic deployment (deployevent's auto-deploy
+    # subscriber reacts to the signature event), so this explicit deploy can
+    # arrive while that one still holds the contract's workflow-gate run and be
+    # refused with 409 DISPATCHING. That refusal is correct — a gate admits one
+    # claim per snapshot — and it settles, so wait for the run instead of
+    # failing the scenario on a race it is not testing. Sized for a loaded ORCE
+    # late in the suite: at 60s a still-evaluating gate leaked its 409 into a
+    # scenario that was owed the deploy endpoint's own answer.
+    deadline = time.monotonic() + 180
+    while True:
+        ContractService._refresh_contract(context, name)
+        _, updated_at = ContractService._contract_data(context, name)
+        context.requests_response = post_json(
+            context, contract_deploy_url(context), {"did": did, "updated_at": updated_at}, headers=manager_h
+        )
+        if context.requests_response.status_code != 409 or time.monotonic() >= deadline:
+            break
+        if "DISPATCHING" not in context.requests_response.text:
+            break
+        time.sleep(2)
     if context.requests_response.status_code == 200:
         body = context.requests_response.json()
         context.deployment_correlation_id = body.get("correlation_id")
         context.deployment_content_hash = body.get("content_hash")
+        # The rules the target is handed, verbatim: a KPI verdict quotes one of
+        # their @ids back (ADR-33).
+        context.deployment_policy = (body.get("payload") or {}).get("odrl:policy")
         ContractService._refresh_contract(context, name)
 
 
@@ -279,11 +496,11 @@ def step_then_archive_records_auto_deployment(context, name):
 
 
 # ---------------------------------------------------------------------------
-# When/Then — callback shared-secret auth
+# When/Then — callback caller authorisation
 # ---------------------------------------------------------------------------
 
 
-@when('the target sends a deployment callback for contract "{name}" with an invalid shared secret')
+@when('another registered system sends a deployment callback for contract "{name}"')
 def step_when_callback_invalid_secret(context, name):
     did, _ = ContractService._contract_data(context, name)
     payload = {
@@ -291,19 +508,21 @@ def step_when_callback_invalid_secret(context, name):
         "correlation_id": getattr(context, "deployment_correlation_id", None) or "bdd-unknown-correlation",
         "status": "ACKNOWLEDGED",
     }
+    # A token from a client that is not this deployment's target: it
+    # authenticates perfectly well and still may not speak for this target.
     headers = {
         "Content-Type": "application/json",
-        DEPLOYMENT_CALLBACK_SECRET_HEADER: "definitely-not-" + _callback_secret(),
+        "Authorization": f"Bearer {_target_access_token('dcs-orce-notary', 'dcs-orce-notary-secret')}",
     }
     context.requests_response = post_json(context, contract_deployment_callback_url(context), payload, headers=headers)
 
 
-@then("the callback request is rejected for the missing or invalid shared secret")
+@then("the callback request is rejected because that caller is not this deployment's target")
 def step_then_callback_rejected(context):
     resp = context.requests_response
     assert resp.status_code in (401, 403), (
-        "Expected POST /contract/deployment/callback to reject a request with an invalid "
-        f"{DEPLOYMENT_CALLBACK_SECRET_HEADER!r} header, got {resp.status_code}: {resp.text}"
+        "Expected POST /contract/deployment/callback to reject a caller that is not the "
+        f"target this deployment was dispatched to, got {resp.status_code}: {resp.text}"
     )
 
 
@@ -318,7 +537,7 @@ def step_when_target_acknowledges(context, name):
     backend dispatched the deployment to the shipped ORCE
     contract-target-flow (CONTRACT_TARGET_URL), whose callback legs POST the
     authoritative ack (status + execution-evidence receipt) back to
-    /contract/deployment/callback with the shared secret. Nothing is
+    /contract/deployment/callback as its own registered client. Nothing is
     simulated here — this step only waits for that ack to land, observable
     as the SIGNED -> ACTIVE transition it drives. Registered as @step so it
     reads naturally in Given ("And the contract target acknowledges ...")
@@ -380,37 +599,48 @@ def step_then_archive_has_tsa_timestamp(context, name):
     )
 
 
-@when('the target reports a KPI value "{metric}" = "{value}" for contract "{name}"')
-def step_when_target_reports_kpi(context, metric, value, name):
+def report_kpi(context, name: str, metric: str, value: str, verdict=None, rule=None):
+    """Post a KPI report over the deployment callback as the target system
+    itself would (DCS-IR-SI-05). `verdict` and `rule` are omitted from the wire
+    entirely when None — an absent verdict is the target saying nothing, which
+    is a different report from one that says "not_evaluated"."""
     did, _ = ContractService._contract_data(context, name)
+    kpi = {"metric": metric, "value": value}
+    if verdict is not None:
+        kpi["verdict"] = verdict
+    if rule is not None:
+        kpi["rule"] = rule
     payload = {
         "did": did,
         "correlation_id": getattr(context, "deployment_correlation_id", None) or "bdd-unknown-correlation",
-        "kpi": {"metric": metric, "value": value},
+        "kpi": kpi,
     }
-    headers = {"Content-Type": "application/json", DEPLOYMENT_CALLBACK_SECRET_HEADER: _callback_secret()}
+    headers = _target_callback_headers()
     context.requests_response = post_json(context, contract_deployment_callback_url(context), payload, headers=headers)
 
 
-@when('the target reports a KPI value for the ODRL-bound field of contract "{name}" = "{value}"')
-def step_when_target_reports_kpi_for_bound_field(context, name, value):
-    # The metric IS the bound placeholder's @id, so EvaluateKPIViolation binds
-    # it to the ODRL constraint by node IRI (DCS-FR-CWE-09).
-    step_when_target_reports_kpi(context, _odrl_bound_field_iri(context, name), value, name)
+# @step, not @when: a scenario that asserts something AFTER a report needs the
+# report as part of its Given block, so these must bind in any block.
+@step('the target reports a KPI value "{metric}" = "{value}" for contract "{name}"')
+def step_when_target_reports_kpi(context, metric, value, name):
+    report_kpi(context, name, metric, value)
 
 
-@then('the contract detail for "{name}" shows a KPI violation flag for its ODRL-bound field')
-def step_then_contract_detail_shows_kpi_violation_for_bound_field(context, name):
-    step_then_contract_detail_shows_kpi_violation(context, name, _odrl_bound_field_iri(context, name))
+@step(
+    'the target reports KPI "{metric}" = "{value}" for contract "{name}", '
+    'concluding "{verdict}" on the rule it deployed'
+)
+def step_when_target_reports_kpi_with_verdict(context, metric, value, name, verdict):
+    report_kpi(context, name, metric, value, verdict=verdict, rule=sole_deployed_rule(context, name))
 
 
-@then('the semantic KPI observations for "{name}" record a violated observation for its ODRL-bound field')
-def step_then_semantic_kpi_observations_for_bound_field(context, name):
-    step_then_semantic_kpi_observations(context, name, _odrl_bound_field_iri(context, name))
+@step('the target reports KPI "{metric}" = "{value}" for contract "{name}", concluding "{verdict}" on rule "{rule}"')
+def step_when_target_reports_kpi_naming_rule(context, metric, value, name, verdict, rule):
+    report_kpi(context, name, metric, value, verdict=verdict, rule=rule)
 
 
-@then('the contract detail for "{name}" shows a target-reported KPI "{metric}"')
-def step_then_contract_detail_shows_target_kpi(context, name, metric):
+@then('the contract detail for "{name}" shows a target-reported KPI "{metric}" recorded as "{verdict}"')
+def step_then_contract_detail_shows_target_kpi(context, name, metric, verdict):
     """DCS-FR-CWE-31 ("KPIs sent from the target system"): the metric below
     is measured and reported by the ORCE contract-target-flow itself (its
     activation latency), not by any harness callback — so its value is only
@@ -425,9 +655,14 @@ def step_then_contract_detail_shows_target_kpi(context, name, metric):
         kpis = _kpi_entries(retrieve.json())
         matching = [k for k in kpis if str(k.get("metric")) == metric]
         if matching:
-            value = str(matching[-1].get("value"))
+            entry = matching[-1]
+            value = str(entry.get("value"))
             assert value and float(value) > 0, (
                 f"Expected the target-measured KPI '{metric}' to carry a positive number, got {value!r}"
+            )
+            assert str(entry.get("verdict")) == verdict, (
+                f"Expected the DCS to record the target's own conclusion on '{metric}' as {verdict!r} "
+                f"(ADR-33: it derives none of its own), got: {entry!r}"
             )
             return
         time.sleep(2)
@@ -455,21 +690,51 @@ def step_then_contract_detail_shows_kpi(context, name, metric, value):
     )
 
 
-@then('the contract detail for "{name}" shows a KPI violation flag for "{metric}"')
-def step_then_contract_detail_shows_kpi_violation(context, name, metric):
+def recorded_kpi(context, name: str, metric: str) -> dict:
+    """The most recent KPI entry the contract detail carries for `metric`."""
     did, _ = ContractService._contract_data(context, name)
     manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
     retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=manager_h)
     assert retrieve.status_code == 200, retrieve.text
-    body = retrieve.json()
-    kpis = _kpi_entries(body)
+    kpis = _kpi_entries(retrieve.json())
     matching = [k for k in kpis if str(k.get("metric")) == metric]
-    flagged_on_entry = any(bool(k.get("violation")) for k in matching)
-    flagged_top_level = metric in _kpi_violation_names(body)
-    assert flagged_on_entry or flagged_top_level, (
-        f"Expected a KPI violation flag/alert for metric '{metric}' on contract '{name}' after a "
-        f"reported KPI value crossed its contractually declared SLA threshold (odrl:Set "
-        f"rightOperand), got kpis: {kpis!r}, kpi_violations: {body.get('kpi_violations')!r}"
+    assert matching, (
+        f"Expected contract '{name}' detail to include a KPI entry for metric '{metric}' "
+        f"(FR-CWE-31/FR-CWE-09 dashboard), got kpis: {kpis!r}"
+    )
+    return matching[-1]
+
+
+@then('the contract detail for "{name}" records KPI "{metric}" with verdict "{verdict}"')
+def step_then_contract_detail_records_verdict(context, name, metric, verdict):
+    """The DCS reproduces the target's conclusion and reaches none of its own
+    (ADR-33). A report that stated nothing is recorded as not_evaluated, which
+    is neither a breach nor compliance."""
+    entry = recorded_kpi(context, name, metric)
+    assert str(entry.get("verdict")) == verdict, (
+        f"Expected KPI '{metric}' on contract '{name}' to carry the target's verdict {verdict!r}, got: {entry!r}"
+    )
+
+
+@then('the contract detail for "{name}" attributes KPI "{metric}" to the rule it deployed')
+def step_then_contract_detail_attributes_rule(context, name, metric):
+    """The verdict is traceable to one term of the signed contract: the rule
+    @id it names is the @id that travelled to the target in the deployment
+    envelope's odrl:policy, unchanged."""
+    entry = recorded_kpi(context, name, metric)
+    expected = sole_deployed_rule(context, name)
+    assert str(entry.get("rule")) == expected, (
+        f"Expected KPI '{metric}' on contract '{name}' to be attributed to the deployed ODRL rule "
+        f"{expected!r}, got: {entry!r}"
+    )
+
+
+@then('the contract detail for "{name}" attributes no rule to KPI "{metric}"')
+def step_then_contract_detail_attributes_no_rule(context, name, metric):
+    entry = recorded_kpi(context, name, metric)
+    assert not entry.get("rule"), (
+        f"Expected KPI '{metric}' on contract '{name}' to name no ODRL rule — the target concluded "
+        f"nothing about one — got: {entry!r}"
     )
 
 
@@ -561,8 +826,7 @@ def step_then_orce_acknowledges(context):
     assert ack.get("activated_at"), f"Expected a non-empty 'activated_at' in the ORCE ack: {ack!r}"
 
 
-@then('the semantic KPI observations for "{name}" record a violated "{metric}" observation')
-def step_then_semantic_kpi_observations(context, name, metric):
+def semantic_kpi_observations(context, name: str, metric: str) -> list:
     """GET /contract/kpis/{did} (DCS-FR-CWE-09/-31): the reported KPIs as a
     JSON-LD observation set — dcs:KPIObservation nodes anchored to the
     Semantic Hub's versioned context, consumable by external tooling."""
@@ -583,12 +847,37 @@ def step_then_semantic_kpi_observations(context, name, metric):
     assert matching, (
         f"Expected a dcs:KPIObservation for metric {metric!r}, got: {observations}"
     )
-    assert any(node.get("dcs:violation") is True for node in matching), (
-        f"Expected a violated {metric!r} observation, got: {matching}"
-    )
     # The observation references the contract's dereferenceable resource IRI,
     # whose last path segment is the system key.
     assert all(
         str(node.get("dcs:aboutContract", {}).get("@id", "")).rstrip("/").rsplit("/", 1)[-1] == did
         for node in matching
     ), f"Expected every observation to reference contract {did}, got: {matching}"
+    return matching
+
+
+@then('the semantic KPI observations for "{name}" record "{metric}" as "{verdict}" against the rule it deployed')
+def step_then_semantic_kpi_observations(context, name, metric, verdict):
+    """The machine-readable side carries the same two facts as the detail: the
+    target's verdict, and the ODRL rule @id it concerns (dcs:aboutRule), so a
+    consumer can join an observation to the term of the contract it judges."""
+    matching = semantic_kpi_observations(context, name, metric)
+    expected_rule = sole_deployed_rule(context, name)
+    assert any(
+        node.get("dcs:verdict") == verdict
+        and str((node.get("dcs:aboutRule") or {}).get("@id") or "") == expected_rule
+        for node in matching
+    ), (
+        f"Expected a {verdict!r} {metric!r} observation naming rule {expected_rule!r}, got: {matching}"
+    )
+
+
+@then('the semantic KPI observations for "{name}" record "{metric}" as "{verdict}" naming no rule')
+def step_then_semantic_kpi_observations_without_rule(context, name, metric, verdict):
+    matching = semantic_kpi_observations(context, name, metric)
+    assert any(
+        node.get("dcs:verdict") == verdict and "dcs:aboutRule" not in node for node in matching
+    ), (
+        f"Expected a {verdict!r} {metric!r} observation with no dcs:aboutRule — an unclassified "
+        f"measurement judges no term — got: {matching}"
+    )

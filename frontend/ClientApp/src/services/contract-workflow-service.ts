@@ -1,22 +1,30 @@
 import http from '@/api/http'
+import type { ContractEvidence, StoreContractEvidence } from '@/models/contract/contract-evidence'
 import type {
   ContractApproveRequest,
   ContractAuditRequest,
   ContractCreateRequest,
   ContractDeployRequest,
   ContractHistoryRetrieveRequest,
+  ContractNegotiationDraftRetrieveRequest,
+  ContractNegotiationDraftSaveRequest,
   ContractNegotiationRequest,
   ContractNegotiationRespondRequest,
+  ContractOfferAcceptRequest,
   ContractOfferRequest,
   ContractRejectRequest,
+  ContractRenewRequest,
   ContractRetrieveByIdRequest,
   ContractRetrieveRequest,
   ContractReviewRequest,
   ContractSearchRequest,
-  ContractStoreRequest,
   ContractSubmitRequest,
+  ContractTargetDesignateRequest,
+  ContractTargetWriteRequest,
   ContractTerminateRequest,
   ContractUpdateRequest,
+  ContractWithdrawRequest,
+  MachineIdentityWriteRequest,
 } from '@/models/requests/contract-request'
 import type {
   ApprovedContractTemplateRetrieveResponse,
@@ -25,22 +33,54 @@ import type {
   ContractCreateResponse,
   ContractDeployResponse,
   ContractHistoryResponse,
+  ContractLifecycleEvent,
+  ContractNegotiationDraftResponse,
   ContractNegotiationRespondResponse,
   ContractNegotiationResponse,
+  ContractOfferAcceptResponse,
   ContractOfferResponse,
+  ContractPdfVerifyResult,
   ContractRejectResponse,
+  ContractRenewResponse,
   ContractRetrieveByIdResponse,
   ContractRetrieveResponse,
+  ContractReviewFinding,
   ContractReviewResponse,
   ContractSearchResponse,
-  ContractStoreResponse,
   ContractSubmitResponse,
+  ContractTarget,
   ContractTerminateResponse,
   ContractUpdateResponse,
+  ContractWithdrawResponse,
+  MachineCredential,
+  MachineIdentity,
+  MachineIdentityCreateResponse,
 } from '@/models/responses/contract-response'
 import type { ContractWorkflowService } from '@/models/services/contract-workflow-service'
 
 export const contractWorkflowService: ContractWorkflowService = {
+  async storeEvidence(request: StoreContractEvidence) {
+    return http.post<{ did: string; evidence_id: string }>('/contract/store', request).then((res) => res.data)
+  },
+  async lifecycle(did: string) {
+    return http
+      .get<ContractLifecycleEvent[]>(`/contract/lifecycle/${encodeURIComponent(did)}`)
+      .then((res) => res.data ?? [])
+  },
+  async reviewFindings(did: string) {
+    return http
+      .get<ContractReviewFinding[]>(`/contract/review-findings/${encodeURIComponent(did)}`)
+      .then((res) => res.data ?? [])
+  },
+  async listEvidence(did: string) {
+    return http.get<ContractEvidence[]>(`/contract/${encodeURIComponent(did)}/evidence`).then((res) => res.data)
+  },
+  async retrieveEvidence(did: string, evidenceId: string) {
+    return http
+      .get<ContractEvidence>(`/contract/${encodeURIComponent(did)}/evidence/${encodeURIComponent(evidenceId)}`)
+      .then((res) => res.data)
+  },
+
   async create(request: ContractCreateRequest) {
     return http.post<ContractCreateResponse>('/contract/create', request).then((res) => res.data)
   },
@@ -59,6 +99,29 @@ export const contractWorkflowService: ContractWorkflowService = {
 
   async negotiate(request: ContractNegotiationRequest) {
     return http.post<ContractNegotiationResponse>('/contract/negotiate', request).then((res) => res.data)
+  },
+
+  // Accept an inbound offer unchanged: mints this instance's negotiation task
+  // for the offer's round and takes the contract OFFERED -> NEGOTIATION. Not
+  // respond(), which decides one already-proposed change request.
+  async acceptOffer(request: ContractOfferAcceptRequest) {
+    return http.post<ContractOfferAcceptResponse>('/contract/accept-offer', request).then((res) => res.data)
+  },
+
+  async saveNegotiationDraft(request: ContractNegotiationDraftSaveRequest) {
+    return http.put<ContractNegotiationDraftResponse>('/contract/negotiation_draft', request).then((res) => res.data)
+  },
+
+  async retrieveNegotiationDraft(request: ContractNegotiationDraftRetrieveRequest) {
+    return http
+      .get<ContractNegotiationDraftResponse>(`/contract/negotiation_draft/${request.did}`)
+      .then((res) => res.data)
+  },
+
+  async deleteNegotiationDraft(request: ContractNegotiationDraftRetrieveRequest) {
+    return http
+      .delete<ContractNegotiationDraftResponse>(`/contract/negotiation_draft/${request.did}`)
+      .then((res) => res.data)
   },
 
   async respond(request: ContractNegotiationRespondRequest) {
@@ -95,13 +158,7 @@ export const contractWorkflowService: ContractWorkflowService = {
   },
 
   async retrieveById(request: ContractRetrieveByIdRequest) {
-    return http
-      .get<ContractRetrieveByIdResponse>(`/contract/retrieve/${request.did}`)
-      .then((res) => ({ ...res.data }))
-      .catch((err: unknown) => {
-        console.error('Retrieve ID Error:', err)
-        return null
-      })
+    return http.get<ContractRetrieveByIdResponse>(`/contract/retrieve/${request.did}`).then((res) => ({ ...res.data }))
   },
 
   async search(request: ContractSearchRequest) {
@@ -122,26 +179,88 @@ export const contractWorkflowService: ContractWorkflowService = {
     return http.post<ContractRejectResponse>('/contract/reject', request).then((res) => res.data)
   },
 
-  async store(request: ContractStoreRequest) {
-    return http.post<ContractStoreResponse>('/contract/store', request).then((res) => res.data)
+  async withdraw(request: ContractWithdrawRequest) {
+    return http.post<ContractWithdrawResponse>('/contract/withdraw', request).then((res) => res.data)
+  },
+
+  async renew(request: ContractRenewRequest) {
+    return http.post<ContractRenewResponse>('/contract/renew', request).then((res) => res.data)
   },
 
   async terminate(request: ContractTerminateRequest) {
     return http.post<ContractTerminateResponse>('/contract/terminate', request).then((res) => res.data)
+  },
+  /** Registers the contract metadata in the Federated Catalogue (DCS-IR-CWE-10). */
+  async publishCatalogue(did: string) {
+    return http
+      .post<{ did: string; asset_hash: string }>('/contract/catalogue/publish', { did })
+      .then((res) => res.data)
   },
 
   async deploy(request: ContractDeployRequest) {
     return http.post<ContractDeployResponse>('/contract/deploy', request).then((res) => res.data)
   },
 
-  async audit(request: ContractAuditRequest) {
+  // ---- Contract target systems (ADR-25) ------------------------------------
+
+  async listTargets() {
+    return http.get<ContractTarget[]>('/contract/targets').then((res) => res.data)
+  },
+
+  async createTarget(request: ContractTargetWriteRequest) {
+    return http.post<ContractTarget>('/contract/targets', request).then((res) => res.data)
+  },
+
+  async updateTarget(request: ContractTargetWriteRequest & { id: string }) {
+    return http.put<ContractTarget>('/contract/targets', request).then((res) => res.data)
+  },
+
+  async deleteTarget(id: string) {
+    return http.delete('/contract/targets', { data: { id } }).then((res) => res.data)
+  },
+
+  /** Issue a new callback credential for a target. The secret comes back once
+   *  and the previous one stops working immediately (ADR-27). */
+  async rotateTargetSecret(id: string) {
     return http
-      .post<ContractAuditResponse>('/contract/audit', request)
+      .post<MachineCredential>(`/contract/targets/${encodeURIComponent(id)}/credential`)
       .then((res) => res.data)
-      .catch((err: unknown) => {
-        console.error('Audit Error:', err)
-        return []
-      })
+  },
+
+  // ---- Machine identities (ADR-27) -----------------------------------------
+
+  async listMachineIdentities() {
+    return http.get<{ identities: MachineIdentity[] }>('/machine-identities').then((res) => res.data.identities)
+  },
+
+  /** Registers the identity and issues its first credential. The secret is in
+   *  this response and in no other. */
+  async createMachineIdentity(request: MachineIdentityWriteRequest) {
+    return http.post<MachineIdentityCreateResponse>('/machine-identities', request).then((res) => res.data)
+  },
+
+  async updateMachineIdentity(request: MachineIdentityWriteRequest & { id: string; enabled: boolean }) {
+    return http
+      .put<MachineIdentity>(`/machine-identities/${encodeURIComponent(request.id)}`, request)
+      .then((res) => res.data)
+  },
+
+  async deleteMachineIdentity(id: string) {
+    return http.delete(`/machine-identities/${encodeURIComponent(id)}`).then((res) => res.data)
+  },
+
+  async rotateMachineIdentitySecret(id: string) {
+    return http
+      .post<MachineCredential>(`/machine-identities/${encodeURIComponent(id)}/credential`)
+      .then((res) => res.data)
+  },
+
+  async designateTarget(request: ContractTargetDesignateRequest) {
+    return http.post('/contract/target/designate', request).then((res) => res.data)
+  },
+
+  async audit(request: ContractAuditRequest) {
+    return http.post<ContractAuditResponse>('/contract/audit', request).then((res) => res.data)
   },
 
   async retrieveHistoryByDid(request: ContractHistoryRetrieveRequest) {
@@ -166,18 +285,19 @@ export const contractWorkflowService: ContractWorkflowService = {
       .then((res) => res.data)
   },
 
-  async verifyPdf(did: string): Promise<{
-    match: boolean
-    jsonld_hash: string
-    base_pdf_hash: string
-    stored_base_pdf_hash: string
-    c2pa_manifest_found?: boolean
-    c2pa_signature_valid?: boolean
-    vc_proof_valid?: boolean
-    status_list_uri?: string
-    lifecycle_status?: string
-    status_list_status?: string
-  }> {
-    return http.get(`/pdf/verify/contract/${encodeURIComponent(did)}`).then((res) => res.data)
+  async verifyPdf(did: string): Promise<ContractPdfVerifyResult> {
+    return http.get<ContractPdfVerifyResult>(`/pdf/verify/contract/${encodeURIComponent(did)}`).then((res) => res.data)
+  },
+
+  // A copy of the contract PDF someone holds, checked against this contract's
+  // stored PDF and its manifest (DCS-OR-C2PA-008).
+  async verifyPdfCopy(did: string, copy: Blob): Promise<ContractPdfVerifyResult> {
+    let binary = ''
+    new Uint8Array(await copy.arrayBuffer()).forEach((b) => {
+      binary += String.fromCharCode(b)
+    })
+    return http
+      .post<ContractPdfVerifyResult>(`/pdf/verify/contract/${encodeURIComponent(did)}`, { pdf: btoa(binary) })
+      .then((res) => res.data)
   },
 }
